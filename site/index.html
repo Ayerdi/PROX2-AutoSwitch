@@ -174,6 +174,27 @@
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   @media (max-width: 680px) { .grid { grid-template-columns: 1fr; } }
 
+  .demo {
+    display: block;
+    max-width: 100%;
+    margin: 16px auto 0;
+    border-radius: var(--radius);
+    border: 1px solid var(--card-border);
+  }
+  .demo-caption {
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+    margin-top: 10px;
+  }
+  .demo-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    align-items: start;
+  }
+  @media (max-width: 680px) { .demo-row { grid-template-columns: 1fr; } }
+
   .pill {
     display: inline-block;
     background: rgba(53,208,127,.12);
@@ -260,6 +281,23 @@
         <li data-i18n="what3"></li>
         <li data-i18n="what4"></li>
       </ul>
+    </div>
+  </section>
+
+  <!-- demo -->
+  <section id="demo">
+    <h2><span class="dot">●</span> <span data-i18n="demoTitle"></span></h2>
+    <div class="card">
+      <div class="demo-row">
+        <div>
+          <img class="demo" src="autoswitch-demo.gif" alt="AutoSwitch demo: headset on selects the headset output, headset off returns to the speakers" loading="lazy">
+        </div>
+        <div>
+          <p data-i18n="demo1"></p>
+          <p data-i18n="demo2"></p>
+          <p data-i18n="demo3"></p>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -387,6 +425,10 @@
       whyTitle: "Por qué existe",
       why1: "Los auriculares inalámbricos mantienen su endpoint USB/LIGHTSPEED visible para Windows aunque estén apagados físicamente. Windows no sabe que debe volver a tus altavoces. Hacerlo a mano — quitarte el auricular, abrir ajustes, cambiar la salida — se hace viejo muy rápido.",
       why2: "Este proyecto elimina esa fricción: la salida cambia sola con solo encender o apagar los auriculares.",
+      demoTitle: "Demostración",
+      demo1: "<strong>PRO X 2 encendidos</strong> → la salida predeterminada pasa a los auriculares Logitech.",
+      demo2: "<strong>PRO X 2 apagados</strong> → la salida vuelve automáticamente a los altavoces.",
+      demo3: "Sin tocar nada: solo encender o apagar los auriculares.",
       howTitle: "Cómo funciona",
       howIntro: "Mientras el PRO X 2 está encendido, la consulta de batería de Logitech G HUB devuelve un payload; al apagarlo, no lo devuelve. AutoSwitch usa esa señal.",
       howDiagram: "PRO X 2\n   │\n   ▼\nLogitech G HUB\nws://localhost:9010\n   │\n   ├── GET /devices/list\n   │      └── localiza el PRO X 2 (extendedDisplayName)\n   │\n   └── GET /battery/<deviceId>/state\n             │\n             ├── payload presente -> ON\n             └── payload ausente  -> OFF\n                         │\n                         ▼\n             SoundVolumeCommandLine\n                         │\n             /SetDefault <Item ID> all\n                         │\n                         ▼\n                      Windows",
@@ -435,6 +477,10 @@
       whyTitle: "Why this exists",
       why1: "Wireless headsets keep their USB/LIGHTSPEED endpoint visible to Windows even when the physical headset is turned off, so Windows doesn't know it should switch back to your speakers. Doing it by hand — taking off the headset, opening sound settings, changing the output — gets old fast.",
       why2: "This project removes that friction: the output switches itself just by powering the headset on or off.",
+      demoTitle: "Demo",
+      demo1: "<strong>PRO X 2 on</strong> → the default output switches to the Logitech headset.",
+      demo2: "<strong>PRO X 2 off</strong> → the output automatically switches back to the speakers.",
+      demo3: "No clicking needed: just power the headset on or off.",
       howTitle: "How it works",
       howIntro: "While the PRO X 2 is powered on, Logitech G HUB's battery query returns a payload; when powered off, it doesn't. AutoSwitch uses that signal.",
       howDiagram: "PRO X 2\n   │\n   ▼\nLogitech G HUB\nws://localhost:9010\n   │\n   ├── GET /devices/list\n   │      └── locate the PRO X 2 (extendedDisplayName)\n   │\n   └── GET /battery/<deviceId>/state\n             │\n             ├── payload present -> ON\n             └── payload absent  -> OFF\n                         │\n                         ▼\n             SoundVolumeCommandLine\n                         │\n             /SetDefault <Item ID> all\n                         │\n                         ▼\n                      Windows",
