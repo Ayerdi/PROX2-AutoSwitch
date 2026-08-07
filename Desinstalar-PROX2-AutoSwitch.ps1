@@ -30,7 +30,7 @@ Start-Sleep -Milliseconds 600
 # Si se ejecuta desde fuera de InstallDir, puede borrarlo directamente.
 # Si se ejecuta desde dentro, cmd hace la limpieza tras terminar PowerShell.
 $current = $MyInvocation.MyCommand.Path
-if ($current -like "$InstallDir*") {
+if ($current -like "$InstallDir\*") {
     $cmd = "timeout /t 2 /nobreak >nul & rmdir /s /q `"$InstallDir`""
     Start-Process -FilePath "$env:SystemRoot\System32\cmd.exe" `
         -ArgumentList "/c $cmd" `

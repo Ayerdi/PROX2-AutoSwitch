@@ -40,9 +40,6 @@ if (-not (Test-Path $Installer)) {
 
 try {
     & $Installer
-    if ($LASTEXITCODE -ne 0) {
-        throw "El instalador termino con codigo de salida $LASTEXITCODE."
-    }
 }
 finally {
     Remove-Item $ZipPath -Force -ErrorAction SilentlyContinue
