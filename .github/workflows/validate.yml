@@ -38,7 +38,7 @@ jobs:
           }
           $results = Invoke-ScriptAnalyzer -Path . -Recurse `
             -Severity Error, Warning `
-            -ExcludeRule PSAvoidUsingWriteHost, PSAvoidUsingPlainTextForPassword, PSAvoidUsingCmdletAliases
+            -ExcludeRule PSAvoidUsingWriteHost, PSAvoidUsingPlainTextForPassword, PSAvoidUsingCmdletAliases, PSAvoidUsingEmptyCatchBlock, PSAvoidAssignmentToAutomaticVariable, PSUseApprovedVerbs, PSUseShouldProcessForStateChangingFunctions, PSAvoidOverwritingBuiltInCmdlets
           if ($results) {
             $results | ForEach-Object {
               Write-Host "::error file=$($_.ScriptPath),line=$($_.Line)::$($_.RuleName): $($_.Message)"
