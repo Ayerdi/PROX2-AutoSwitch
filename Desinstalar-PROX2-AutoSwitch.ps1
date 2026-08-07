@@ -44,19 +44,21 @@ else {
 }
 
 # 2. Proceso del runtime.
-$processFound = $false
+$matched = @()
 if (Test-Path $MainScript) {
     $escaped = [regex]::Escape($MainScript)
 
-    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-        Where-Object {
-            $_.ProcessId -ne $PID -and
-            $_.CommandLine -match $escaped
-        } |
-        ForEach-Object {
-            $processFound = $true
-            Invoke-CimMethod -InputObject $_ -MethodName Terminate | Out-Null
-        }
+    $matched = @(
+        Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.ProcessId -ne $PID -and
+                $_.CommandLine -match $escaped
+            }
+    )
+
+    foreach ($proc in $matched) {
+        Invoke-CimMethod -InputObject $proc -MethodName Terminate | Out-Null
+    }
 }
 
 Start-Sleep -Milliseconds 600
@@ -68,7 +70,7 @@ $stillRunning = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
     } |
     Select-Object -First 1
 
-if ($processFound) {
+if ($matched.Count -gt 0) {
     if ($stillRunning) {
         $failed = $true
         Show-Test "Proceso AutoSwitch" $false "sigue en ejecucion (PID $($stillRunning.ProcessId))"
