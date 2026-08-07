@@ -1,0 +1,9 @@
+# PowerShell / Windows
+*.log
+test-output/
+.vscode/
+.idea/
+
+# System
+Thumbs.db
+Desktop.ini
