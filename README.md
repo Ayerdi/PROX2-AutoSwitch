@@ -1,5 +1,8 @@
 # PRO X 2 LIGHTSPEED AutoSwitch
 
+[![validate](https://github.com/Ayerdi/PROX2-AutoSwitch/actions/workflows/validate.yml/badge.svg)](https://github.com/Ayerdi/PROX2-AutoSwitch/actions/workflows/validate.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Automatically switch your Windows default audio output when you put on or take off your **Logitech PRO X 2 Lightspeed** headset.
 
 - **PRO X 2 powered on** → Windows uses the headset output.
@@ -212,3 +215,5 @@ then extract only:
 - `Verificar-PROX2-AutoSwitch.ps1` — quick diagnostics.
 - `AGENT.md` — context so an AI agent can maintain/rebuild the project.
 - `SOURCES.md` — verified technical references.
+- `SECURITY.md` — security scope and how to report a vulnerability.
+- `.github/workflows/validate.yml` — CI that parses the PowerShell scripts.

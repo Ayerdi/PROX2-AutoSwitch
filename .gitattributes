@@ -1,0 +1,7 @@
+# Normalize line endings for PowerShell on Windows
+*.ps1 text eol=crlf
+*.md  text eol=lf
+*.txt text eol=lf
+
+# Binary
+*.zip binary

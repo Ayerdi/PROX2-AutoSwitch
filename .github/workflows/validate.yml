@@ -1,0 +1,43 @@
+name: validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate-scripts:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate PowerShell syntax
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $scripts = Get-ChildItem -Path . -Filter '*.ps1' -File
+          if (-not $scripts) { Write-Error 'No .ps1 scripts found' }
+          foreach ($script in $scripts) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              $script.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error "$($script.Name): $($_.Message) (line $($_.Extent.StartLineNumber))" }
+              exit 1
+            }
+            Write-Host "OK: $($script.Name)"
+          }
+
+      - name: Verify scripts reference files present
+        shell: pwsh
+        run: |
+          $required = @(
+            'Instalar-PROX2-AutoSwitch.ps1',
+            'Runtime-PROX2-AutoSwitch.ps1',
+            'Desinstalar-PROX2-AutoSwitch.ps1',
+            'Verificar-PROX2-AutoSwitch.ps1'
+          )
+          $missing = $required | Where-Object { -not (Test-Path $_) }
+          if ($missing) { Write-Error "Missing: $($missing -join ', ')" }
+          Write-Host "All required files present."
