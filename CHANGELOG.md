@@ -4,18 +4,20 @@ Todas las versiones notables de este proyecto se documentan aquí.
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Este proyecto se adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — hardening
+## [1.1.0] - 2026-08-07
 
 ### Added
 - Timeouts acotados en el WebSocket de G HUB: conexión (5 s), espera de respuesta (5 s) y límite global por petición (10 s). Tras un timeout se cierra el socket, se registra en el log y se reintenta; mientras el estado sea desconocido no se cambia la salida de audio.
-- `lib/AutoSwitchCore.psm1`: módulo de lógica pura compartida (extracción de Item ID, debounce OFF, validación de config) usada por instalador, runtime y tests.
-- Tests Pester (`tests/`) ejecutados en CI: extracción de Item ID válido, rechazo de salida inválida, regresión `/Stdout`, debounce OFF tras `OffMissThreshold`, payload único que no dispara OFF, rechazo de IDs idénticos.
-- `install.ps1` verifica SHA-256 del ZIP de la release contra un asset `.sha256` publicado antes de extraer/ejecutar. Selección determinista: exactamente un `PROX2-AutoSwitch-*.zip`, fallo si hay cero o varios.
+- Cierre del WebSocket con límite duro: `CloseAsync` espera como máximo 1 s y, si falla o expira, `Abort()` + `Dispose()` garantizan que la recuperación nunca se quede colgada con un G HUB atascado. Aplicado también a la comprobación de G HUB del instalador.
+- `lib/AutoSwitchCore.psm1`: módulo de lógica pura compartida (extracción de Item ID, debounce OFF, validación de config, token de timeout) usada por instalador, runtime y tests.
+- Tests Pester (`tests/`) ejecutados en CI: extracción de Item ID válido, rechazo de salida inválida, regresión `/Stdout`, debounce OFF tras `OffMissThreshold`, payload único que no dispara OFF, rechazo de IDs idénticos y autocancelación del token de timeout.
+- `install.ps1` verifica SHA-256 del ZIP de la release contra un asset `.sha256` publicado antes de extraer/ejecutar. Selección determinista: exactamente un `PROX2-AutoSwitch-*.zip`, fallo si hay cero o varios. Todo el flujo (descarga, checksum, extracción, ejecución) está dentro de un `try/finally` que limpia `%TEMP%` en cualquier fallo.
 - Workflow de release (`.github/workflows/release.yml`): genera el ZIP + `.sha256` automáticamente en tags `v*`.
-- Desinstalador reporta cada paso (proceso, inicio automático, directorio) y distingue éxito completo, limpieza parcial fallida y "nada que desinstalar".
+- Desinstalador reporta cada paso (proceso, inicio automático, directorio) y distingue éxito completo, limpieza parcial fallida y "nada que desinstalar". La eliminación programada vía `cmd.exe` se marca solo si se lanza correctamente.
 
 ### Changed
 - Configuración de instalación ahora incluye `ConnectTimeoutMs`, `ReceiveTimeoutMs`, `RequestTimeoutMs` (config v1.1.0).
+- Instalador de un clic (`install.ps1`): solo instala releases que publiquen checksum `.sha256`; documenta la verificación antes de extraer.
 
 ### Fixed
 - `install.ps1`: eliminada la comprobación engañosa de `$LASTEXITCODE` tras invocar el instalador `.ps1`; los errores se propagan por excepción.
