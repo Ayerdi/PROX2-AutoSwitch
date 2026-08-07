@@ -11,6 +11,19 @@ if (-not (Test-Path $SvclPath))   { exit 11 }
 
 $Config = Get-Content -Raw -Path $ConfigPath | ConvertFrom-Json
 
+# Logica compartida (extraccion de Item ID, debounce, validacion de config).
+$ModulePath = Join-Path $InstallDir "lib\AutoSwitchCore.psm1"
+if (-not (Test-Path $ModulePath)) { exit 12 }
+Import-Module $ModulePath -ErrorAction Stop
+
+# Timeouts de G HUB (ms). Overridables desde config.json.
+$script:ConnectTimeoutMs = 5000
+$script:ReceiveTimeoutMs = 5000
+$script:RequestTimeoutMs = 10000
+foreach ($k in 'ConnectTimeoutMs', 'ReceiveTimeoutMs', 'RequestTimeoutMs') {
+    if ($Config.$k) { Set-Variable -Scope script -Name $k -Value ([int]$Config.$k) }
+}
+
 function Write-AutoSwitchLog {
     param([string]$Message)
 
@@ -61,6 +74,15 @@ function Close-GHubConnection {
     $script:Cts = $null
 }
 
+function New-GHubTimeoutToken {
+    # Token que se cancela solo pasados $Milliseconds.
+    param([int]$Milliseconds)
+
+    $cts = New-Object System.Threading.CancellationTokenSource
+    $cts.CancelAfter($Milliseconds)
+    return $cts
+}
+
 function Connect-GHub {
     Close-GHubConnection
 
@@ -79,7 +101,17 @@ function Connect-GHub {
     $script:Ws.Options.AddSubProtocol("json")
 
     $uri = New-Object System.Uri("ws://localhost:$($Config.GHubPort)")
-    $script:Ws.ConnectAsync($uri, $script:Cts.Token).GetAwaiter().GetResult() | Out-Null
+
+    $timeout = New-GHubTimeoutToken -Milliseconds $script:ConnectTimeoutMs
+    try {
+        $script:Ws.ConnectAsync($uri, $timeout.Token).GetAwaiter().GetResult() | Out-Null
+    }
+    catch [System.OperationCanceledException] {
+        throw "Timeout al conectar con G HUB ($($script:ConnectTimeoutMs) ms)."
+    }
+    finally {
+        $timeout.Dispose()
+    }
 
     if ($script:Ws.State -ne [System.Net.WebSockets.WebSocketState]::Open) {
         throw "No se pudo conectar con Logitech G HUB."
@@ -93,12 +125,21 @@ function Send-GHubJson {
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
     $segment = New-Object 'System.ArraySegment[byte]' -ArgumentList (,$bytes)
 
-    $script:Ws.SendAsync(
-        $segment,
-        [System.Net.WebSockets.WebSocketMessageType]::Text,
-        $true,
-        $script:Cts.Token
-    ).GetAwaiter().GetResult() | Out-Null
+    $timeout = New-GHubTimeoutToken -Milliseconds $script:ReceiveTimeoutMs
+    try {
+        $script:Ws.SendAsync(
+            $segment,
+            [System.Net.WebSockets.WebSocketMessageType]::Text,
+            $true,
+            $timeout.Token
+        ).GetAwaiter().GetResult() | Out-Null
+    }
+    catch [System.OperationCanceledException] {
+        throw "Timeout al enviar peticion a G HUB ($($script:ReceiveTimeoutMs) ms)."
+    }
+    finally {
+        $timeout.Dispose()
+    }
 }
 
 function Receive-GHubText {
@@ -108,10 +149,20 @@ function Receive-GHubText {
     try {
         do {
             $segment = New-Object 'System.ArraySegment[byte]' -ArgumentList (,$buffer)
-            $result = $script:Ws.ReceiveAsync(
-                $segment,
-                $script:Cts.Token
-            ).GetAwaiter().GetResult()
+
+            $timeout = New-GHubTimeoutToken -Milliseconds $script:ReceiveTimeoutMs
+            try {
+                $result = $script:Ws.ReceiveAsync(
+                    $segment,
+                    $timeout.Token
+                ).GetAwaiter().GetResult()
+            }
+            catch [System.OperationCanceledException] {
+                throw "Timeout esperando respuesta de G HUB ($($script:ReceiveTimeoutMs) ms)."
+            }
+            finally {
+                $timeout.Dispose()
+            }
 
             if ($result.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) {
                 throw "G HUB cerro el WebSocket."
@@ -140,7 +191,15 @@ function Invoke-GHubGet {
         path  = $Path
     }
 
+    # Limite global por peticion: aunque G HUB intercale eventos,
+    # la respuesta buscada debe llegar antes del deadline.
+    $deadline = (Get-Date).AddMilliseconds($script:RequestTimeoutMs)
+
     while ($true) {
+        if ((Get-Date) -gt $deadline) {
+            throw "Timeout de peticion G HUB ($($script:RequestTimeoutMs) ms): $Path"
+        }
+
         $raw = Receive-GHubText
 
         try {
@@ -185,16 +244,12 @@ function Get-DefaultRenderItemId {
     $raw = & $SvclPath /GetColumnValue "DefaultRenderDevice" "Item ID" 2>&1
     $text = ($raw | Out-String).Trim()
 
-    $m = [regex]::Match(
-        $text,
-        '\{0\.0\.0\.00000000\}\.\{[0-9A-Fa-f-]+\}'
-    )
-
-    if (-not $m.Success) {
+    $id = Get-RenderItemIdFromText -Text $text
+    if (-not $id) {
         throw "No se pudo leer el Item ID del dispositivo predeterminado. Salida: $text"
     }
 
-    return $m.Value.ToLowerInvariant()
+    return $id
 }
 
 function Set-AudioOutput {
@@ -256,23 +311,16 @@ try {
             while ($script:Ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
                 $battery = Invoke-GHubGet -Path $batteryPath
 
-                if ($null -ne $battery.payload) {
-                    $misses = 0
-                    $isOn = $true
-                }
-                else {
-                    $misses++
+                $state = Resolve-HeadsetState `
+                    -PayloadPresent ($null -ne $battery.payload) `
+                    -Misses $misses `
+                    -OffMissThreshold ([int]$Config.OffMissThreshold)
 
-                    if ($misses -lt [int]$Config.OffMissThreshold) {
-                        Start-Sleep -Milliseconds ([int]$Config.PollMilliseconds)
-                        continue
-                    }
+                $misses = $state.Misses
 
-                    $isOn = $false
-                }
-
-                if ($null -eq $lastState -or $isOn -ne $lastState) {
-                    if ($isOn) {
+                if ($state.Decision -and
+                    ($null -eq $lastState -or $state.IsOn -ne $lastState)) {
+                    if ($state.IsOn) {
                         Set-AudioOutput `
                             -DeviceId ([string]$Config.HeadsetId) `
                             -Label ([string]$Config.HeadsetName)
@@ -283,7 +331,7 @@ try {
                             -Label ([string]$Config.SpeakerName)
                     }
 
-                    $lastState = $isOn
+                    $lastState = $state.IsOn
                 }
 
                 Start-Sleep -Milliseconds ([int]$Config.PollMilliseconds)

@@ -64,7 +64,7 @@ No admin rights should be required for normal operation.
 
 ## Installation
 
-**One click** (downloads the latest release and runs the full installer):
+**One click** (downloads the latest release ZIP and its SHA-256 checksum, verifies the ZIP before extracting, then runs the full installer):
 
 ```powershell
 powershell.exe -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Ayerdi/PROX2-AutoSwitch/main/install.ps1 | iex"
@@ -218,15 +218,18 @@ then extract only:
 
 ## Repository layout
 
-- `install.ps1` — one-click bootstrap: downloads the latest release ZIP and runs the installer.
+- `install.ps1` — one-click bootstrap: fetches the latest release ZIP and its `.sha256`, verifies the hash, then runs the installer.
 - `Instalar-PROX2-AutoSwitch.ps1` — clean install from scratch.
 - `Runtime-PROX2-AutoSwitch.ps1` — the runtime copied to `%LOCALAPPDATA%`.
-- `Desinstalar-PROX2-AutoSwitch.ps1` — removes process, autostart and files.
+- `Desinstalar-PROX2-AutoSwitch.ps1` — removes process, autostart and files (with truthful per-step reporting).
 - `Verificar-PROX2-AutoSwitch.ps1` — quick diagnostics.
+- `lib/AutoSwitchCore.psm1` — shared pure logic (Item ID extraction, OFF debounce, config validation) used by installer, runtime and tests.
+- `tests/` — Pester coverage for the pure logic.
 - `site/` — the [GitHub Pages site](https://ayerdi.github.io/PROX2-AutoSwitch/), ES/EN.
 - `AGENT.md` — context so an AI agent can maintain/rebuild the project.
 - `SOURCES.md` — verified technical references.
 - `SECURITY.md` — security scope and how to report a vulnerability.
 - `CHANGELOG.md` — version history (Keep a Changelog).
-- `.github/workflows/validate.yml` — CI that parses the PowerShell scripts.
+- `.github/workflows/validate.yml` — CI: PowerShell syntax, PSScriptAnalyzer, Pester.
 - `.github/workflows/pages.yml` — CI that deploys `site/` to GitHub Pages.
+- `.github/workflows/release.yml` — builds the release ZIP + `.sha256` on `v*` tags.

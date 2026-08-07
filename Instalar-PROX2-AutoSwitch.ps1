@@ -6,6 +6,7 @@ $InstallDir   = Join-Path $env:LOCALAPPDATA "PROX2AutoSwitch"
 $RuntimeSrc   = Join-Path $PackageDir "Runtime-PROX2-AutoSwitch.ps1"
 $UninstallSrc = Join-Path $PackageDir "Desinstalar-PROX2-AutoSwitch.ps1"
 $VerifySrc    = Join-Path $PackageDir "Verificar-PROX2-AutoSwitch.ps1"
+$ModuleSrc    = Join-Path $PackageDir "lib\AutoSwitchCore.psm1"
 
 $MainScript   = Join-Path $InstallDir "PROX2AutoSwitch.ps1"
 $ConfigPath   = Join-Path $InstallDir "config.json"
@@ -22,11 +23,14 @@ $SvclUrl = "https://www.nirsoft.net/utils/svcl-x64.zip"
 $ExpectedSha256 = "7ba008e9ece8b3eda323ef01711e4647eb7f40b28dc25f98b2ed6a738810bfcd"
 $ZipPath = Join-Path $env:TEMP "svcl-x64.zip"
 
-foreach ($required in @($RuntimeSrc, $UninstallSrc, $VerifySrc)) {
+foreach ($required in @($RuntimeSrc, $UninstallSrc, $VerifySrc, $ModuleSrc)) {
     if (-not (Test-Path $required)) {
         throw "Falta un fichero del paquete: $required. Extrae el ZIP completo antes de instalar."
     }
 }
+
+# Logica compartida (extraccion de Item ID, validacion de config, debounce).
+Import-Module $ModuleSrc -ErrorAction Stop
 
 if (-not [Environment]::Is64BitOperatingSystem) {
     throw "Este paquete esta preparado para Windows x64."
@@ -88,6 +92,8 @@ if (-not (Test-Path $SvclPath)) {
 Copy-Item $RuntimeSrc $MainScript -Force
 Copy-Item $UninstallSrc (Join-Path $InstallDir "Desinstalar-PROX2-AutoSwitch.ps1") -Force
 Copy-Item $VerifySrc (Join-Path $InstallDir "Verificar-PROX2-AutoSwitch.ps1") -Force
+New-Item -ItemType Directory -Path (Join-Path $InstallDir "lib") -Force | Out-Null
+Copy-Item $ModuleSrc (Join-Path $InstallDir "lib\AutoSwitchCore.psm1") -Force
 
 # --- Funciones G HUB para la instalacion ---
 $script:Ws  = $null
@@ -213,16 +219,12 @@ function Get-DefaultColumn {
 function Get-DefaultRenderItemId {
     $text = Get-DefaultColumn "Item ID"
 
-    $m = [regex]::Match(
-        $text,
-        '\{0\.0\.0\.00000000\}\.\{[0-9A-Fa-f-]+\}'
-    )
-
-    if (-not $m.Success) {
+    $id = Get-RenderItemIdFromText -Text $text
+    if (-not $id) {
         throw "No pude extraer el Item ID del dispositivo predeterminado. Salida: $text"
     }
 
-    return $m.Value.ToLowerInvariant()
+    return $id
 }
 
 function Get-DefaultRenderName {
@@ -350,7 +352,7 @@ PASO B - ALTAVOCES
 Selecciona manualmente en Windows la salida que quieres usar cuando los PRO X 2 esten apagados.
 "@
 
-    if ($headsetOutput.ItemId -ieq $speakerOutput.ItemId) {
+    if (-not (Test-ValidAudioConfig -HeadsetId $headsetOutput.ItemId -SpeakerId $speakerOutput.ItemId)) {
         throw "Has capturado el mismo dispositivo dos veces. Repite la instalacion."
     }
 
@@ -370,16 +372,19 @@ Selecciona manualmente en Windows la salida que quieres usar cuando los PRO X 2 
     }
 
     $config = [ordered]@{
-        Version          = "1.0.0"
-        GHubDisplayName  = [string]$ghubHeadset.extendedDisplayName
-        GHubPort         = 9010
-        HeadsetName      = [string]$headsetOutput.Name
-        HeadsetId        = [string]$headsetOutput.ItemId
-        SpeakerName      = [string]$speakerOutput.Name
-        SpeakerId        = [string]$speakerOutput.ItemId
-        PollMilliseconds = 1500
-        OffMissThreshold = 2
-        InstalledAt      = (Get-Date).ToString("o")
+        Version           = "1.1.0"
+        GHubDisplayName   = [string]$ghubHeadset.extendedDisplayName
+        GHubPort          = 9010
+        HeadsetName       = [string]$headsetOutput.Name
+        HeadsetId         = [string]$headsetOutput.ItemId
+        SpeakerName       = [string]$speakerOutput.Name
+        SpeakerId         = [string]$speakerOutput.ItemId
+        PollMilliseconds  = 1500
+        OffMissThreshold  = 2
+        ConnectTimeoutMs  = 5000
+        ReceiveTimeoutMs  = 5000
+        RequestTimeoutMs  = 10000
+        InstalledAt       = (Get-Date).ToString("o")
     }
 
     $config | ConvertTo-Json -Depth 10 |
