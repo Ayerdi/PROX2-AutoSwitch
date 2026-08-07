@@ -33,6 +33,7 @@ jobs:
         shell: pwsh
         run: |
           $required = @(
+            'install.ps1',
             'Instalar-PROX2-AutoSwitch.ps1',
             'Runtime-PROX2-AutoSwitch.ps1',
             'Desinstalar-PROX2-AutoSwitch.ps1',

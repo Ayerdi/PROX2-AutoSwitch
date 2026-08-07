@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="PRO X 2 LIGHTSPEED AutoSwitch — cambia automáticamente la salida de audio de Windows al encender o apagar tus Logitech PRO X 2. Automatically switch your Windows default audio output when you power your Logitech PRO X 2 on or off.">
+<title>PRO X 2 LIGHTSPEED AutoSwitch</title>
+<style>
+  :root {
+    --bg: #0b0e14;
+    --bg-soft: #111624;
+    --card: #161c2c;
+    --card-border: #232c44;
+    --text: #e6eaf3;
+    --muted: #9aa4bd;
+    --accent: #35d07f;
+    --accent-dim: #20b866;
+    --blue: #4ea1ff;
+    --code-bg: #0d121f;
+    --code-border: #1f2940;
+    --radius: 14px;
+    --mono: "SFMono-Regular", "Cascadia Code", "Consolas", "Menlo", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, "Helvetica Neue", Arial, sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    background-image:
+      radial-gradient(1100px 500px at 85% -10%, rgba(53,208,127,.08), transparent 60%),
+      radial-gradient(900px 450px at -10% 15%, rgba(78,161,255,.07), transparent 60%);
+    color: var(--text);
+    font-family: var(--sans);
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .wrap { max-width: 900px; margin: 0 auto; padding: 0 20px; }
+
+  /* ---------- language switcher ---------- */
+  .lang {
+    position: fixed;
+    top: 16px;
+    right: 20px;
+    z-index: 50;
+    display: inline-flex;
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 999px;
+    padding: 4px;
+    box-shadow: 0 4px 18px rgba(0,0,0,.35);
+  }
+  .lang button {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background .15s, color .15s;
+  }
+  .lang button.active { background: var(--accent); color: #04120a; }
+
+  /* ---------- header ---------- */
+  header { padding: 72px 0 28px; }
+  .badges { margin-bottom: 18px; }
+  .badges svg { height: 22px; vertical-align: middle; margin-right: 8px; }
+  h1 {
+    font-size: clamp(30px, 5vw, 46px);
+    font-weight: 800;
+    letter-spacing: -.02em;
+    line-height: 1.1;
+  }
+  h1 .accent { color: var(--accent); }
+  .tagline {
+    margin-top: 14px;
+    color: var(--muted);
+    font-size: clamp(15px, 2.4vw, 18px);
+    max-width: 640px;
+  }
+
+  /* ---------- sections ---------- */
+  main { padding-bottom: 60px; }
+
+  section { margin-top: 44px; }
+
+  h2 {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -.01em;
+    margin-bottom: 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--card-border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  h2 .dot { color: var(--accent); }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius);
+    padding: 20px 22px;
+  }
+  .card + .card { margin-top: 14px; }
+
+  .card h3 { font-size: 16px; font-weight: 700; margin-bottom: 10px; }
+
+  p { color: var(--text); }
+  p.muted, li { color: var(--muted); }
+  p + p { margin-top: 10px; }
+
+  ul, ol { padding-left: 22px; margin-top: 10px; }
+  li + li { margin-top: 6px; }
+  li strong, p strong { color: var(--text); }
+
+  code {
+    font-family: var(--mono);
+    font-size: .9em;
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 2px 6px;
+    color: #cfe9ff;
+    word-break: break-all;
+  }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    overflow-x: auto;
+    margin-top: 12px;
+    line-height: 1.55;
+  }
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    color: #b7e4ff;
+    font-size: .88em;
+    word-break: normal;
+  }
+
+  .copy {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--muted);
+    background: none;
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+    transition: border-color .15s, color .15s;
+  }
+  .copy:hover { border-color: var(--accent); color: var(--accent); }
+  .copy.ok { color: var(--accent); border-color: var(--accent); }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 680px) { .grid { grid-template-columns: 1fr; } }
+
+  .pill {
+    display: inline-block;
+    background: rgba(53,208,127,.12);
+    border: 1px solid rgba(53,208,127,.35);
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 999px;
+  }
+
+  .steps { counter-reset: step; list-style: none; padding-left: 0; }
+  .steps li {
+    counter-increment: step;
+    position: relative;
+    padding-left: 34px;
+    margin-top: 14px;
+  }
+  .steps li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0;
+    top: 2px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #04120a;
+    font-size: 13px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  blockquote {
+    border-left: 3px solid var(--blue);
+    background: rgba(78,161,255,.07);
+    border-radius: 0 10px 10px 0;
+    padding: 12px 16px;
+    margin-top: 14px;
+    color: var(--muted);
+  }
+
+  footer {
+    border-top: 1px solid var(--card-border);
+    padding: 26px 0 40px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  footer .wrap { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+
+<div class="lang" role="group" aria-label="Idioma / Language">
+  <button id="btn-es" class="active">ES</button>
+  <button id="btn-en">EN</button>
+</div>
+
+<header class="wrap">
+  <div class="badges">
+    <a href="https://github.com/Ayerdi/PROX2-AutoSwitch/actions/workflows/validate.yml" aria-label="CI">
+      <img src="https://github.com/Ayerdi/PROX2-AutoSwitch/actions/workflows/validate.yml/badge.svg" alt="validate">
+    </a>
+    <a href="https://github.com/Ayerdi/PROX2-AutoSwitch/blob/main/LICENSE" aria-label="License">
+      <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT">
+    </a>
+  </div>
+  <h1>PRO X 2 <span class="accent">LIGHTSPEED</span> AutoSwitch</h1>
+  <p class="tagline" data-i18n="tagline"></p>
+</header>
+
+<main class="wrap">
+
+  <!-- what -->
+  <section id="what">
+    <h2><span class="dot">●</span> <span data-i18n="whatTitle"></span></h2>
+    <div class="card">
+      <ul>
+        <li data-i18n="what1"></li>
+        <li data-i18n="what2"></li>
+        <li data-i18n="what3"></li>
+        <li data-i18n="what4"></li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- why -->
+  <section id="why">
+    <h2><span class="dot">●</span> <span data-i18n="whyTitle"></span></h2>
+    <div class="card">
+      <p data-i18n="why1"></p>
+      <p data-i18n="why2"></p>
+    </div>
+  </section>
+
+  <!-- how -->
+  <section id="how">
+    <h2><span class="dot">●</span> <span data-i18n="howTitle"></span></h2>
+    <div class="card">
+      <p data-i18n="howIntro"></p>
+      <pre><code data-i18n="howDiagram"></code></pre>
+    </div>
+  </section>
+
+  <!-- install -->
+  <section id="install">
+    <h2><span class="dot">●</span> <span data-i18n="installTitle"></span></h2>
+
+    <div class="card">
+      <span class="pill">install.ps1</span>
+      <h3 data-i18n="quickTitle" style="margin-top:10px"></h3>
+      <p data-i18n="quick1"></p>
+      <pre><code data-i18n="quickCmd"></code></pre>
+      <button class="copy" data-copy="quickCmd"><span data-i18n="copyBtn"></span></button>
+      <blockquote data-i18n="quickNote"></blockquote>
+    </div>
+
+    <div class="card">
+      <span class="pill">ZIP</span>
+      <h3 data-i18n="manualTitle" style="margin-top:10px"></h3>
+      <p data-i18n="manual1"></p>
+      <p data-i18n="manual2"></p>
+      <pre><code data-i18n="manualCmd"></code></pre>
+      <button class="copy" data-copy="manualCmd"><span data-i18n="copyBtn"></span></button>
+    </div>
+
+    <div class="card">
+      <h3 data-i18n="whatInstallerDoesTitle"></h3>
+      <ol class="steps">
+        <li data-i18n="id1"></li>
+        <li data-i18n="id2"></li>
+        <li data-i18n="id3"></li>
+        <li data-i18n="id4"></li>
+        <li data-i18n="id5"></li>
+      </ol>
+      <blockquote data-i18n="idNote"></blockquote>
+    </div>
+  </section>
+
+  <!-- requirements -->
+  <section id="reqs">
+    <h2><span class="dot">●</span> <span data-i18n="reqsTitle"></span></h2>
+    <div class="card grid">
+      <div>
+        <ul>
+          <li data-i18n="req1"></li>
+          <li data-i18n="req2"></li>
+          <li data-i18n="req3"></li>
+        </ul>
+      </div>
+      <div>
+        <ul>
+          <li data-i18n="req4"></li>
+          <li data-i18n="req5"></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- verify -->
+  <section id="verify">
+    <h2><span class="dot">●</span> <span data-i18n="verifyTitle"></span></h2>
+    <div class="card">
+      <pre><code data-i18n="verifyCmd"></code></pre>
+      <button class="copy" data-copy="verifyCmd"><span data-i18n="copyBtn"></span></button>
+      <ol class="steps" style="margin-top:16px">
+        <li data-i18n="v1"></li>
+        <li data-i18n="v2"></li>
+        <li data-i18n="v3"></li>
+        <li data-i18n="v4"></li>
+        <li data-i18n="v5"></li>
+      </ol>
+    </div>
+  </section>
+
+  <!-- security -->
+  <section id="security">
+    <h2><span class="dot">●</span> <span data-i18n="secTitle"></span></h2>
+    <div class="card">
+      <ul>
+        <li data-i18n="sec1"></li>
+        <li data-i18n="sec2"></li>
+      </ul>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span data-i18n="footer"></span>
+    <span><a href="https://github.com/Ayerdi/PROX2-AutoSwitch">github.com/Ayerdi/PROX2-AutoSwitch</a></span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  var T = {
+    es: {
+      tagline: "Cambia automáticamente la salida de audio de Windows cuando enciendes o apagas tus Logitech PRO X 2 LIGHTSPEED. Sin ventanas, sin tocar nada, en segundo plano.",
+      whatTitle: "Qué hace",
+      what1: "<strong>PRO X 2 encendidos</strong> → Windows usa la salida de los auriculares.",
+      what2: "<strong>PRO X 2 apagados</strong> → Windows vuelve a la salida alternativa (p. ej. los altavoces).",
+      what3: "El dongle LIGHTSPEED puede permanecer conectado.",
+      what4: "Corre en segundo plano <strong>sin ventana de PowerShell</strong> al iniciar sesión.",
+      whyTitle: "Por qué existe",
+      why1: "Los auriculares inalámbricos mantienen su endpoint USB/LIGHTSPEED visible para Windows aunque estén apagados físicamente. Windows no sabe que debe volver a tus altavoces. Hacerlo a mano — quitarte el auricular, abrir ajustes, cambiar la salida — se hace viejo muy rápido.",
+      why2: "Este proyecto elimina esa fricción: la salida cambia sola con solo encender o apagar los auriculares.",
+      howTitle: "Cómo funciona",
+      howIntro: "Mientras el PRO X 2 está encendido, la consulta de batería de Logitech G HUB devuelve un payload; al apagarlo, no lo devuelve. AutoSwitch usa esa señal.",
+      howDiagram: "PRO X 2\n   │\n   ▼\nLogitech G HUB\nws://localhost:9010\n   │\n   ├── GET /devices/list\n   │      └── localiza el PRO X 2 (extendedDisplayName)\n   │\n   └── GET /battery/<deviceId>/state\n             │\n             ├── payload presente -> ON\n             └── payload ausente  -> OFF\n                         │\n                         ▼\n             SoundVolumeCommandLine\n                         │\n             /SetDefault <Item ID> all\n                         │\n                         ▼\n                      Windows",
+      installTitle: "Instalación",
+      quickTitle: "Instalación en un clic",
+      quick1: "Abre PowerShell (Windows) y pega esta línea. Descarga la última versión, la verifica y ejecuta el instalador completo.",
+      quickCmd: 'powershell.exe -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Ayerdi/PROX2-AutoSwitch/main/install.ps1 | iex"',
+      quickNote: "Requiere Logitech G HUB instalado, abierto y reconociendo los PRO X 2. El asistente te pedirá seleccionar las dos salidas de audio.",
+      manualTitle: "Instalación manual (ZIP)",
+      manual1: "Descarga el ZIP de la versión más reciente desde GitHub Releases.",
+      manual2: "Extrae todo el ZIP a una carpeta normal (no ejecutes desde dentro del ZIP) y ejecuta:",
+      manualCmd: 'powershell.exe -ExecutionPolicy Bypass -File ".\\Instalar-PROX2-AutoSwitch.ps1"',
+      whatInstallerDoesTitle: "Qué hace el instalador",
+      id1: "Descarga SoundVolumeCommandLine desde NirSoft y verifica su SHA-256 antes de ejecutarlo.",
+      id2: "Conecta con G HUB (ws://localhost:9010) y localiza el PRO X 2.",
+      id3: "Captura el Item ID real de Windows de cada salida y prueba ambos cambios de verdad.",
+      id4: "Copia el runtime, crea un inicio automático invisible (wscript.exe) y arranca AutoSwitch.",
+      id5: "Deja la configuración en %LOCALAPPDATA%\\PROX2AutoSwitch\\.",
+      idNote: "Los Item ID de audio de Windows no se reutilizan entre instalaciones: el instalador captura los del Windows actual. No copies config.json de otro equipo.",
+      reqsTitle: "Requisitos",
+      req1: "Windows 10/11 x64",
+      req2: "Logitech G HUB instalado, abierto y reconociendo los PRO X 2",
+      req3: "PowerShell 5.1 o superior",
+      req4: "Conexión a Internet durante la instalación (descarga svcl.exe de NirSoft)",
+      req5: "No requiere permisos de administrador para el funcionamiento normal",
+      verifyTitle: "Comprobar que funciona",
+      verifyCmd: 'powershell.exe -ExecutionPolicy Bypass -File "Verificar-PROX2-AutoSwitch.ps1"',
+      v1: "Enciende los PRO X 2.",
+      v2: "Espera ~1–2 segundos. Windows debería seleccionar los auriculares.",
+      v3: "Apágalos.",
+      v4: "Tras dos comprobaciones consecutivas (~3 segundos), Windows debería seleccionar la salida alternativa.",
+      v5: "El log está en %LOCALAPPDATA%\\PROX2AutoSwitch\\autoswitch.log.",
+      secTitle: "Notas de seguridad",
+      sec1: "El WebSocket de G HUB (localhost:9010) no es una API oficial de Logitech: es una interfaz local usada por proyectos de terceros. Logitech puede cambiarla en futuras versiones. Si deja de funcionar tras una actualización, revisa AGENT.md.",
+      sec2: "El instalador descarga svcl-x64.zip de NirSoft y verifica su SHA-256. Si NirSoft publica una versión nueva, el hash cambia y el instalador falla de forma segura: no desactives esa comprobación.",
+      copyBtn: "Copiar",
+      footer: "MIT License · Hecho porque hacer el baile del cambio de salida manual era insoportable."
+    },
+    en: {
+      tagline: "Automatically switch your Windows default audio output when you power your Logitech PRO X 2 LIGHTSPEED on or off. No windows, no clicking around, running in the background.",
+      whatTitle: "What it does",
+      what1: "<strong>PRO X 2 on</strong> → Windows uses the headset output.",
+      what2: "<strong>PRO X 2 off</strong> → Windows falls back to your alternative output (e.g. PC speakers).",
+      what3: "The LIGHTSPEED dongle can stay plugged in.",
+      what4: "Runs in the background with <strong>no PowerShell window</strong> at login.",
+      whyTitle: "Why this exists",
+      why1: "Wireless headsets keep their USB/LIGHTSPEED endpoint visible to Windows even when the physical headset is turned off, so Windows doesn't know it should switch back to your speakers. Doing it by hand — taking off the headset, opening sound settings, changing the output — gets old fast.",
+      why2: "This project removes that friction: the output switches itself just by powering the headset on or off.",
+      howTitle: "How it works",
+      howIntro: "While the PRO X 2 is powered on, Logitech G HUB's battery query returns a payload; when powered off, it doesn't. AutoSwitch uses that signal.",
+      howDiagram: "PRO X 2\n   │\n   ▼\nLogitech G HUB\nws://localhost:9010\n   │\n   ├── GET /devices/list\n   │      └── locate the PRO X 2 (extendedDisplayName)\n   │\n   └── GET /battery/<deviceId>/state\n             │\n             ├── payload present -> ON\n             └── payload absent  -> OFF\n                         │\n                         ▼\n             SoundVolumeCommandLine\n                         │\n             /SetDefault <Item ID> all\n                         │\n                         ▼\n                      Windows",
+      installTitle: "Installation",
+      quickTitle: "One-click install",
+      quick1: "Open PowerShell (Windows) and paste this line. It downloads the latest version, verifies it and runs the full installer.",
+      quickCmd: 'powershell.exe -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Ayerdi/PROX2-AutoSwitch/main/install.ps1 | iex"',
+      quickNote: "Requires Logitech G HUB installed, open and recognizing the PRO X 2. The wizard will ask you to select the two audio outputs.",
+      manualTitle: "Manual install (ZIP)",
+      manual1: "Download the ZIP of the latest release from GitHub Releases.",
+      manual2: "Extract the whole ZIP to a normal folder (don't run from inside the ZIP) and run:",
+      manualCmd: 'powershell.exe -ExecutionPolicy Bypass -File ".\\Instalar-PROX2-AutoSwitch.ps1"',
+      whatInstallerDoesTitle: "What the installer does",
+      id1: "Downloads SoundVolumeCommandLine from NirSoft and verifies its SHA-256 before running it.",
+      id2: "Connects to G HUB (ws://localhost:9010) and locates the PRO X 2.",
+      id3: "Captures the real Windows Item ID of each output and actually tests both switches.",
+      id4: "Copies the runtime, creates an invisible autostart entry (wscript.exe) and starts AutoSwitch.",
+      id5: "Keeps its config in %LOCALAPPDATA%\\PROX2AutoSwitch\\.",
+      idNote: "Windows audio Item IDs are not reused across installs: the installer captures them from your current Windows. Don't copy config.json from another machine.",
+      reqsTitle: "Requirements",
+      req1: "Windows 10/11 x64",
+      req2: "Logitech G HUB installed, open and recognizing the PRO X 2",
+      req3: "PowerShell 5.1 or newer",
+      req4: "Internet connection during install (downloads svcl.exe from NirSoft)",
+      req5: "No admin rights required for normal operation",
+      verifyTitle: "Verify it works",
+      verifyCmd: 'powershell.exe -ExecutionPolicy Bypass -File "Verificar-PROX2-AutoSwitch.ps1"',
+      v1: "Power on the PRO X 2.",
+      v2: "Wait ~1–2 seconds. Windows should select the headset.",
+      v3: "Power them off.",
+      v4: "After two consecutive checks (~3 seconds), Windows should select the alternative output.",
+      v5: "The log lives in %LOCALAPPDATA%\\PROX2AutoSwitch\\autoswitch.log.",
+      secTitle: "Security notes",
+      sec1: "The G HUB WebSocket (localhost:9010) is not an official Logitech API: it's a local interface used by third-party projects. Logitech can change it in future versions. If it stops working after a G HUB update, check AGENT.md.",
+      sec2: "The installer downloads svcl-x64.zip from NirSoft and verifies its SHA-256. If NirSoft ships a new version the hash may change and the installer fails safely: don't remove that check.",
+      copyBtn: "Copy",
+      footer: "MIT License · Built because the manual output-switching dance got unbearable."
+    }
+  };
+
+  var KEY = "prox2-lang";
+  var DEFAULTS = ["es", "en"];
+  var el = {};
+  document.querySelectorAll("[data-i18n]").forEach(function (n) {
+    el[n.getAttribute("data-i18n")] = n;
+  });
+
+  function setLang(lang) {
+    if (!T[lang]) { lang = "es"; }
+    var t = T[lang];
+    Object.keys(t).forEach(function (k) {
+      if (el[k]) {
+        if (k.indexOf("what") === 0 || k.indexOf("sec") === 0 || k.indexOf("id") === 0) {
+          el[k].innerHTML = t[k];
+        } else {
+          el[k].textContent = t[k];
+        }
+      }
+    });
+    document.documentElement.lang = lang;
+    document.querySelectorAll(".lang button").forEach(function (b) {
+      b.classList.toggle("active", b.id === "btn-" + lang);
+    });
+    try { localStorage.setItem(KEY, lang); } catch (e) {}
+  }
+
+  function copy(elBtn) {
+    var key = elBtn.getAttribute("data-copy");
+    var text = (el[key] && el[key].textContent) || "";
+    navigator.clipboard.writeText(text).then(function () {
+      var label = elBtn.querySelector("[data-i18n]");
+      var original = label.textContent;
+      var ok = (document.documentElement.lang === "es") ? "✓ Copiado" : "✓ Copied";
+      label.textContent = ok;
+      elBtn.classList.add("ok");
+      setTimeout(function () {
+        label.textContent = original;
+        elBtn.classList.remove("ok");
+      }, 1600);
+    }).catch(function () {});
+  }
+
+  document.getElementById("btn-es").addEventListener("click", function () { setLang("es"); });
+  document.getElementById("btn-en").addEventListener("click", function () { setLang("en"); });
+  document.querySelectorAll(".copy").forEach(function (b) {
+    b.addEventListener("click", function () { copy(b); });
+  });
+
+  var saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  var detected = (navigator.language || "es").slice(0, 2).toLowerCase();
+  setLang(saved && T[saved] ? saved : (DEFAULTS.indexOf(detected) !== -1 ? detected : "es"));
+})();
+</script>
+</body>
+</html>

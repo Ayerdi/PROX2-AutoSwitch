@@ -2,6 +2,7 @@
 
 [![validate](https://github.com/Ayerdi/PROX2-AutoSwitch/actions/workflows/validate.yml/badge.svg)](https://github.com/Ayerdi/PROX2-AutoSwitch/actions/workflows/validate.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Pages](https://github.com/Ayerdi/PROX2-AutoSwitch/actions/workflows/pages.yml/badge.svg)](https://github.com/Ayerdi/PROX2-AutoSwitch/actions/workflows/pages.yml)
 
 Automatically switch your Windows default audio output when you put on or take off your **Logitech PRO X 2 Lightspeed** headset.
 
@@ -62,6 +63,14 @@ ws://localhost:9010
 No admin rights should be required for normal operation.
 
 ## Installation
+
+**One click** (downloads the latest release and runs the full installer):
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Ayerdi/PROX2-AutoSwitch/main/install.ps1 | iex"
+```
+
+Or manually:
 
 1. Install Logitech G HUB and confirm it detects the PRO X 2.
 2. Extract the whole ZIP to a normal folder. Don't run the installer from inside the ZIP.
@@ -209,11 +218,14 @@ then extract only:
 
 ## Repository layout
 
+- `install.ps1` — one-click bootstrap: downloads the latest release ZIP and runs the installer.
 - `Instalar-PROX2-AutoSwitch.ps1` — clean install from scratch.
 - `Runtime-PROX2-AutoSwitch.ps1` — the runtime copied to `%LOCALAPPDATA%`.
 - `Desinstalar-PROX2-AutoSwitch.ps1` — removes process, autostart and files.
 - `Verificar-PROX2-AutoSwitch.ps1` — quick diagnostics.
+- `site/` — the [GitHub Pages site](https://ayerdi.github.io/PROX2-AutoSwitch/), ES/EN.
 - `AGENT.md` — context so an AI agent can maintain/rebuild the project.
 - `SOURCES.md` — verified technical references.
 - `SECURITY.md` — security scope and how to report a vulnerability.
 - `.github/workflows/validate.yml` — CI that parses the PowerShell scripts.
+- `.github/workflows/pages.yml` — CI that deploys `site/` to GitHub Pages.
