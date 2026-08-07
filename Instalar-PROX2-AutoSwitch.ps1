@@ -6,6 +6,7 @@ $InstallDir   = Join-Path $env:LOCALAPPDATA "PROX2AutoSwitch"
 $RuntimeSrc   = Join-Path $PackageDir "Runtime-PROX2-AutoSwitch.ps1"
 $UninstallSrc = Join-Path $PackageDir "Desinstalar-PROX2-AutoSwitch.ps1"
 $VerifySrc    = Join-Path $PackageDir "Verificar-PROX2-AutoSwitch.ps1"
+$ModuleSrc    = Join-Path $PackageDir "lib\AutoSwitchCore.psm1"
 
 $MainScript   = Join-Path $InstallDir "PROX2AutoSwitch.ps1"
 $ConfigPath   = Join-Path $InstallDir "config.json"
@@ -22,11 +23,14 @@ $SvclUrl = "https://www.nirsoft.net/utils/svcl-x64.zip"
 $ExpectedSha256 = "7ba008e9ece8b3eda323ef01711e4647eb7f40b28dc25f98b2ed6a738810bfcd"
 $ZipPath = Join-Path $env:TEMP "svcl-x64.zip"
 
-foreach ($required in @($RuntimeSrc, $UninstallSrc, $VerifySrc)) {
+foreach ($required in @($RuntimeSrc, $UninstallSrc, $VerifySrc, $ModuleSrc)) {
     if (-not (Test-Path $required)) {
         throw "Falta un fichero del paquete: $required. Extrae el ZIP completo antes de instalar."
     }
 }
+
+# Logica compartida (extraccion de Item ID, validacion de config, debounce).
+Import-Module $ModuleSrc -ErrorAction Stop
 
 if (-not [Environment]::Is64BitOperatingSystem) {
     throw "Este paquete esta preparado para Windows x64."
@@ -88,35 +92,51 @@ if (-not (Test-Path $SvclPath)) {
 Copy-Item $RuntimeSrc $MainScript -Force
 Copy-Item $UninstallSrc (Join-Path $InstallDir "Desinstalar-PROX2-AutoSwitch.ps1") -Force
 Copy-Item $VerifySrc (Join-Path $InstallDir "Verificar-PROX2-AutoSwitch.ps1") -Force
+New-Item -ItemType Directory -Path (Join-Path $InstallDir "lib") -Force | Out-Null
+Copy-Item $ModuleSrc (Join-Path $InstallDir "lib\AutoSwitchCore.psm1") -Force
 
 # --- Funciones G HUB para la instalacion ---
 $script:Ws  = $null
-$script:Cts = $null
+
+# Timeouts de G HUB (ms): la comprobacion de G HUB del asistente no puede
+# colgarse si G HUB acepta la conexion y deja de responder.
+$script:ConnectTimeoutMs = 5000
+$script:ReceiveTimeoutMs = 5000
+$script:RequestTimeoutMs = 10000
+
+# Token de timeout G HUB: definido en lib\AutoSwitchCore.psm1 (importado arriba).
 
 function Close-GHubConnection {
-    try {
-        if ($null -ne $script:Ws -and
-            $script:Ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
+    # El cierre no debe colgar el asistente: si CloseAsync no termina en 1 s
+    # (o falla), Abort() + Dispose() garantizan salida.
+    if ($null -ne $script:Ws -and
+        $script:Ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
+        $closeCts = New-Object System.Threading.CancellationTokenSource
+        $closeCts.CancelAfter(1000)
+        try {
             $script:Ws.CloseAsync(
                 [System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure,
                 "fin",
-                $script:Cts.Token
+                $closeCts.Token
             ).GetAwaiter().GetResult() | Out-Null
         }
-    } catch {}
+        catch {
+            try { $script:Ws.Abort() } catch {}
+        }
+        finally {
+            $closeCts.Dispose()
+        }
+    }
 
     try { if ($null -ne $script:Ws)  { $script:Ws.Dispose() } } catch {}
-    try { if ($null -ne $script:Cts) { $script:Cts.Dispose() } } catch {}
 
     $script:Ws  = $null
-    $script:Cts = $null
 }
 
 function Connect-GHub {
     Close-GHubConnection
 
     $script:Ws  = New-Object System.Net.WebSockets.ClientWebSocket
-    $script:Cts = New-Object System.Threading.CancellationTokenSource
 
     $script:Ws.Options.UseDefaultCredentials = $false
     $script:Ws.Options.SetRequestHeader("Origin", "file://")
@@ -130,7 +150,17 @@ function Connect-GHub {
     $script:Ws.Options.AddSubProtocol("json")
 
     $uri = New-Object System.Uri("ws://localhost:9010")
-    $script:Ws.ConnectAsync($uri, $script:Cts.Token).GetAwaiter().GetResult() | Out-Null
+
+    $timeout = New-GHubTimeoutToken -Milliseconds $script:ConnectTimeoutMs
+    try {
+        $script:Ws.ConnectAsync($uri, $timeout.Token).GetAwaiter().GetResult() | Out-Null
+    }
+    catch [System.OperationCanceledException] {
+        throw "Timeout al conectar con G HUB ($($script:ConnectTimeoutMs) ms)."
+    }
+    finally {
+        $timeout.Dispose()
+    }
 
     if ($script:Ws.State -ne [System.Net.WebSockets.WebSocketState]::Open) {
         throw "No se pudo abrir ws://localhost:9010."
@@ -144,25 +174,57 @@ function Send-GHubJson {
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
     $segment = New-Object 'System.ArraySegment[byte]' -ArgumentList (,$bytes)
 
-    $script:Ws.SendAsync(
-        $segment,
-        [System.Net.WebSockets.WebSocketMessageType]::Text,
-        $true,
-        $script:Cts.Token
-    ).GetAwaiter().GetResult() | Out-Null
+    $timeout = New-GHubTimeoutToken -Milliseconds $script:ReceiveTimeoutMs
+    try {
+        $script:Ws.SendAsync(
+            $segment,
+            [System.Net.WebSockets.WebSocketMessageType]::Text,
+            $true,
+            $timeout.Token
+        ).GetAwaiter().GetResult() | Out-Null
+    }
+    catch [System.OperationCanceledException] {
+        throw "Timeout al enviar peticion a G HUB ($($script:ReceiveTimeoutMs) ms)."
+    }
+    finally {
+        $timeout.Dispose()
+    }
 }
 
 function Receive-GHubText {
+    param(
+        # Deadline duro de la peticion: ningun fragmento puede cruzar este punto.
+        [Parameter(Mandatory=$true)][datetime]$Deadline
+    )
+
     $buffer = New-Object byte[] 16384
     $stream = New-Object System.IO.MemoryStream
 
     try {
         do {
+            $remainingMs = [int](($Deadline - (Get-Date)).TotalMilliseconds)
+            if ($remainingMs -le 0) {
+                throw "Timeout de peticion G HUB ($($script:RequestTimeoutMs) ms)."
+            }
+            # El fragmento espera como mucho ReceiveTimeoutMs, nunca mas alla
+            # del deadline global de la peticion.
+            $fragmentMs = [Math]::Min($script:ReceiveTimeoutMs, $remainingMs)
+
             $segment = New-Object 'System.ArraySegment[byte]' -ArgumentList (,$buffer)
-            $result = $script:Ws.ReceiveAsync(
-                $segment,
-                $script:Cts.Token
-            ).GetAwaiter().GetResult()
+
+            $timeout = New-GHubTimeoutToken -Milliseconds $fragmentMs
+            try {
+                $result = $script:Ws.ReceiveAsync(
+                    $segment,
+                    $timeout.Token
+                ).GetAwaiter().GetResult()
+            }
+            catch [System.OperationCanceledException] {
+                throw "Timeout esperando respuesta de G HUB ($($fragmentMs) ms)."
+            }
+            finally {
+                $timeout.Dispose()
+            }
 
             if ($result.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) {
                 throw "G HUB cerro el WebSocket."
@@ -191,8 +253,16 @@ function Invoke-GHubGet {
         path  = $Path
     }
 
+    # Limite global por peticion: aunque G HUB intercale eventos,
+    # la respuesta buscada debe llegar antes del deadline.
+    $deadline = (Get-Date).AddMilliseconds($script:RequestTimeoutMs)
+
     while ($true) {
-        $raw = Receive-GHubText
+        if ((Get-Date) -gt $deadline) {
+            throw "Timeout de peticion G HUB ($($script:RequestTimeoutMs) ms): $Path"
+        }
+
+        $raw = Receive-GHubText -Deadline $deadline
         try { $message = $raw | ConvertFrom-Json } catch { continue }
 
         if (($message.msgId -eq $msgId) -or ($message.path -eq $Path)) {
@@ -213,16 +283,12 @@ function Get-DefaultColumn {
 function Get-DefaultRenderItemId {
     $text = Get-DefaultColumn "Item ID"
 
-    $m = [regex]::Match(
-        $text,
-        '\{0\.0\.0\.00000000\}\.\{[0-9A-Fa-f-]+\}'
-    )
-
-    if (-not $m.Success) {
+    $id = Get-RenderItemIdFromText -Text $text
+    if (-not $id) {
         throw "No pude extraer el Item ID del dispositivo predeterminado. Salida: $text"
     }
 
-    return $m.Value.ToLowerInvariant()
+    return $id
 }
 
 function Get-DefaultRenderName {
@@ -350,7 +416,7 @@ PASO B - ALTAVOCES
 Selecciona manualmente en Windows la salida que quieres usar cuando los PRO X 2 esten apagados.
 "@
 
-    if ($headsetOutput.ItemId -ieq $speakerOutput.ItemId) {
+    if (-not (Test-ValidAudioConfig -HeadsetId $headsetOutput.ItemId -SpeakerId $speakerOutput.ItemId)) {
         throw "Has capturado el mismo dispositivo dos veces. Repite la instalacion."
     }
 
@@ -370,16 +436,19 @@ Selecciona manualmente en Windows la salida que quieres usar cuando los PRO X 2 
     }
 
     $config = [ordered]@{
-        Version          = "1.0.0"
-        GHubDisplayName  = [string]$ghubHeadset.extendedDisplayName
-        GHubPort         = 9010
-        HeadsetName      = [string]$headsetOutput.Name
-        HeadsetId        = [string]$headsetOutput.ItemId
-        SpeakerName      = [string]$speakerOutput.Name
-        SpeakerId        = [string]$speakerOutput.ItemId
-        PollMilliseconds = 1500
-        OffMissThreshold = 2
-        InstalledAt      = (Get-Date).ToString("o")
+        Version           = "1.1.0"
+        GHubDisplayName   = [string]$ghubHeadset.extendedDisplayName
+        GHubPort          = 9010
+        HeadsetName       = [string]$headsetOutput.Name
+        HeadsetId         = [string]$headsetOutput.ItemId
+        SpeakerName       = [string]$speakerOutput.Name
+        SpeakerId         = [string]$speakerOutput.ItemId
+        PollMilliseconds  = 1500
+        OffMissThreshold  = 2
+        ConnectTimeoutMs  = 5000
+        ReceiveTimeoutMs  = 5000
+        RequestTimeoutMs  = 10000
+        InstalledAt       = (Get-Date).ToString("o")
     }
 
     $config | ConvertTo-Json -Depth 10 |

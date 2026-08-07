@@ -1,0 +1,41 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build release ZIP and checksum
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF#refs/tags/}"
+          PACKAGE_DIR="PROX2-AutoSwitch-$VERSION"
+          rm -rf "$PACKAGE_DIR"
+          mkdir -p "$PACKAGE_DIR/lib"
+          cp Instalar-PROX2-AutoSwitch.ps1 \
+             Runtime-PROX2-AutoSwitch.ps1 \
+             Desinstalar-PROX2-AutoSwitch.ps1 \
+             Verificar-PROX2-AutoSwitch.ps1 \
+             install.ps1 \
+             README.md AGENT.md SOURCES.md SECURITY.md LICENSE CHANGELOG.md \
+             "$PACKAGE_DIR/"
+          cp lib/AutoSwitchCore.psm1 "$PACKAGE_DIR/lib/"
+          zip -r "PROX2-AutoSwitch-$VERSION.zip" "$PACKAGE_DIR"
+          sha256sum "PROX2-AutoSwitch-$VERSION.zip" > "PROX2-AutoSwitch-$VERSION.zip.sha256"
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            PROX2-AutoSwitch-*.zip
+            PROX2-AutoSwitch-*.zip.sha256
+          generate_release_notes: true

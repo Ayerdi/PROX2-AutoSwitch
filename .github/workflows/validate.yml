@@ -55,8 +55,23 @@ jobs:
             'Instalar-PROX2-AutoSwitch.ps1',
             'Runtime-PROX2-AutoSwitch.ps1',
             'Desinstalar-PROX2-AutoSwitch.ps1',
-            'Verificar-PROX2-AutoSwitch.ps1'
+            'Verificar-PROX2-AutoSwitch.ps1',
+            'lib/AutoSwitchCore.psm1'
           )
           $missing = $required | Where-Object { -not (Test-Path $_) }
           if ($missing) { Write-Error "Missing: $($missing -join ', ')" }
           Write-Host "All required files present."
+
+      - name: Run Pester tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-Module -ListAvailable -Name Pester)) {
+            Install-Module -Name Pester -Force -Scope CurrentUser -SkipPublisherCheck
+          }
+          $config = New-PesterConfiguration
+          $config.Run.Path = 'tests'
+          $config.Output.Verbosity = 'Detailed'
+          $result = Invoke-Pester -Configuration $config
+          if ($result.FailedCount -gt 0) { exit 1 }
+          Write-Host "Pester: $($result.PassedCount) passed, $($result.FailedCount) failed."

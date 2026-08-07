@@ -29,6 +29,7 @@ function Show-Test {
 
 Show-Test "Directorio de instalacion" (Test-Path $InstallDir) $InstallDir
 Show-Test "Runtime" (Test-Path $MainScript) $MainScript
+Show-Test "Modulo de logica (lib)" (Test-Path (Join-Path $InstallDir "lib\AutoSwitchCore.psm1")) (Join-Path $InstallDir "lib\AutoSwitchCore.psm1")
 Show-Test "Configuracion" (Test-Path $ConfigPath) $ConfigPath
 Show-Test "svcl.exe" (Test-Path $SvclPath) $SvclPath
 Show-Test "Inicio automatico invisible" (Test-Path $ShortcutPath) $ShortcutPath
