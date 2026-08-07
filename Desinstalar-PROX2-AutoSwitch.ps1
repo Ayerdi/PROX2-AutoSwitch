@@ -100,10 +100,18 @@ if ($runningFromInstall) {
     }
     else {
         $cmd = "timeout /t 2 /nobreak >nul & rmdir /s /q `"$InstallDir`""
-        Start-Process -FilePath "$env:SystemRoot\System32\cmd.exe" `
-            -ArgumentList "/c $cmd" `
-            -WindowStyle Hidden
-        Show-Test "Directorio de instalacion" $true "eliminacion programada al salir del desinstalador"
+        try {
+            Start-Process -FilePath "$env:SystemRoot\System32\cmd.exe" `
+                -ArgumentList "/c $cmd" `
+                -WindowStyle Hidden `
+                -ErrorAction Stop
+            $removedSomething = $true
+            Show-Test "Directorio de instalacion" $true "eliminacion programada al salir del desinstalador"
+        }
+        catch {
+            $failed = $true
+            Show-Test "Directorio de instalacion" $false "no se pudo programar la eliminacion: $($_.Exception.Message)"
+        }
     }
 }
 else {

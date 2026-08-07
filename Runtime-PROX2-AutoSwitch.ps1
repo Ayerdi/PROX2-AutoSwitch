@@ -143,14 +143,27 @@ function Send-GHubJson {
 }
 
 function Receive-GHubText {
+    param(
+        # Deadline duro de la peticion: ningun fragmento puede cruzar este punto.
+        [Parameter(Mandatory=$true)][datetime]$Deadline
+    )
+
     $buffer = New-Object byte[] 16384
     $stream = New-Object System.IO.MemoryStream
 
     try {
         do {
+            $remainingMs = [int](($Deadline - (Get-Date)).TotalMilliseconds)
+            if ($remainingMs -le 0) {
+                throw "Timeout de peticion G HUB ($($script:RequestTimeoutMs) ms)."
+            }
+            # El fragmento espera como mucho ReceiveTimeoutMs, nunca mas alla
+            # del deadline global de la peticion.
+            $fragmentMs = [Math]::Min($script:ReceiveTimeoutMs, $remainingMs)
+
             $segment = New-Object 'System.ArraySegment[byte]' -ArgumentList (,$buffer)
 
-            $timeout = New-GHubTimeoutToken -Milliseconds $script:ReceiveTimeoutMs
+            $timeout = New-GHubTimeoutToken -Milliseconds $fragmentMs
             try {
                 $result = $script:Ws.ReceiveAsync(
                     $segment,
@@ -158,7 +171,7 @@ function Receive-GHubText {
                 ).GetAwaiter().GetResult()
             }
             catch [System.OperationCanceledException] {
-                throw "Timeout esperando respuesta de G HUB ($($script:ReceiveTimeoutMs) ms)."
+                throw "Timeout esperando respuesta de G HUB ($($fragmentMs) ms)."
             }
             finally {
                 $timeout.Dispose()
@@ -200,7 +213,7 @@ function Invoke-GHubGet {
             throw "Timeout de peticion G HUB ($($script:RequestTimeoutMs) ms): $Path"
         }
 
-        $raw = Receive-GHubText
+        $raw = Receive-GHubText -Deadline $deadline
 
         try {
             $message = $raw | ConvertFrom-Json

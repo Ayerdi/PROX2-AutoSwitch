@@ -36,42 +36,43 @@ $ZipPath = Join-Path $env:TEMP $zipAsset.name
 $ChecksumPath = Join-Path $env:TEMP $checksumName
 $ExtractDir = Join-Path $env:TEMP "PROX2-AutoSwitch-extract"
 
-Write-Host "Version $($release.tag_name)" -ForegroundColor Green
-Write-Host "Descargando $($zipAsset.name) y su checksum..." -ForegroundColor Yellow
-Invoke-WebRequest -UseBasicParsing -Uri $zipAsset.browser_download_url -OutFile $ZipPath
-Invoke-WebRequest -UseBasicParsing -Uri $checksumAsset.browser_download_url -OutFile $ChecksumPath
-
-Write-Host "Verificando SHA-256..." -ForegroundColor Yellow
-$expectedLine = (Get-Content -Raw $ChecksumPath).Trim()
-$expectedHash = ($expectedLine -split "\s+")[0].ToLowerInvariant()
-if (-not $expectedHash -or $expectedHash -notmatch '^[0-9a-f]{64}$') {
-    throw "El checksum descargado no parece un SHA-256 valido."
-}
-$actualHash = (Get-FileHash -Algorithm SHA256 -Path $ZipPath).Hash.ToLowerInvariant()
-if ($actualHash -ne $expectedHash) {
-    throw "El SHA-256 del ZIP no coincide con el publicado. Abortando. Esperado=$expectedHash Obtenido=$actualHash"
-}
-Write-Host "      SHA-256 correcto." -ForegroundColor Green
-
-Write-Host "Extrayendo..." -ForegroundColor Yellow
-if (Test-Path $ExtractDir) { Remove-Item $ExtractDir -Recurse -Force }
-Expand-Archive -Path $ZipPath -DestinationPath $ExtractDir -Force
-
-$Installer = Join-Path $ExtractDir "Instalar-PROX2-AutoSwitch.ps1"
-if (-not (Test-Path $Installer)) {
-    # El ZIP puede tener una carpeta envolvente: buscamos un nivel mas abajo.
-    $nested = Get-ChildItem -Path $ExtractDir -Recurse -Filter "Instalar-PROX2-AutoSwitch.ps1" |
-        Select-Object -First 1
-    if ($nested) { $Installer = $nested.FullName }
-}
-if (-not (Test-Path $Installer)) {
-    throw "No se encontro el instalador dentro del ZIP."
-}
-
 try {
+    Write-Host "Version $($release.tag_name)" -ForegroundColor Green
+    Write-Host "Descargando $($zipAsset.name) y su checksum..." -ForegroundColor Yellow
+    Invoke-WebRequest -UseBasicParsing -Uri $zipAsset.browser_download_url -OutFile $ZipPath
+    Invoke-WebRequest -UseBasicParsing -Uri $checksumAsset.browser_download_url -OutFile $ChecksumPath
+
+    Write-Host "Verificando SHA-256..." -ForegroundColor Yellow
+    $expectedLine = (Get-Content -Raw $ChecksumPath).Trim()
+    $expectedHash = ($expectedLine -split "\s+")[0].ToLowerInvariant()
+    if (-not $expectedHash -or $expectedHash -notmatch '^[0-9a-f]{64}$') {
+        throw "El checksum descargado no parece un SHA-256 valido."
+    }
+    $actualHash = (Get-FileHash -Algorithm SHA256 -Path $ZipPath).Hash.ToLowerInvariant()
+    if ($actualHash -ne $expectedHash) {
+        throw "El SHA-256 del ZIP no coincide con el publicado. Abortando. Esperado=$expectedHash Obtenido=$actualHash"
+    }
+    Write-Host "      SHA-256 correcto." -ForegroundColor Green
+
+    Write-Host "Extrayendo..." -ForegroundColor Yellow
+    if (Test-Path $ExtractDir) { Remove-Item $ExtractDir -Recurse -Force }
+    Expand-Archive -Path $ZipPath -DestinationPath $ExtractDir -Force
+
+    $Installer = Join-Path $ExtractDir "Instalar-PROX2-AutoSwitch.ps1"
+    if (-not (Test-Path $Installer)) {
+        # El ZIP puede tener una carpeta envolvente: buscamos un nivel mas abajo.
+        $nested = Get-ChildItem -Path $ExtractDir -Recurse -Filter "Instalar-PROX2-AutoSwitch.ps1" |
+            Select-Object -First 1
+        if ($nested) { $Installer = $nested.FullName }
+    }
+    if (-not (Test-Path $Installer)) {
+        throw "No se encontro el instalador dentro del ZIP."
+    }
+
     & $Installer
 }
 finally {
+    # Sin basura en %TEMP% si falla cualquiera de los pasos anteriores.
     Remove-Item $ZipPath -Force -ErrorAction SilentlyContinue
     Remove-Item $ChecksumPath -Force -ErrorAction SilentlyContinue
     Remove-Item $ExtractDir -Recurse -Force -ErrorAction SilentlyContinue
