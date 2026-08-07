@@ -71,3 +71,20 @@ Describe 'Test-ValidAudioConfig' {
         Test-ValidAudioConfig -HeadsetId '{0.0.0.00000000}.{11111111-2222-3333-4444-555555555555}' -SpeakerId '{0.0.0.00000000}.{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}' | Should -Be $true
     }
 }
+
+Describe 'New-GHubTimeoutToken' {
+    It 'returns a token that cancels itself after the requested interval' {
+        $cts = New-GHubTimeoutToken -Milliseconds 50
+        $cts.Token.IsCancellationRequested | Should -Be $false
+
+        Start-Sleep -Milliseconds 150
+        $cts.Token.IsCancellationRequested | Should -Be $true
+        $cts.Dispose()
+    }
+
+    It 'accepts and applies a large interval' {
+        $cts = New-GHubTimeoutToken -Milliseconds 60000
+        $cts.Token.IsCancellationRequested | Should -Be $false
+        $cts.Dispose()
+    }
+}

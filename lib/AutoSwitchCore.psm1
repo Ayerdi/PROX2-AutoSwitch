@@ -84,4 +84,22 @@ function Test-ValidAudioConfig {
     return ($HeadsetId -ine $SpeakerId)
 }
 
-Export-ModuleMember -Function Get-RenderItemIdFromText, Resolve-HeadsetState, Test-ValidAudioConfig
+function New-GHubTimeoutToken {
+    <#
+    .SYNOPSIS
+        CancellationTokenSource que se cancela solo pasados $Milliseconds.
+    .DESCRIPTION
+        Todos los CallAsync del WebSocket usan este token; sin el CancelAfter
+        un CloseAsync/ReceiveAsync podria colgar el runtime indefinidamente.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][int]$Milliseconds
+    )
+
+    $cts = New-Object System.Threading.CancellationTokenSource
+    $cts.CancelAfter($Milliseconds)
+    return $cts
+}
+
+Export-ModuleMember -Function Get-RenderItemIdFromText, Resolve-HeadsetState, Test-ValidAudioConfig, New-GHubTimeoutToken

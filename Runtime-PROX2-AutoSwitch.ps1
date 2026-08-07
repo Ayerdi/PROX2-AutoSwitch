@@ -48,46 +48,42 @@ if (-not $createdNew) {
 }
 
 $script:Ws  = $null
-$script:Cts = $null
 
 function Close-GHubConnection {
-    try {
-        if ($null -ne $script:Ws -and
-            $script:Ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
+    # El cierre no debe poder colgar la recuperacion: si CloseAsync no
+    # termina en 1 s (o falla), Abort() + Dispose() garantizan salida.
+    if ($null -ne $script:Ws -and
+        $script:Ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
+        $closeCts = New-Object System.Threading.CancellationTokenSource
+        $closeCts.CancelAfter(1000)
+        try {
             $script:Ws.CloseAsync(
                 [System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure,
                 "reconnect",
-                $script:Cts.Token
+                $closeCts.Token
             ).GetAwaiter().GetResult() | Out-Null
         }
-    } catch {}
+        catch {
+            try { $script:Ws.Abort() } catch {}
+        }
+        finally {
+            $closeCts.Dispose()
+        }
+    }
 
     try {
         if ($null -ne $script:Ws) { $script:Ws.Dispose() }
     } catch {}
 
-    try {
-        if ($null -ne $script:Cts) { $script:Cts.Dispose() }
-    } catch {}
-
     $script:Ws  = $null
-    $script:Cts = $null
 }
 
-function New-GHubTimeoutToken {
-    # Token que se cancela solo pasados $Milliseconds.
-    param([int]$Milliseconds)
-
-    $cts = New-Object System.Threading.CancellationTokenSource
-    $cts.CancelAfter($Milliseconds)
-    return $cts
-}
+# Token de timeout G HUB: definido en lib\AutoSwitchCore.psm1 (importado arriba).
 
 function Connect-GHub {
     Close-GHubConnection
 
     $script:Ws  = New-Object System.Net.WebSockets.ClientWebSocket
-    $script:Cts = New-Object System.Threading.CancellationTokenSource
 
     $script:Ws.Options.UseDefaultCredentials = $false
     $script:Ws.Options.SetRequestHeader("Origin", "file://")
