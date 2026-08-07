@@ -299,11 +299,11 @@ try {
         throw "G HUB no devolvio dispositivos."
     }
 
-    $matches = @($deviceInfos | Where-Object {
+    $candidates = @($deviceInfos | Where-Object {
         $_.extendedDisplayName -match "PRO\s*X\s*2"
     })
 
-    if ($matches.Count -eq 0) {
+    if ($candidates.Count -eq 0) {
         Write-Host ""
         Write-Host "G HUB devuelve estos dispositivos:" -ForegroundColor Yellow
         $deviceInfos |
@@ -313,14 +313,14 @@ try {
         throw "No se encontro automaticamente un Logitech PRO X 2."
     }
 
-    if ($matches.Count -eq 1) {
-        $ghubHeadset = $matches[0]
+    if ($candidates.Count -eq 1) {
+        $ghubHeadset = $candidates[0]
     }
     else {
         Write-Host ""
         Write-Host "Se encontraron varios candidatos:" -ForegroundColor Yellow
-        for ($i = 0; $i -lt $matches.Count; $i++) {
-            Write-Host "[$($i + 1)] $($matches[$i].extendedDisplayName)"
+        for ($i = 0; $i -lt $candidates.Count; $i++) {
+            Write-Host "[$($i + 1)] $($candidates[$i].extendedDisplayName)"
         }
 
         do {
@@ -328,10 +328,10 @@ try {
             $parsed = 0
             $valid = [int]::TryParse($choice, [ref]$parsed) -and
                      $parsed -ge 1 -and
-                     $parsed -le $matches.Count
+                     $parsed -le $candidates.Count
         } until ($valid)
 
-        $ghubHeadset = $matches[$parsed - 1]
+        $ghubHeadset = $candidates[$parsed - 1]
     }
 
     Write-Host "      G HUB: $($ghubHeadset.extendedDisplayName)" -ForegroundColor Green

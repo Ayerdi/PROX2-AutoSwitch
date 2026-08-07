@@ -11,7 +11,7 @@ if (-not (Test-Path $SvclPath))   { exit 11 }
 
 $Config = Get-Content -Raw -Path $ConfigPath | ConvertFrom-Json
 
-function Write-Log {
+function Write-AutoSwitchLog {
     param([string]$Message)
 
     try {
@@ -175,7 +175,7 @@ function Get-ProX2BatteryPath {
         throw "G HUB no devuelve el PRO X 2 en /devices/list."
     }
 
-    Write-Log ("PRO X 2 detectado por G HUB: {0} ({1})" -f $headset.extendedDisplayName, $headset.id)
+    Write-AutoSwitchLog ("PRO X 2 detectado por G HUB: {0} ({1})" -f $headset.extendedDisplayName, $headset.id)
     return "/battery/$($headset.id)/state"
 }
 
@@ -215,7 +215,7 @@ function Set-AudioOutput {
 
     $actual = Get-DefaultRenderItemId
     if ($actual -ieq $DeviceId) {
-        Write-Log "Salida cambiada -> $Label"
+        Write-AutoSwitchLog "Salida cambiada -> $Label"
         return
     }
 
@@ -226,14 +226,14 @@ function Set-AudioOutput {
 
     $actual = Get-DefaultRenderItemId
     if ($actual -ieq $DeviceId) {
-        Write-Log "Salida cambiada -> $Label (segundo intento)"
+        Write-AutoSwitchLog "Salida cambiada -> $Label (segundo intento)"
         return
     }
 
     throw "svcl no consiguio establecer '$Label'. Esperado=$DeviceId Actual=$actual"
 }
 
-Write-Log "PRO X 2 AutoSwitch iniciado."
+Write-AutoSwitchLog "PRO X 2 AutoSwitch iniciado."
 
 $availabilityLogged = $false
 
@@ -244,9 +244,9 @@ try {
             $batteryPath = Get-ProX2BatteryPath
 
             if ($availabilityLogged) {
-                Write-Log "Conexion con G HUB recuperada."
+                Write-AutoSwitchLog "Conexion con G HUB recuperada."
             } else {
-                Write-Log "Conectado con G HUB."
+                Write-AutoSwitchLog "Conectado con G HUB."
             }
 
             $availabilityLogged = $false
@@ -295,7 +295,7 @@ try {
             Close-GHubConnection
 
             if (-not $availabilityLogged) {
-                Write-Log ((
+                Write-AutoSwitchLog ((
                     "G HUB/AutoSwitch no disponible: {0}. " +
                     "Se reintentara; mientras el estado sea desconocido no se cambia la salida."
                 ) -f $_.Exception.Message)
