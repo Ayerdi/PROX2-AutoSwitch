@@ -227,5 +227,6 @@ then extract only:
 - `AGENT.md` — context so an AI agent can maintain/rebuild the project.
 - `SOURCES.md` — verified technical references.
 - `SECURITY.md` — security scope and how to report a vulnerability.
+- `CHANGELOG.md` — version history (Keep a Changelog).
 - `.github/workflows/validate.yml` — CI that parses the PowerShell scripts.
 - `.github/workflows/pages.yml` — CI that deploys `site/` to GitHub Pages.

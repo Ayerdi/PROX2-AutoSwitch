@@ -29,6 +29,24 @@ jobs:
             Write-Host "OK: $($script.Name)"
           }
 
+      - name: Lint with PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
+            Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
+          }
+          $results = Invoke-ScriptAnalyzer -Path . -Recurse `
+            -Severity Error, Warning `
+            -ExcludeRule PSAvoidUsingWriteHost, PSAvoidUsingPlainTextForPassword, PSAvoidUsingCmdletAliases
+          if ($results) {
+            $results | ForEach-Object {
+              Write-Host "::error file=$($_.ScriptPath),line=$($_.Line)::$($_.RuleName): $($_.Message)"
+            }
+            exit 1
+          }
+          Write-Host "PSScriptAnalyzer: no Error/Warning findings."
+
       - name: Verify scripts reference files present
         shell: pwsh
         run: |
