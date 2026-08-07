@@ -45,9 +45,17 @@ if ($process) {
 Show-Test "Proceso AutoSwitch" ($null -ne $process) $processDetail
 
 $ghubPort = $false
+$ghubPortToTest = 9010
+if (Test-Path $ConfigPath) {
+    try {
+        $cfgPort = (Get-Content -Raw $ConfigPath | ConvertFrom-Json).GHubPort
+        if ($cfgPort) { $ghubPortToTest = [int]$cfgPort }
+    }
+    catch {}
+}
 try {
     $client = New-Object System.Net.Sockets.TcpClient
-    $iar = $client.BeginConnect("127.0.0.1", 9010, $null, $null)
+    $iar = $client.BeginConnect("127.0.0.1", $ghubPortToTest, $null, $null)
     $ghubPort = $iar.AsyncWaitHandle.WaitOne(1000, $false)
     if ($ghubPort) {
         $client.EndConnect($iar)
@@ -62,7 +70,7 @@ $ghubDetail = "Abre Logitech G HUB"
 if ($ghubPort) {
     $ghubDetail = "Puerto accesible"
 }
-Show-Test "G HUB localhost:9010" $ghubPort $ghubDetail
+Show-Test "G HUB localhost:$ghubPortToTest" $ghubPort $ghubDetail
 
 if (Test-Path $ConfigPath) {
     try {
