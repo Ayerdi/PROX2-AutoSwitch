@@ -104,6 +104,7 @@ if ($runningFromInstall) {
             Start-Process -FilePath "$env:SystemRoot\System32\cmd.exe" `
                 -ArgumentList "/c $cmd" `
                 -WindowStyle Hidden `
+                -WorkingDirectory (Split-Path -Parent $InstallDir) `
                 -ErrorAction Stop
             $removedSomething = $true
             Show-Test "Directorio de instalacion" $true "eliminacion programada al salir del desinstalador"

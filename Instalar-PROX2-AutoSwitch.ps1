@@ -1,6 +1,10 @@
 ﻿#requires -Version 5.1
 $ErrorActionPreference = "Stop"
 
+# PowerShell 5.1 sobre .NET antiguo puede negociar TLS 1.0/1.1 y fallar
+# contra GitHub/NirSoft. Forzamos TLS 1.2.
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
 $PackageDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $InstallDir   = Join-Path $env:LOCALAPPDATA "PROX2AutoSwitch"
 $RuntimeSrc   = Join-Path $PackageDir "Runtime-PROX2-AutoSwitch.ps1"

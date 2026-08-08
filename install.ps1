@@ -1,6 +1,10 @@
 #requires -Version 5.1
 $ErrorActionPreference = "Stop"
 
+# PowerShell 5.1 sobre .NET antiguo puede negociar TLS 1.0/1.1 y fallar
+# contra GitHub/NirSoft. Forzamos TLS 1.2.
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
 # PRO X 2 LIGHTSPEED AutoSwitch - instalador de un clic.
 # Descarga la ultima version desde GitHub Releases junto con su checksum
 # SHA-256 y ejecuta el instalador real solo tras verificar la integridad.

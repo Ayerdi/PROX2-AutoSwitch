@@ -316,6 +316,7 @@ try {
             $availabilityLogged = $false
             $lastState = $null
             $misses = 0
+            $script:AudioOpInProgress = $false
 
             while ($script:Ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
                 $battery = Invoke-GHubGet -Path $batteryPath
@@ -329,6 +330,7 @@ try {
 
                 if ($state.Decision -and
                     ($null -eq $lastState -or $state.IsOn -ne $lastState)) {
+                    $script:AudioOpInProgress = $true
                     if ($state.IsOn) {
                         Set-AudioOutput `
                             -DeviceId ([string]$Config.HeadsetId) `
@@ -339,6 +341,7 @@ try {
                             -DeviceId ([string]$Config.SpeakerId) `
                             -Label ([string]$Config.SpeakerName)
                     }
+                    $script:AudioOpInProgress = $false
 
                     $lastState = $state.IsOn
                 }
@@ -351,7 +354,13 @@ try {
         catch {
             Close-GHubConnection
 
-            if (-not $availabilityLogged) {
+            if ($script:AudioOpInProgress) {
+                $script:AudioOpInProgress = $false
+                Write-AutoSwitchLog (
+                    "No se pudo cambiar la salida de audio: {0}. Se reintentara." -f $_.Exception.Message
+                )
+            }
+            elseif (-not $availabilityLogged) {
                 Write-AutoSwitchLog ((
                     "G HUB/AutoSwitch no disponible: {0}. " +
                     "Se reintentara; mientras el estado sea desconocido no se cambia la salida."
