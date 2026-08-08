@@ -533,7 +533,7 @@
     var t = T[lang];
     Object.keys(t).forEach(function (k) {
       if (el[k]) {
-        if (k.indexOf("what") === 0 || k.indexOf("sec") === 0 || k.indexOf("id") === 0) {
+        if (k.indexOf("what") === 0 || k.indexOf("sec") === 0 || k.indexOf("id") === 0 || k.indexOf("demo") === 0) {
           el[k].innerHTML = t[k];
         } else {
           el[k].textContent = t[k];
