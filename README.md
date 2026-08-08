@@ -11,6 +11,10 @@ Automatically switch your Windows default audio output when you put on or take o
 - The LIGHTSPEED dongle can stay plugged in.
 - Runs in the background with **no PowerShell window at login**.
 
+![AutoSwitch demo: headset on selects the headset output, headset off returns to the speakers](site/autoswitch-demo.gif)
+
+See it live on the [project page](https://ayerdi.github.io/PROX2-AutoSwitch/).
+
 ## Why this exists
 
 Wireless headsets keep their USB/LIGHTSPEED endpoint visible to Windows even when the physical headset is turned off. So Windows doesn't know it should switch back to your speakers.
