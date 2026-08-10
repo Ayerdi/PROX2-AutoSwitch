@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="PRO X 2 LIGHTSPEED AutoSwitch — cambia automáticamente la salida de audio de Windows al encender o apagar tus Logitech PRO X 2. Automatically switch your Windows default audio output when you power your Logitech PRO X 2 on or off.">
-<title>PRO X 2 LIGHTSPEED AutoSwitch</title>
+<meta name="description" content="Audio AutoSwitch — cambia automáticamente la salida de audio de Windows cuando conectas o desconectas tu auricular inalámbrico. Automatically switch your Windows default audio output when you connect or disconnect your wireless headset.">
+<title>Audio AutoSwitch</title>
 <style>
   :root {
     --bg: #0b0e14;
@@ -265,7 +265,7 @@
       <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT">
     </a>
   </div>
-  <h1>PRO X 2 <span class="accent">LIGHTSPEED</span> AutoSwitch</h1>
+  <h1>Audio <span class="accent">AutoSwitch</span></h1>
   <p class="tagline" data-i18n="tagline"></p>
 </header>
 
@@ -280,6 +280,7 @@
         <li data-i18n="what2"></li>
         <li data-i18n="what3"></li>
         <li data-i18n="what4"></li>
+        <li data-i18n="what5"></li>
       </ul>
     </div>
   </section>
@@ -416,49 +417,50 @@
 
   var T = {
     es: {
-      tagline: "Cambia automáticamente la salida de audio de Windows cuando enciendes o apagas tus Logitech PRO X 2 LIGHTSPEED. Sin ventanas, sin tocar nada, en segundo plano.",
+      tagline: "Cambia automáticamente la salida de audio de Windows cuando conectas o desconectas tu auricular inalámbrico. Compatible con auriculares cuyo estado lo exponga Windows (p. ej. Jabra Evolve 65) y con Logitech PRO X 2. Sin ventanas, en segundo plano.",
       whatTitle: "Qué hace",
-      what1: "<strong>PRO X 2 encendidos</strong> → Windows usa la salida de los auriculares.",
-      what2: "<strong>PRO X 2 apagados</strong> → Windows vuelve a la salida alternativa (p. ej. los altavoces).",
-      what3: "El dongle LIGHTSPEED puede permanecer conectado.",
-      what4: "Corre en segundo plano <strong>sin ventana de PowerShell</strong> al iniciar sesión.",
+      what1: "<strong>Auriculares conectados</strong> → Windows usa la salida de los auriculares.",
+      what2: "<strong>Auriculares desconectados</strong> → Windows vuelve a la salida alternativa (p. ej. los altavoces).",
+      what3: "Funciona con auriculares inalámbricos cuyo estado de conexión lo exponga Windows; el PRO X 2 se soporta vía Logitech G HUB.",
+      what4: "Icono de bandeja: activar/pausar AutoSwitch y deshabilitar/habilitar los Audio Enhancements del auricular.",
+      what5: "Corre en segundo plano <strong>sin ventana de PowerShell</strong> al iniciar sesión.",
       whyTitle: "Por qué existe",
       why1: "Los auriculares inalámbricos mantienen su endpoint USB/LIGHTSPEED visible para Windows aunque estén apagados físicamente. Windows no sabe que debe volver a tus altavoces. Hacerlo a mano — quitarte el auricular, abrir ajustes, cambiar la salida — se hace viejo muy rápido.",
       why2: "Este proyecto elimina esa fricción: la salida cambia sola con solo encender o apagar los auriculares.",
       demoTitle: "Demostración",
-      demo1: "<strong>PRO X 2 encendidos</strong> → la salida predeterminada pasa a los auriculares Logitech.",
-      demo2: "<strong>PRO X 2 apagados</strong> → la salida vuelve automáticamente a los altavoces.",
+      demo1: "<strong>Auriculares encendidos</strong> → la salida predeterminada pasa a los auriculares.",
+      demo2: "<strong>Auriculares apagados</strong> → la salida vuelve automáticamente a los altavoces.",
       demo3: "Sin tocar nada: solo encender o apagar los auriculares.",
       howTitle: "Cómo funciona",
-      howIntro: "Mientras el PRO X 2 está encendido, la consulta de batería de Logitech G HUB devuelve un payload; al apagarlo, no lo devuelve. AutoSwitch usa esa señal.",
-      howDiagram: "PRO X 2\n   │\n   ▼\nLogitech G HUB\nws://localhost:9010\n   │\n   ├── GET /devices/list\n   │      └── localiza el PRO X 2 (extendedDisplayName)\n   │\n   └── GET /battery/<deviceId>/state\n             │\n             ├── payload presente -> ON\n             └── payload ausente  -> OFF\n                         │\n                         ▼\n             SoundVolumeCommandLine\n                         │\n             /SetDefault <Item ID> all\n                         │\n                         ▼\n                      Windows",
+      howIntro: "Dos modos de detección, elegidos automáticamente al instalar: WindowsEndpoint (el estado Active ↔ Unplugged del endpoint de Windows) y LogitechGHub (payload de batería de G HUB para el PRO X 2).",
+      howDiagram: "Auriculares inalámbricos\n   │\n   ▼\nWindowsEndpoint (Active ↔ Unplugged)\n        │  (o G HUB ws://localhost:9010 para PRO X 2)\n        ▼\nConnected / Disconnected / Unknown\n        │        │\n   (debounce)  └──► Unknown: no cambiar\n        ▼\nSoundVolumeCommandLine\n        │\n/SetDefault <Item ID> all\n        │\n        ▼\n     Windows",
       installTitle: "Instalación",
       quickTitle: "Instalación en un clic",
       quick1: "Abre PowerShell (Windows) y pega esta línea. Descarga la última versión, verifica su SHA-256 contra el checksum publicado y ejecuta el instalador completo.",
       quickCmd: 'powershell.exe -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Ayerdi/PROX2-AutoSwitch/main/install.ps1 | iex"',
-      quickNote: "Requiere Logitech G HUB instalado, abierto y reconociendo los PRO X 2. El asistente te pedirá seleccionar las dos salidas de audio.",
+      quickNote: "El asistente detecta el modo automáticamente. Para Logitech PRO X 2 requiere G HUB abierto; para el resto, basta con que Windows vea el endpoint del auricular.",
       manualTitle: "Instalación manual (ZIP)",
       manual1: "Descarga el ZIP de la versión más reciente desde GitHub Releases.",
       manual2: "Extrae todo el ZIP a una carpeta normal (no ejecutes desde dentro del ZIP) y ejecuta:",
       manualCmd: 'powershell.exe -ExecutionPolicy Bypass -File ".\\Instalar-PROX2-AutoSwitch.ps1"',
       whatInstallerDoesTitle: "Qué hace el instalador",
       id1: "Descarga SoundVolumeCommandLine desde NirSoft y verifica su SHA-256 antes de ejecutarlo.",
-      id2: "Conecta con G HUB (ws://localhost:9010) y localiza el PRO X 2.",
+      id2: "Detecta el auricular: si G HUB reporta un PRO X 2 usa G HUB; si no, te deja elegir auricular y fallback de la lista de dispositivos de Windows y comprueba si Windows refleja el estado físico.",
       id3: "Captura el Item ID real de Windows de cada salida y prueba ambos cambios de verdad.",
       id4: "Copia el runtime, crea un inicio automático invisible (wscript.exe) y arranca AutoSwitch.",
       id5: "Deja la configuración en %LOCALAPPDATA%\\PROX2AutoSwitch\\.",
       idNote: "Los Item ID de audio de Windows no se reutilizan entre instalaciones: el instalador captura los del Windows actual. No copies config.json de otro equipo.",
       reqsTitle: "Requisitos",
       req1: "Windows 10/11 x64",
-      req2: "Logitech G HUB instalado, abierto y reconociendo los PRO X 2",
-      req3: "PowerShell 5.1 o superior",
-      req4: "Conexión a Internet durante la instalación (descarga svcl.exe de NirSoft)",
-      req5: "No requiere permisos de administrador para el funcionamiento normal",
+      req2: "PowerShell 5.1 o superior",
+      req3: "Conexión a Internet durante la instalación (descarga svcl.exe de NirSoft)",
+      req4: "Para el modo PRO X 2: Logitech G HUB instalado, abierto y reconociendo los PRO X 2",
+      req5: "No requiere permisos de administrador para el funcionamiento normal (solo el toggle de enhancements pide UAC)",
       verifyTitle: "Comprobar que funciona",
       verifyCmd: 'powershell.exe -ExecutionPolicy Bypass -File "Verificar-PROX2-AutoSwitch.ps1"',
-      v1: "Enciende los PRO X 2.",
+      v1: "Conecta / enciende el auricular.",
       v2: "Espera ~1–2 segundos. Windows debería seleccionar los auriculares.",
-      v3: "Apágalos.",
+      v3: "Desconéctalo / apágalo.",
       v4: "Tras dos comprobaciones consecutivas (~3 segundos), Windows debería seleccionar la salida alternativa.",
       v5: "El log está en %LOCALAPPDATA%\\PROX2AutoSwitch\\autoswitch.log.",
       secTitle: "Notas de seguridad",
@@ -468,49 +470,50 @@
       footer: "MIT License · Hecho porque hacer el baile del cambio de salida manual era insoportable."
     },
     en: {
-      tagline: "Automatically switch your Windows default audio output when you power your Logitech PRO X 2 LIGHTSPEED on or off. No windows, no clicking around, running in the background.",
+      tagline: "Automatically switch your Windows default audio output when you connect or disconnect your wireless headset. Works with headsets whose state Windows exposes (e.g. Jabra Evolve 65) and with Logitech PRO X 2. No windows, running in the background.",
       whatTitle: "What it does",
-      what1: "<strong>PRO X 2 on</strong> → Windows uses the headset output.",
-      what2: "<strong>PRO X 2 off</strong> → Windows falls back to your alternative output (e.g. PC speakers).",
-      what3: "The LIGHTSPEED dongle can stay plugged in.",
-      what4: "Runs in the background with <strong>no PowerShell window</strong> at login.",
+      what1: "<strong>Headset connected</strong> → Windows uses the headset output.",
+      what2: "<strong>Headset disconnected</strong> → Windows falls back to your alternative output (e.g. PC speakers).",
+      what3: "Works with wireless headsets whose connection state Windows exposes; PRO X 2 is supported via Logitech G HUB.",
+      what4: "Tray icon: enable/pause AutoSwitch and disable/enable the headset's Audio Enhancements.",
+      what5: "Runs in the background with <strong>no PowerShell window</strong> at login.",
       whyTitle: "Why this exists",
       why1: "Wireless headsets keep their USB/LIGHTSPEED endpoint visible to Windows even when the physical headset is turned off, so Windows doesn't know it should switch back to your speakers. Doing it by hand — taking off the headset, opening sound settings, changing the output — gets old fast.",
       why2: "This project removes that friction: the output switches itself just by powering the headset on or off.",
       demoTitle: "Demo",
-      demo1: "<strong>PRO X 2 on</strong> → the default output switches to the Logitech headset.",
-      demo2: "<strong>PRO X 2 off</strong> → the output automatically switches back to the speakers.",
+      demo1: "<strong>Headset on</strong> → the default output switches to the headset.",
+      demo2: "<strong>Headset off</strong> → the output automatically switches back to the speakers.",
       demo3: "No clicking needed: just power the headset on or off.",
       howTitle: "How it works",
-      howIntro: "While the PRO X 2 is powered on, Logitech G HUB's battery query returns a payload; when powered off, it doesn't. AutoSwitch uses that signal.",
-      howDiagram: "PRO X 2\n   │\n   ▼\nLogitech G HUB\nws://localhost:9010\n   │\n   ├── GET /devices/list\n   │      └── locate the PRO X 2 (extendedDisplayName)\n   │\n   └── GET /battery/<deviceId>/state\n             │\n             ├── payload present -> ON\n             └── payload absent  -> OFF\n                         │\n                         ▼\n             SoundVolumeCommandLine\n                         │\n             /SetDefault <Item ID> all\n                         │\n                         ▼\n                      Windows",
+      howIntro: "Two detection modes, chosen automatically at install: WindowsEndpoint (the endpoint's Active ↔ Unplugged state) and LogitechGHub (G HUB battery payload for PRO X 2).",
+      howDiagram: "Wireless headset\n   │\n   ▼\nWindowsEndpoint (Active ↔ Unplugged)\n        │  (or G HUB ws://localhost:9010 for PRO X 2)\n        ▼\nConnected / Disconnected / Unknown\n        │        │\n   (debounce)  └──► Unknown: do not switch\n        ▼\nSoundVolumeCommandLine\n        │\n/SetDefault <Item ID> all\n        │\n        ▼\n     Windows",
       installTitle: "Installation",
       quickTitle: "One-click install",
       quick1: "Open PowerShell (Windows) and paste this line. It downloads the latest version, verifies its SHA-256 against the published checksum and runs the full installer.",
       quickCmd: 'powershell.exe -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Ayerdi/PROX2-AutoSwitch/main/install.ps1 | iex"',
-      quickNote: "Requires Logitech G HUB installed, open and recognizing the PRO X 2. The wizard will ask you to select the two audio outputs.",
+      quickNote: "The wizard detects the mode automatically. For Logitech PRO X 2 it requires G HUB open; for anything else, Windows just needs to see the headset endpoint.",
       manualTitle: "Manual install (ZIP)",
       manual1: "Download the ZIP of the latest release from GitHub Releases.",
       manual2: "Extract the whole ZIP to a normal folder (don't run from inside the ZIP) and run:",
       manualCmd: 'powershell.exe -ExecutionPolicy Bypass -File ".\\Instalar-PROX2-AutoSwitch.ps1"',
       whatInstallerDoesTitle: "What the installer does",
       id1: "Downloads SoundVolumeCommandLine from NirSoft and verifies its SHA-256 before running it.",
-      id2: "Connects to G HUB (ws://localhost:9010) and locates the PRO X 2.",
+      id2: "Detects the headset: if G HUB reports a PRO X 2 it uses G HUB; otherwise lets you pick headset + fallback from the Windows device list and checks whether Windows reflects the physical state.",
       id3: "Captures the real Windows Item ID of each output and actually tests both switches.",
       id4: "Copies the runtime, creates an invisible autostart entry (wscript.exe) and starts AutoSwitch.",
       id5: "Keeps its config in %LOCALAPPDATA%\\PROX2AutoSwitch\\.",
       idNote: "Windows audio Item IDs are not reused across installs: the installer captures them from your current Windows. Don't copy config.json from another machine.",
       reqsTitle: "Requirements",
       req1: "Windows 10/11 x64",
-      req2: "Logitech G HUB installed, open and recognizing the PRO X 2",
-      req3: "PowerShell 5.1 or newer",
-      req4: "Internet connection during install (downloads svcl.exe from NirSoft)",
-      req5: "No admin rights required for normal operation",
+      req2: "PowerShell 5.1 or newer",
+      req3: "Internet connection during install (downloads svcl.exe from NirSoft)",
+      req4: "For PRO X 2 mode: Logitech G HUB installed, open and recognizing the PRO X 2",
+      req5: "No admin rights required for normal operation (only the enhancements toggle asks for UAC)",
       verifyTitle: "Verify it works",
       verifyCmd: 'powershell.exe -ExecutionPolicy Bypass -File "Verificar-PROX2-AutoSwitch.ps1"',
-      v1: "Power on the PRO X 2.",
+      v1: "Connect / power on the headset.",
       v2: "Wait ~1–2 seconds. Windows should select the headset.",
-      v3: "Power them off.",
+      v3: "Disconnect / power it off.",
       v4: "After two consecutive checks (~3 seconds), Windows should select the alternative output.",
       v5: "The log lives in %LOCALAPPDATA%\\PROX2AutoSwitch\\autoswitch.log.",
       secTitle: "Security notes",

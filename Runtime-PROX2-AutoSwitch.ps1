@@ -5,13 +5,14 @@ $InstallDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ConfigPath = Join-Path $InstallDir "config.json"
 $SvclPath   = Join-Path $InstallDir "svcl.exe"
 $LogPath    = Join-Path $InstallDir "autoswitch.log"
+$HelperPath = Join-Path $InstallDir "Toggle-AudioEnhancements.ps1"
 
 if (-not (Test-Path $ConfigPath)) { exit 10 }
 if (-not (Test-Path $SvclPath))   { exit 11 }
 
 $Config = Get-Content -Raw -Path $ConfigPath | ConvertFrom-Json
 
-# Logica compartida (extraccion de Item ID, debounce, validacion de config).
+# Logica compartida (extraccion de Item ID, debounce, CSV, estados, config).
 $ModulePath = Join-Path $InstallDir "lib\AutoSwitchCore.psm1"
 if (-not (Test-Path $ModulePath)) { exit 12 }
 Import-Module $ModulePath -ErrorAction Stop
@@ -22,6 +23,12 @@ $script:ReceiveTimeoutMs = 5000
 $script:RequestTimeoutMs = 10000
 foreach ($k in 'ConnectTimeoutMs', 'ReceiveTimeoutMs', 'RequestTimeoutMs') {
     if ($Config.$k) { Set-Variable -Scope script -Name $k -Value ([int]$Config.$k) }
+}
+
+$script:DetectionMode = Get-ConfigDetectionMode -Config $Config
+if (-not $script:DetectionMode) {
+    Write-Host "config.json tiene un DetectionMode no valido. Reinstala o corrige el archivo."
+    exit 13
 }
 
 function Write-AutoSwitchLog {
@@ -37,6 +44,22 @@ function Write-AutoSwitchLog {
 
     $line = "[{0}] {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $Message
     Add-Content -Path $LogPath -Value $line -Encoding UTF8
+}
+
+# Migracion de config v1.1.0 -> v1.2.0: se anade DetectionMode si falta.
+if (-not $Config.PSObject.Properties['DetectionMode']) {
+    try {
+        $migrated = [ordered]@{}
+        foreach ($p in $Config.PSObject.Properties) {
+            $migrated[$p.Name] = $p.Value
+        }
+        $migrated['DetectionMode'] = $script:DetectionMode
+        $migrated['Version'] = '1.2.0'
+        $migrated | ConvertTo-Json -Depth 10 |
+            Set-Content -Path $ConfigPath -Encoding UTF8
+        Write-AutoSwitchLog "Config migrada a v1.2.0 (DetectionMode=$script:DetectionMode)."
+    }
+    catch { }
 }
 
 # Impide dos instancias del runtime para el mismo usuario.
@@ -297,82 +320,302 @@ function Set-AudioOutput {
     throw "svcl no consiguio establecer '$Label'. Esperado=$DeviceId Actual=$actual"
 }
 
-Write-AutoSwitchLog "PRO X 2 AutoSwitch iniciado."
+# --- Estado del endpoint de Windows (DetectionMode=WindowsEndpoint) ---
 
-$availabilityLogged = $false
+function Get-SvclCsvExport {
+    # Exporta TODOS los items de sonido en CSV. /scomma "" lista todo.
+    $raw = & $SvclPath /scomma "" 2>&1
+    return ($raw | Out-String).Trim()
+}
 
-try {
-    while ($true) {
+function Get-HeadsetEndpointState {
+    <#
+    .SYNOPSIS
+        Devuelve 'Connected' / 'Disconnected' / 'Unknown' del endpoint del headset.
+    .DESCRIPTION
+        Busca la fila cuyo Item ID coincide con Config.HeadsetId (mas robusto
+        que el nombre) y normaliza su columna State/DeviceState.
+    #>
+    $csv = Get-SvclCsvExport
+    $rows = ConvertFrom-SvclCsv -Text $csv
+
+    $row = $rows |
+        Where-Object {
+            $id = Get-CsvColumn -Row $_ -Names @('Item ID')
+            $null -ne $id -and $id.Trim().ToLowerInvariant() -eq [string]$Config.HeadsetId
+        } |
+        Select-Object -First 1
+
+    if (-not $row) {
+        # El endpoint no aparece en la lista: para Windows significa
+        # que no esta presente -> Disconnected.
+        return 'Disconnected'
+    }
+
+    $state = Get-CsvColumn -Row $row -Names @('State', 'DeviceState')
+    if ($null -eq $state) {
+        return 'Unknown'
+    }
+
+    return Resolve-EndpointState -State $state
+}
+
+# --- Tray icon + Timer (message pump) ---
+
+$script:TrayIcon = $null
+$script:MenuItemAutoSwitch = $null
+$script:MenuItemEnhancements = $null
+$script:AutoSwitchEnabled = $true
+$script:PollTimer = $null
+$script:LastState = $null
+$script:Misses = 0
+$script:AvailabilityLogged = $false
+$script:AudioOpInProgress = $false
+
+function Get-EnhancementsAction {
+    # Lee el estado actual de SysFx del headset y devuelve 'Disable' o 'Enable'.
+    $fx = Get-EndpointFxState -DeviceId ([string]$Config.HeadsetId)
+    if ($null -eq $fx) {
+        return $null
+    }
+    if ($fx) { return 'Enable' }   # ya deshabilitados -> ofrecer habilitar
+    return 'Disable'               # habilitados -> ofrecer deshabilitar
+}
+
+function Update-EnhancementsMenu {
+    if (-not $script:MenuItemEnhancements) { return }
+
+    $action = Get-EnhancementsAction
+    $headsetName = if ($Config.HeadsetName) { [string]$Config.HeadsetName } else { 'este dispositivo' }
+
+    if ($null -eq $action) {
+        $script:MenuItemEnhancements.Text = "Audio Enhancements (no legible)"
+        $script:MenuItemEnhancements.Enabled = $false
+        return
+    }
+
+    $script:MenuItemEnhancements.Enabled = $true
+    if ($action -eq 'Disable') {
+        $script:MenuItemEnhancements.Text = "Disable Audio Enhancements for $headsetName"
+    }
+    else {
+        $script:MenuItemEnhancements.Text = "Enable Audio Enhancements for $headsetName"
+    }
+}
+
+function Invoke-EnhancementsToggle {
+    if (-not (Test-Path $HelperPath)) {
+        Write-AutoSwitchLog "No se encuentra el helper de enhancements: $HelperPath"
+        return
+    }
+
+    $action = Get-EnhancementsAction
+    if ($null -eq $action) {
+        Write-AutoSwitchLog "No se pudo leer el estado de enhancements del headset."
+        return
+    }
+
+    try {
+        Write-AutoSwitchLog ("Solicitando {0} enhancements en {1}..." -f $action, $Config.HeadsetId)
+
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+        $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$HelperPath`" -DeviceId `"$($Config.HeadsetId)`" -Action $action"
+        $psi.UseShellExecute = $true
+        $psi.Verb = "RunAs"
+        $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        $proc.WaitForExit()
+    }
+    catch {
+        # UAC cancelado o error al lanzar.
+        Write-AutoSwitchLog ("Enhancements: cambio cancelado o fallido ({0})." -f $_.Exception.Message)
+        return
+    }
+
+    if ($proc.ExitCode -eq 0) {
+        Write-AutoSwitchLog "Enhancements: cambio verificado por el helper."
+        Update-EnhancementsMenu
+    }
+    else {
+        Write-AutoSwitchLog "Enhancements: el helper no confirmo el cambio (codigo $($proc.ExitCode))."
+    }
+}
+
+function Invoke-AutoSwitchToggle {
+    $script:AutoSwitchEnabled = -not $script:AutoSwitchEnabled
+    if ($script:MenuItemAutoSwitch) {
+        if ($script:AutoSwitchEnabled) {
+            $script:MenuItemAutoSwitch.Text = "AutoSwitch: Enabled"
+            $script:MenuItemAutoSwitch.Checked = $true
+        }
+        else {
+            $script:MenuItemAutoSwitch.Text = "AutoSwitch: Disabled"
+            $script:MenuItemAutoSwitch.Checked = $false
+        }
+    }
+    Write-AutoSwitchLog ("AutoSwitch {0} por el usuario." -f $(if ($script:AutoSwitchEnabled) { 'activado' } else { 'desactivado' }))
+}
+
+function Stop-Runtime {
+    try { $script:TrayIcon.Visible = $false } catch {}
+    try { $script:PollTimer.Stop() } catch {}
+    [System.Windows.Forms.Application]::Exit()
+}
+
+function Invoke-PollOnce {
+    if (-not $script:AutoSwitchEnabled) {
+        return
+    }
+
+    $isOn = $false
+    $known = $false
+
+    if ($script:DetectionMode -eq 'WindowsEndpoint') {
+        try {
+            $endpoint = Get-HeadsetEndpointState
+            if ($endpoint -eq 'Connected') {
+                $isOn = $true
+                $known = $true
+            }
+            elseif ($endpoint -eq 'Disconnected') {
+                $isOn = $false
+                $known = $true
+            }
+            # Unknown -> no tocar nada.
+        }
+        catch {
+            if (-not $script:AvailabilityLogged) {
+                Write-AutoSwitchLog ("WindowsEndpoint no disponible: {0}. Se reintentara." -f $_.Exception.Message)
+                $script:AvailabilityLogged = $true
+            }
+        }
+    }
+    else {
+        # LogitechGHub
         try {
             Connect-GHub
             $batteryPath = Get-ProX2BatteryPath
 
-            if ($availabilityLogged) {
+            if ($script:AvailabilityLogged) {
                 Write-AutoSwitchLog "Conexion con G HUB recuperada."
-            } else {
+            }
+            else {
                 Write-AutoSwitchLog "Conectado con G HUB."
             }
+            $script:AvailabilityLogged = $false
 
-            $availabilityLogged = $false
-            $lastState = $null
-            $misses = 0
-            $script:AudioOpInProgress = $false
-
-            while ($script:Ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
-                $battery = Invoke-GHubGet -Path $batteryPath
-
-                $state = Resolve-HeadsetState `
-                    -PayloadPresent ($null -ne $battery.payload) `
-                    -Misses $misses `
-                    -OffMissThreshold ([int]$Config.OffMissThreshold)
-
-                $misses = $state.Misses
-
-                if ($state.Decision -and
-                    ($null -eq $lastState -or $state.IsOn -ne $lastState)) {
-                    $script:AudioOpInProgress = $true
-                    if ($state.IsOn) {
-                        Set-AudioOutput `
-                            -DeviceId ([string]$Config.HeadsetId) `
-                            -Label ([string]$Config.HeadsetName)
-                    }
-                    else {
-                        Set-AudioOutput `
-                            -DeviceId ([string]$Config.SpeakerId) `
-                            -Label ([string]$Config.SpeakerName)
-                    }
-                    $script:AudioOpInProgress = $false
-
-                    $lastState = $state.IsOn
-                }
-
-                Start-Sleep -Milliseconds ([int]$Config.PollMilliseconds)
-            }
-
-            throw "Se perdio la conexion con G HUB."
+            $battery = Invoke-GHubGet -Path $batteryPath
+            $isOn = $null -ne $battery.payload
+            $known = $true
         }
         catch {
             Close-GHubConnection
-
-            if ($script:AudioOpInProgress) {
-                $script:AudioOpInProgress = $false
-                Write-AutoSwitchLog (
-                    "No se pudo cambiar la salida de audio: {0}. Se reintentara." -f $_.Exception.Message
-                )
-            }
-            elseif (-not $availabilityLogged) {
+            if (-not $script:AvailabilityLogged) {
                 Write-AutoSwitchLog ((
                     "G HUB/AutoSwitch no disponible: {0}. " +
                     "Se reintentara; mientras el estado sea desconocido no se cambia la salida."
                 ) -f $_.Exception.Message)
-                $availabilityLogged = $true
+                $script:AvailabilityLogged = $true
             }
+            return
+        }
+    }
 
-            Start-Sleep -Seconds 5
+    if (-not $known) {
+        return
+    }
+
+    # Debounce: solo se decide OFF tras OffMissThreshold lecturas consecutivas.
+    $state = Resolve-HeadsetState `
+        -PayloadPresent $isOn `
+        -Misses $script:Misses `
+        -OffMissThreshold ([int]$Config.OffMissThreshold)
+
+    $script:Misses = $state.Misses
+
+    if ($state.Decision -and
+        ($null -eq $script:LastState -or $state.IsOn -ne $script:LastState)) {
+        $script:AudioOpInProgress = $true
+        try {
+            if ($state.IsOn) {
+                Set-AudioOutput `
+                    -DeviceId ([string]$Config.HeadsetId) `
+                    -Label ([string]$Config.HeadsetName)
+            }
+            else {
+                Set-AudioOutput `
+                    -DeviceId ([string]$Config.SpeakerId) `
+                    -Label ([string]$Config.SpeakerName)
+            }
+            $script:LastState = $state.IsOn
+        }
+        catch {
+            Write-AutoSwitchLog (
+                "No se pudo cambiar la salida de audio: {0}. Se reintentara." -f $_.Exception.Message
+            )
+        }
+        finally {
+            $script:AudioOpInProgress = $false
         }
     }
 }
+
+function Initialize-TrayAndTimer {
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+
+    $script:TrayIcon = New-Object System.Windows.Forms.NotifyIcon
+    $script:TrayIcon.Icon = [System.Drawing.SystemIcons]::Application
+    $script:TrayIcon.Text = "Audio AutoSwitch"
+    $script:TrayIcon.Visible = $true
+
+    $menu = New-Object System.Windows.Forms.ContextMenuStrip
+
+    $script:MenuItemAutoSwitch = New-Object System.Windows.Forms.ToolStripMenuItem
+    $script:MenuItemAutoSwitch.Text = "AutoSwitch: Enabled"
+    $script:MenuItemAutoSwitch.Checked = $true
+    $script:MenuItemAutoSwitch.Add_Click({ Invoke-AutoSwitchToggle })
+    [void]$menu.Items.Add($script:MenuItemAutoSwitch)
+
+    $script:MenuItemEnhancements = New-Object System.Windows.Forms.ToolStripMenuItem
+    $script:MenuItemEnhancements.Text = "Audio Enhancements..."
+    $script:MenuItemEnhancements.Add_Click({ Invoke-EnhancementsToggle })
+    [void]$menu.Items.Add($script:MenuItemEnhancements)
+
+    $exitItem = New-Object System.Windows.Forms.ToolStripMenuItem
+    $exitItem.Text = "Exit"
+    $exitItem.Add_Click({ Stop-Runtime })
+    [void]$menu.Items.Add($exitItem)
+
+    $script:TrayIcon.ContextMenuStrip = $menu
+
+    Update-EnhancementsMenu
+
+    $script:PollTimer = New-Object System.Windows.Forms.Timer
+    $script:PollTimer.Interval = [int]$Config.PollMilliseconds
+    $script:PollTimer.Add_Tick({ Invoke-PollOnce })
+    $script:PollTimer.Start()
+}
+
+Write-AutoSwitchLog "PRO X 2 AutoSwitch iniciado (modo $script:DetectionMode)."
+
+try {
+    Initialize-TrayAndTimer
+
+    if ($Config.DisableEnhancementsOnStart) {
+        $action = Get-EnhancementsAction
+        if ($action -eq 'Disable') {
+            Write-AutoSwitchLog "DisableEnhancementsOnStart esta activo: deshabilitando enhancements del headset."
+            Invoke-EnhancementsToggle
+        }
+    }
+
+    [System.Windows.Forms.Application]::Run()
+}
 finally {
+    try { $script:TrayIcon.Visible = $false } catch {}
     Close-GHubConnection
     try {
         $mutex.ReleaseMutex()

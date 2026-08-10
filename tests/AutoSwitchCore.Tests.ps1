@@ -88,3 +88,102 @@ Describe 'New-GHubTimeoutToken' {
         $cts.Dispose()
     }
 }
+
+Describe 'ConvertFrom-SvclCsv' {
+    It 'parses header and rows with quoted fields and internal commas' {
+        $csv = @'
+Name,State,Item ID,Default
+"2- Jabra Evolve 65","Active","{0.0.0.00000000}.{ed043b5e-65dc-4ba6-a847-310517ac1849}","Render"
+"Altavoces, AMAZON","Active","{0.0.0.00000000}.{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}","Render"
+'@
+        $rows = ConvertFrom-SvclCsv -Text $csv
+        $rows.Count | Should -Be 2
+        $rows[0].Name | Should -Be '2- Jabra Evolve 65'
+        $rows[0].State | Should -Be 'Active'
+        $rows[0].'Item ID' | Should -Be '{0.0.0.00000000}.{ed043b5e-65dc-4ba6-a847-310517ac1849}'
+        $rows[1].Name | Should -Be 'Altavoces, AMAZON'
+        $rows[1].Default | Should -Be 'Render'
+    }
+
+    It 'returns empty for header-only or empty input' {
+        ConvertFrom-SvclCsv -Text "Name,State" | Should -BeNullOrEmpty
+        ConvertFrom-SvclCsv -Text "" | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Resolve-EndpointState' {
+    It 'maps Active to Connected' {
+        Resolve-EndpointState -State 'Active' | Should -Be 'Connected'
+    }
+
+    It 'maps Unplugged and NotPresent to Disconnected' {
+        Resolve-EndpointState -State 'Unplugged' | Should -Be 'Disconnected'
+        Resolve-EndpointState -State 'NotPresent' | Should -Be 'Disconnected'
+    }
+
+    It 'maps Disabled to Unknown (never switch)' {
+        Resolve-EndpointState -State 'Disabled' | Should -Be 'Unknown'
+    }
+
+    It 'maps any other value to Unknown' {
+        Resolve-EndpointState -State 'Error' | Should -Be 'Unknown'
+        Resolve-EndpointState -State '' | Should -Be 'Unknown'
+        Resolve-EndpointState -State 'Active ' | Should -Be 'Connected'
+    }
+}
+
+Describe 'Resolve-DetectedState' {
+    It 'applies debounce exactly like Resolve-HeadsetState' {
+        $s1 = Resolve-DetectedState -PayloadPresent $false -Misses 0 -OffMissThreshold 2
+        $s1.IsOn | Should -Be $false
+        $s1.Decision | Should -Be $false
+        $s1.Misses | Should -Be 1
+
+        $s2 = Resolve-DetectedState -PayloadPresent $false -Misses 1 -OffMissThreshold 2
+        $s2.Decision | Should -Be $true
+        $s2.Misses | Should -Be 2
+
+        $s3 = Resolve-DetectedState -PayloadPresent $true -Misses 5 -OffMissThreshold 2
+        $s3.IsOn | Should -Be $true
+        $s3.Misses | Should -Be 0
+    }
+}
+
+Describe 'Get-CsvColumn' {
+    It 'finds a column by exact name' {
+        $row = [pscustomobject]@{ Name = 'X'; State = 'Active' }
+        Get-CsvColumn -Row $row -Names @('State') | Should -Be 'Active'
+    }
+
+    It 'falls back to alias names (State vs DeviceState)' {
+        $row = [pscustomobject]@{ Name = 'X'; DeviceState = 'Unplugged' }
+        Get-CsvColumn -Row $row -Names @('State', 'DeviceState') | Should -Be 'Unplugged'
+    }
+
+    It 'returns null when no column matches' {
+        $row = [pscustomobject]@{ Name = 'X' }
+        Get-CsvColumn -Row $row -Names @('State', 'DeviceState') | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Get-ConfigDetectionMode' {
+    It 'returns WindowsEndpoint when set' {
+        $cfg = [pscustomobject]@{ DetectionMode = 'WindowsEndpoint'; HeadsetId = 'x' }
+        Get-ConfigDetectionMode -Config $cfg | Should -Be 'WindowsEndpoint'
+    }
+
+    It 'returns LogitechGHub when set' {
+        $cfg = [pscustomobject]@{ DetectionMode = 'LogitechGHub'; HeadsetId = 'x' }
+        Get-ConfigDetectionMode -Config $cfg | Should -Be 'LogitechGHub'
+    }
+
+    It 'defaults to LogitechGHub for old configs without DetectionMode' {
+        $cfg = [pscustomobject]@{ Version = '1.1.0'; HeadsetId = 'x' }
+        Get-ConfigDetectionMode -Config $cfg | Should -Be 'LogitechGHub'
+    }
+
+    It 'returns null for an invalid value' {
+        $cfg = [pscustomobject]@{ DetectionMode = 'Foo'; HeadsetId = 'x' }
+        Get-ConfigDetectionMode -Config $cfg | Should -BeNullOrEmpty
+    }
+}

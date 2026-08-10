@@ -4,6 +4,24 @@ Todas las versiones notables de este proyecto se documentan aquí.
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Este proyecto se adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-08-10
+
+### Added
+- Modo universal `WindowsEndpoint`: detecta el estado físico del auricular leyendo el estado del endpoint de audio de Windows (`svcl /scomma`, columna `State`/`DeviceState`). Funciona con cualquier auricular inalámbrico cuyo endpoint refleje el estado físico (p. ej. Jabra Evolve 65: `Active` → conectado, `Unplugged`/ausente → desconectado).
+- Campo `DetectionMode` en config (`WindowsEndpoint` | `LogitechGHub`). Compatibilidad hacia atrás: una config sin `DetectionMode` se interpreta como `LogitechGHub` y se migra a v1.2.0 automáticamente en el primer arranque.
+- Icono de bandeja (tray) en el runtime: activar/desactivar AutoSwitch, deshabilitar/habilitar Audio Enhancements del headset configurado y salir. El polling ahora se ejecuta con `System.Windows.Forms.Timer` dentro de `Application.Run()` (sin `while + Start-Sleep`), por lo que la bandeja nunca se bloquea.
+- `Toggle-AudioEnhancements.ps1`: helper elevado (UAC puntual) que escribe `PKEY_AudioEndpoint_Disable_SysFx` en el endpoint del headset vía `IPolicyConfig`, verifica el resultado y actualiza el menú solo si el cambio se confirmó. El runtime nunca se ejecuta elevado.
+- Instalador universal: selecciona headset y fallback desde la lista de dispositivos de Windows y auto-detecta el modo (si Windows refleja `Active ↔ Unplugged` → `WindowsEndpoint`; si no y es Logitech con G HUB → `LogitechGHub`; si no hay método compatible, aborta).
+- `DisableEnhancementsOnStart` y `EnhancementsDeviceId` opcionales en config; el instalador ofrece deshabilitar enhancements del headset tras instalar.
+
+### Changed
+- Config v1.2.0 con `DetectionMode` (el runtime conserva el comportamiento G HUB para instalaciones existentes).
+- El runtime espera `Toggle-AudioEnhancements.ps1` en el directorio de instalación.
+- Verificador muestra `DetectionMode`, estado del endpoint del headset y estado de enhancements.
+
+### Fixed
+- El estado `Unknown` (svcl falla, `Disabled`, valor raro) nunca cambia la salida de audio: protege de mandar al fallback por un fallo puntual de svcl.
+
 ## [1.1.0] - 2026-08-07
 
 ### Added

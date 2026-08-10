@@ -56,6 +56,7 @@ jobs:
             'Runtime-PROX2-AutoSwitch.ps1',
             'Desinstalar-PROX2-AutoSwitch.ps1',
             'Verificar-PROX2-AutoSwitch.ps1',
+            'Toggle-AudioEnhancements.ps1',
             'lib/AutoSwitchCore.psm1'
           )
           $missing = $required | Where-Object { -not (Test-Path $_) }

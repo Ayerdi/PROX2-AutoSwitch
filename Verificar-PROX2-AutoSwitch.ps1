@@ -34,6 +34,12 @@ Show-Test "Configuracion" (Test-Path $ConfigPath) $ConfigPath
 Show-Test "svcl.exe" (Test-Path $SvclPath) $SvclPath
 Show-Test "Inicio automatico invisible" (Test-Path $ShortcutPath) $ShortcutPath
 
+# Funciones del modulo (Get-ConfigDetectionMode, ConvertFrom-SvclCsv, Get-EndpointFxState).
+$ModulePath = Join-Path $InstallDir "lib\AutoSwitchCore.psm1"
+if (Test-Path $ModulePath) {
+    Import-Module $ModulePath -ErrorAction SilentlyContinue
+}
+
 $escaped = [regex]::Escape($MainScript)
 $process = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
     Where-Object { $_.CommandLine -match $escaped } |
@@ -78,9 +84,52 @@ if (Test-Path $ConfigPath) {
         $cfg = Get-Content -Raw $ConfigPath | ConvertFrom-Json
         Write-Host ""
         Write-Host "Configuracion:" -ForegroundColor Yellow
-        Write-Host "  G HUB:       $($cfg.GHubDisplayName)"
-        Write-Host "  Auriculares: $($cfg.HeadsetName)"
-        Write-Host "  Alternativa: $($cfg.SpeakerName)"
+
+        $mode = Get-ConfigDetectionMode -Config $cfg
+        Write-Host "  Modo deteccion: $mode"
+
+        if ($cfg.HeadsetName) { Write-Host "  Auriculares:   $($cfg.HeadsetName)" }
+        if ($cfg.SpeakerName) { Write-Host "  Alternativa:   $($cfg.SpeakerName)" }
+
+        if ($mode -eq 'LogitechGHub' -and $cfg.GHubDisplayName) {
+            Write-Host "  G HUB:         $($cfg.GHubDisplayName)"
+        }
+
+        # Estado actual del endpoint del headset (solo WindowsEndpoint).
+        if ($mode -eq 'WindowsEndpoint' -and $cfg.HeadsetId) {
+            try {
+                $csv = (& $SvclPath /scomma "" 2>&1 | Out-String).Trim()
+                $rows = @(ConvertFrom-SvclCsv -Text $csv)
+                $row = $rows | Where-Object {
+                    $id = Get-CsvColumn -Row $_ -Names @('Item ID')
+                    $null -ne $id -and $id.Trim().ToLowerInvariant() -eq [string]$cfg.HeadsetId
+                } | Select-Object -First 1
+                if ($row) {
+                    $st = Get-CsvColumn -Row $row -Names @('State', 'DeviceState')
+                    Write-Host "  Estado headset: $st"
+                }
+                else {
+                    Write-Host "  Estado headset: (endpoint no presente)" -ForegroundColor DarkGray
+                }
+            }
+            catch {
+                Write-Host "  Estado headset: no legible" -ForegroundColor DarkGray
+            }
+        }
+
+        # Estado de enhancements (lectura sin elevacion).
+        if ($cfg.HeadsetId) {
+            $fx = Get-EndpointFxState -DeviceId ([string]$cfg.HeadsetId)
+            if ($null -eq $fx) {
+                Write-Host "  Enhancements:   no legible" -ForegroundColor DarkGray
+            }
+            elseif ($fx) {
+                Write-Host "  Enhancements:   DESHABILITADOS" -ForegroundColor Green
+            }
+            else {
+                Write-Host "  Enhancements:   habilitados" -ForegroundColor Yellow
+            }
+        }
     }
     catch {
         Write-Warning "config.json no se pudo leer: $($_.Exception.Message)"

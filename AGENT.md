@@ -1,13 +1,28 @@
-# AGENT.md — maintaining PRO X 2 AutoSwitch
+# AGENT.md — maintaining PRO X 2 AutoSwitch (universal)
 
 ## Goal
 
 Maintain a Windows solution that automatically switches the default audio output:
 
-- PRO X 2 physically powered on → headset endpoint.
-- PRO X 2 physically powered off → configured alternative endpoint.
+- Wireless headset physically powered on / connected → headset endpoint.
+- Wireless headset powered off / disconnected → configured alternative endpoint.
 
-The LIGHTSPEED receiver stays connected, so you **cannot** use the presence of the USB/PnP endpoint as an on/off signal.
+The tool is universal: it works with **any headset whose connection state is exposed by Windows**
+(`DetectionMode = WindowsEndpoint`), with a device-specific fallback (`DetectionMode = LogitechGHub`)
+for Logitech headsets such as the PRO X 2 whose endpoint stays `Active` while off.
+
+The LIGHTSPEED receiver stays connected, so you **cannot** use the presence of the USB/PnP endpoint as an on/off signal for the PRO X 2.
+
+## Detection modes (config `DetectionMode`)
+
+- `WindowsEndpoint` (default for new installs): read the headset endpoint `State` from the
+  `svcl.exe /scomma` export and map it:
+  - `Active` → `Connected` → headset.
+  - `Unplugged` / `NotPresent` / row absent → `Disconnected` → fallback.
+  - `Disabled` / `Error` / unparseable → `Unknown` → **never switch**.
+- `LogitechGHub`: existing G HUB WebSocket path (payload present = ON, absent = OFF), debounce applied.
+- Config without `DetectionMode` is treated as `LogitechGHub` (backward compat); the runtime migrates
+  the config file to v1.2.0 on first run, preserving all values.
 
 ## Verified design state
 
@@ -22,6 +37,10 @@ On the original machine, 2026-08-07:
   - returned a payload again when powered back on.
 
 Do not persist `dev000000XX`: it can change. Persist `extendedDisplayName` and resolve the current ID via `/devices/list`.
+
+On 2026-08-10, the universal path was validated with a **Jabra Evolve 65**: the endpoint `Item ID`
+stays the same and only its `State` changes (`Active` ↔ `Unplugged`) with physical power, so no
+vendor software is needed.
 
 ## Design constraints
 
@@ -49,14 +68,14 @@ Do not persist `dev000000XX`: it can change. Persist `extendedDisplayName` and r
    - compare with the target;
    - allow a single short retry.
 
-6. G HUB unavailable:
+6. Unknown state (svcl failure, `Disabled`, garbage):
    - do not guess the state;
    - do not switch the output;
    - write a log entry;
-   - retry every 5 s.
+   - retry next poll.
 
-7. Power-off:
-   - require at least 2 consecutive payload-less responses (`OffMissThreshold=2`) before switching to speakers.
+7. Power-off / disconnect:
+   - require at least 2 consecutive OFF readings (`OffMissThreshold=2`) before switching to the fallback.
 
 8. Avoid windows at login:
    - use `wscript.exe` + `Iniciar-Oculto.vbs`;
@@ -64,6 +83,18 @@ Do not persist `dev000000XX`: it can change. Persist `extendedDisplayName` and r
 
 9. Avoid duplicate instances:
    - per-user mutex.
+
+10. **Runtime loop**: the runtime runs `Application.Run()` (WinForms message pump) with a
+    `System.Windows.Forms.Timer` (Interval = `PollMilliseconds`). Do NOT mix a `while/Start-Sleep`
+    loop with the pump — the tray icon must stay responsive.
+
+11. **Audio Enhancements**: toggled only for the configured `HeadsetId` via a temporary elevated
+    helper (`Toggle-AudioEnhancements.ps1`, `Start-Process -Verb RunAs`) that writes
+    `PKEY_AudioEndpoint_Disable_SysFx` (1da5d803-d492-4edd-8c23-e0c0ffee7f0e, 5) through
+    `IPolicyConfig::SetPropertyValue`, verifies, and exits. The runtime itself is never elevated.
+    The menu label updates only after a verified success (UAC cancel → no visual change).
+    Do **NOT** use `svcl /SetBooleanFxProperty` for this (individual effects only, not the global
+    "Disable audio enhancements" switch).
 
 ## Local G HUB API used
 
@@ -146,7 +177,16 @@ Before changing the hash:
 
 ## Required tests after any change
 
-### Clean install
+### Clean install — universal (WindowsEndpoint)
+
+- No G HUB needed.
+- Pick headset + fallback from the endpoint list.
+- Auto-detect: `Active → Unplugged` observed → `WindowsEndpoint`.
+- IDs are different.
+- Test `fallback -> headset` = OK.
+- Test `headset -> fallback` = OK.
+
+### Clean install — Logitech (LogitechGHub)
 
 - G HUB open.
 - PRO X 2 detected.
@@ -158,30 +198,40 @@ Before changing the hash:
 
 ### Runtime
 
-- Start with headset ON.
-- Start with headset OFF.
+- Start with headset ON / connected.
+- Start with headset OFF / disconnected.
 - ON → OFF.
 - OFF → ON.
-- Close/reopen G HUB.
+- Close/reopen G HUB (Logitech mode).
 - Log out and back in.
 - Confirm no PowerShell window appears.
 - Confirm no duplicate processes.
+- Confirm the tray icon stays responsive while polling (Timer-driven).
 - Confirm reasonable log.
+
+### Enhancements
+
+- Menu shows "Disable for …" when enabled; after verified disable, flips to "Enable for …".
+- Cancel UAC → label unchanged.
+- With the headset OFF and speakers as default, toggling still modifies the headset endpoint (`HeadsetId`).
 
 ### Failure cases
 
-- G HUB closed: do not switch output.
+- G HUB closed (Logitech mode): do not switch output.
 - Endpoint removed/recreated: log SetDefault failure; ask for reinstall/recalibration.
 - NirSoft hash differs: abort install.
-- `/devices/list` does not contain the PRO X 2: show the list and abort; do not invent a `deviceId`.
+- `/devices/list` does not contain the PRO X 2: fall back to WindowsEndpoint path; do not invent a `deviceId`.
+- svcl `State` read fails or is `Disabled`/garbage: `Unknown`, do not switch.
 
 ## Possible future improvements
 
+- Event-driven `IMMNotificationClient` for instant `Active ↔ Unplugged` (needs C# `Add-Type`; the runtime is PS-only today).
 - Subscribe to `/battery/state/changed` to reduce polling.
-- Tray UI to pause/change outputs.
 - Recalibration without reinstalling.
-- Support for other Logitech headsets after validating the battery signal on power-off.
+- More vendor-specific providers (Jabra Direct, BT APIs) for headsets Windows cannot detect.
+- Settings GUI (per-device config).
 - Scheduled task as an alternative to Startup+WScript if VBScript disappears from future Windows versions.
+- Repo rename to "Audio AutoSwitch" (update install.ps1 URLs in README/site).
 
 ## Do not assume
 

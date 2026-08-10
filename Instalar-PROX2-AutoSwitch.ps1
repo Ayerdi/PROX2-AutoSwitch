@@ -11,12 +11,14 @@ $RuntimeSrc   = Join-Path $PackageDir "Runtime-PROX2-AutoSwitch.ps1"
 $UninstallSrc = Join-Path $PackageDir "Desinstalar-PROX2-AutoSwitch.ps1"
 $VerifySrc    = Join-Path $PackageDir "Verificar-PROX2-AutoSwitch.ps1"
 $ModuleSrc    = Join-Path $PackageDir "lib\AutoSwitchCore.psm1"
+$HelperSrc    = Join-Path $PackageDir "Toggle-AudioEnhancements.ps1"
 
 $MainScript   = Join-Path $InstallDir "PROX2AutoSwitch.ps1"
 $ConfigPath   = Join-Path $InstallDir "config.json"
 $SvclPath     = Join-Path $InstallDir "svcl.exe"
 $LauncherVbs  = Join-Path $InstallDir "Iniciar-Oculto.vbs"
 $LogPath      = Join-Path $InstallDir "autoswitch.log"
+$HelperPath   = Join-Path $InstallDir "Toggle-AudioEnhancements.ps1"
 
 $StartupDir   = [Environment]::GetFolderPath("Startup")
 $ShortcutPath = Join-Path $StartupDir "PRO X 2 AutoSwitch.lnk"
@@ -27,7 +29,7 @@ $SvclUrl = "https://www.nirsoft.net/utils/svcl-x64.zip"
 $ExpectedSha256 = "7ba008e9ece8b3eda323ef01711e4647eb7f40b28dc25f98b2ed6a738810bfcd"
 $ZipPath = Join-Path $env:TEMP "svcl-x64.zip"
 
-foreach ($required in @($RuntimeSrc, $UninstallSrc, $VerifySrc, $ModuleSrc)) {
+foreach ($required in @($RuntimeSrc, $UninstallSrc, $VerifySrc, $ModuleSrc, $HelperSrc)) {
     if (-not (Test-Path $required)) {
         throw "Falta un fichero del paquete: $required. Extrae el ZIP completo antes de instalar."
     }
@@ -96,6 +98,7 @@ if (-not (Test-Path $SvclPath)) {
 Copy-Item $RuntimeSrc $MainScript -Force
 Copy-Item $UninstallSrc (Join-Path $InstallDir "Desinstalar-PROX2-AutoSwitch.ps1") -Force
 Copy-Item $VerifySrc (Join-Path $InstallDir "Verificar-PROX2-AutoSwitch.ps1") -Force
+Copy-Item $HelperSrc (Join-Path $InstallDir "Toggle-AudioEnhancements.ps1") -Force
 New-Item -ItemType Directory -Path (Join-Path $InstallDir "lib") -Force | Out-Null
 Copy-Item $ModuleSrc (Join-Path $InstallDir "lib\AutoSwitchCore.psm1") -Force
 
@@ -354,74 +357,180 @@ function Test-SetDefault {
 }
 
 try {
-    Write-Host "[3/7] Comprobando Logitech G HUB..." -ForegroundColor Yellow
+    # --- Deteccion del modo ---
+    # Intentamos primero el modo Logitech G HUB (PRO X 2 y otros Logitech);
+    # si no hay G HUB o no aparece un PRO X 2, pasamos al modo universal
+    # WindowsEndpoint (lista de endpoints de Windows).
+    $DetectionMode = $null
+    $ghubHeadset = $null
+
+    Write-Host "[3/7] Detectando el auricular..." -ForegroundColor Yellow
+
     try {
         Connect-GHub
+        $devices = Invoke-GHubGet -Path "/devices/list"
+        $deviceInfos = @($devices.payload.deviceInfos)
+
+        $candidates = @($deviceInfos | Where-Object {
+            $_.extendedDisplayName -match "PRO\s*X\s*2"
+        })
+
+        if ($candidates.Count -gt 0) {
+            if ($candidates.Count -eq 1) {
+                $ghubHeadset = $candidates[0]
+            }
+            else {
+                Write-Host ""
+                Write-Host "Se encontraron varios candidatos:" -ForegroundColor Yellow
+                for ($i = 0; $i -lt $candidates.Count; $i++) {
+                    Write-Host "[$($i + 1)] $($candidates[$i].extendedDisplayName)"
+                }
+
+                do {
+                    $choice = Read-Host "Elige el numero del PRO X 2"
+                    $parsed = 0
+                    $valid = [int]::TryParse($choice, [ref]$parsed) -and
+                             $parsed -ge 1 -and
+                             $parsed -le $candidates.Count
+                } until ($valid)
+
+                $ghubHeadset = $candidates[$parsed - 1]
+            }
+
+            Write-Host "      G HUB: $($ghubHeadset.extendedDisplayName)" -ForegroundColor Green
+            $DetectionMode = "LogitechGHub"
+        }
     }
     catch {
-        throw "No puedo conectar con Logitech G HUB en localhost:9010. Abre G HUB y vuelve a ejecutar el instalador. Detalle: $($_.Exception.Message)"
+        # G HUB no disponible o sin PRO X 2: se ignora y seguimos con WindowsEndpoint.
+        Write-Host "      G HUB no disponible o sin PRO X 2; probando deteccion universal..." -ForegroundColor DarkGray
     }
 
-    $devices = Invoke-GHubGet -Path "/devices/list"
-    $deviceInfos = @($devices.payload.deviceInfos)
+    if (-not $DetectionMode) {
+        # --- Modo universal: elegir headset y fallback desde la lista de endpoints ---
+        Write-Host "      Usando la lista de dispositivos de audio de Windows..." -ForegroundColor DarkGray
 
-    if ($deviceInfos.Count -eq 0) {
-        throw "G HUB no devolvio dispositivos."
-    }
-
-    $candidates = @($deviceInfos | Where-Object {
-        $_.extendedDisplayName -match "PRO\s*X\s*2"
-    })
-
-    if ($candidates.Count -eq 0) {
-        Write-Host ""
-        Write-Host "G HUB devuelve estos dispositivos:" -ForegroundColor Yellow
-        $deviceInfos |
-            Select-Object id, extendedDisplayName, deviceType |
-            Format-Table -AutoSize
-
-        throw "No se encontro automaticamente un Logitech PRO X 2."
-    }
-
-    if ($candidates.Count -eq 1) {
-        $ghubHeadset = $candidates[0]
-    }
-    else {
-        Write-Host ""
-        Write-Host "Se encontraron varios candidatos:" -ForegroundColor Yellow
-        for ($i = 0; $i -lt $candidates.Count; $i++) {
-            Write-Host "[$($i + 1)] $($candidates[$i].extendedDisplayName)"
+        $csvText = (& $SvclPath /scomma "" 2>&1 | Out-String).Trim()
+        $rows = @(ConvertFrom-SvclCsv -Text $csvText)
+        if ($rows.Count -eq 0) {
+            throw "No se pudo leer la lista de dispositivos de audio de Windows (svcl /scomma)."
         }
 
+        $renderRows = @($rows | Where-Object {
+            $def = Get-CsvColumn -Row $_ -Names @('Default')
+            ($null -eq $def) -or ($def -match 'Render')
+        })
+        if ($renderRows.Count -eq 0) { $renderRows = $rows }
+
+        Write-Host ""
+        Write-Host "Dispositivos de salida detectados:" -ForegroundColor Yellow
+        for ($i = 0; $i -lt $renderRows.Count; $i++) {
+            $name = Get-CsvColumn -Row $renderRows[$i] -Names @('Name', 'DeviceName')
+            Write-Host ("  [{0}] {1}" -f ($i + 1), $name)
+        }
+
+        $chosenHeadset = $null
         do {
-            $choice = Read-Host "Elige el numero del PRO X 2"
+            $choice = Read-Host "Elige el numero del AURICULAR (headset)"
             $parsed = 0
             $valid = [int]::TryParse($choice, [ref]$parsed) -and
                      $parsed -ge 1 -and
-                     $parsed -le $candidates.Count
+                     $parsed -le $renderRows.Count
         } until ($valid)
+        $chosenHeadset = $renderRows[$parsed - 1]
 
-        $ghubHeadset = $candidates[$parsed - 1]
+        $chosenSpeaker = $null
+        do {
+            $choice = Read-Host "Elige el numero del dispositivo de FALLBACK (altavoces)"
+            $parsed = 0
+            $valid = [int]::TryParse($choice, [ref]$parsed) -and
+                     $parsed -ge 1 -and
+                     $parsed -le $renderRows.Count
+        } until ($valid)
+        $chosenSpeaker = $renderRows[$parsed - 1]
+
+        $headsetId = Get-CsvColumn -Row $chosenHeadset -Names @('Item ID')
+        $speakerId = Get-CsvColumn -Row $chosenSpeaker -Names @('Item ID')
+
+        if (-not (Test-ValidAudioConfig -HeadsetId $headsetId -SpeakerId $speakerId)) {
+            throw "Has elegido el mismo dispositivo para headset y fallback. Repite la instalacion."
+        }
+
+        $headsetName = Get-CsvColumn -Row $chosenHeadset -Names @('Name', 'DeviceName')
+        $speakerName = Get-CsvColumn -Row $chosenSpeaker -Names @('Name', 'DeviceName')
+
+        # Auto-detectar si Windows refleja el estado fisico del headset.
+        $before = Get-CsvColumn -Row $chosenHeadset -Names @('State', 'DeviceState')
+        Write-Host ""
+        Write-Host "Apaga el auricular y pulsa ENTER para comprobar si Windows detecta el cambio..." -ForegroundColor Cyan
+        [void](Read-Host)
+        $csvText2 = (& $SvclPath /scomma "" 2>&1 | Out-String).Trim()
+        $rows2 = @(ConvertFrom-SvclCsv -Text $csvText2)
+        $afterRow = $rows2 | Where-Object {
+            $id = Get-CsvColumn -Row $_ -Names @('Item ID')
+            $null -ne $id -and $id -eq $headsetId
+        } | Select-Object -First 1
+        $after = if ($afterRow) { Get-CsvColumn -Row $afterRow -Names @('State', 'DeviceState') } else { $null }
+
+        $beforeState = Resolve-EndpointState -State $before
+        $afterState  = if ($null -eq $after) { 'Disconnected' } else { Resolve-EndpointState -State $after }
+
+        if ($beforeState -eq 'Connected' -and $afterState -eq 'Disconnected') {
+            $DetectionMode = "WindowsEndpoint"
+            Write-Host "      Windows refleja el estado fisico (Active -> Unplugged): modo universal." -ForegroundColor Green
+        }
+        else {
+            Write-Host "      Windows NO refleja el estado fisico de este auricular." -ForegroundColor DarkGray
+            # Fallback a G HUB solo si es un Logitech y G HUB responde.
+            try {
+                Connect-GHub
+                $devices = Invoke-GHubGet -Path "/devices/list"
+                $deviceInfos = @($devices.payload.deviceInfos)
+                $logi = @($deviceInfos | Where-Object { $_.extendedDisplayName -match "Logitech|PRO\s*X" })
+                if ($logi.Count -gt 0) {
+                    $ghubHeadset = $logi[0]
+                    $DetectionMode = "LogitechGHub"
+                    Write-Host "      Detectado Logitech con G HUB: modo G HUB." -ForegroundColor Green
+                }
+            }
+            catch { }
+        }
+
+        if (-not $DetectionMode) {
+            throw "Windows no puede detectar el estado fisico de este auricular y no hay metodo compatible (ni G HUB). No se instalara."
+        }
     }
-
-    Write-Host "      G HUB: $($ghubHeadset.extendedDisplayName)" -ForegroundColor Green
 
     Write-Host ""
     Write-Host "[4/7] Calibrando salidas de Windows..." -ForegroundColor Yellow
     Write-Host "No se guardan IDs antiguos: se capturan los del Windows actual." -ForegroundColor DarkGray
 
-    $headsetOutput = Capture-DefaultOutput @"
+    if ($DetectionMode -eq 'LogitechGHub') {
+        # Flujo PRO X 2 original: captura manual del headset y del fallback.
+        $headsetOutput = Capture-DefaultOutput @"
 PASO A - AURICULARES
 Enciende los PRO X 2 y selecciona manualmente en Windows la salida de los auriculares.
 "@
 
-    $speakerOutput = Capture-DefaultOutput @"
+        $speakerOutput = Capture-DefaultOutput @"
 PASO B - ALTAVOCES
 Selecciona manualmente en Windows la salida que quieres usar cuando los PRO X 2 esten apagados.
 "@
 
-    if (-not (Test-ValidAudioConfig -HeadsetId $headsetOutput.ItemId -SpeakerId $speakerOutput.ItemId)) {
-        throw "Has capturado el mismo dispositivo dos veces. Repite la instalacion."
+        if (-not (Test-ValidAudioConfig -HeadsetId $headsetOutput.ItemId -SpeakerId $speakerOutput.ItemId)) {
+            throw "Has capturado el mismo dispositivo dos veces. Repite la instalacion."
+        }
+    }
+    else {
+        # Modo universal: ya capturamos los IDs de la lista de Windows.
+        $headsetOutput = [pscustomobject]@{
+            Name   = $headsetName
+            ItemId = $headsetId
+        }
+        $speakerOutput = [pscustomobject]@{
+            Name   = $speakerName
+            ItemId = $speakerId
+        }
     }
 
     Write-Host ""
@@ -440,23 +549,60 @@ Selecciona manualmente en Windows la salida que quieres usar cuando los PRO X 2 
     }
 
     $config = [ordered]@{
-        Version           = "1.1.0"
-        GHubDisplayName   = [string]$ghubHeadset.extendedDisplayName
-        GHubPort          = 9010
-        HeadsetName       = [string]$headsetOutput.Name
-        HeadsetId         = [string]$headsetOutput.ItemId
-        SpeakerName       = [string]$speakerOutput.Name
-        SpeakerId         = [string]$speakerOutput.ItemId
-        PollMilliseconds  = 1500
-        OffMissThreshold  = 2
-        ConnectTimeoutMs  = 5000
-        ReceiveTimeoutMs  = 5000
-        RequestTimeoutMs  = 10000
-        InstalledAt       = (Get-Date).ToString("o")
+        Version                = "1.2.0"
+        DetectionMode          = $DetectionMode
+        HeadsetName            = [string]$headsetOutput.Name
+        HeadsetId              = [string]$headsetOutput.ItemId
+        SpeakerName            = [string]$speakerOutput.Name
+        SpeakerId              = [string]$speakerOutput.ItemId
+        PollMilliseconds       = 1500
+        OffMissThreshold       = 2
+        ConnectTimeoutMs       = 5000
+        ReceiveTimeoutMs       = 5000
+        RequestTimeoutMs       = 10000
+        DisableEnhancementsOnStart = $false
+        InstalledAt            = (Get-Date).ToString("o")
+    }
+
+    # Campos especificos del modo G HUB.
+    if ($DetectionMode -eq 'LogitechGHub' -and $ghubHeadset) {
+        $config['GHubDisplayName'] = [string]$ghubHeadset.extendedDisplayName
+        $config['GHubPort']        = 9010
+    }
+
+    # Preguntar si se quieren deshabilitar los audio enhancements del headset
+    # ahora (requiere elevacion puntual via UAC).
+    Write-Host ""
+    Write-Host "Audio Enhancements de Windows:" -ForegroundColor Yellow
+    $enhChoice = Read-Host "Quieres deshabilitar los audio enhancements del headset? (s/N)"
+    if ($enhChoice -match '^(s|si|sí|y|yes)$') {
+        $config['EnhancementsDeviceId'] = [string]$headsetOutput.ItemId
+        $config['DisableEnhancementsOnStart'] = $true
+        Write-Host "      Se deshabilitaran (puede aparecer una ventana de UAC)..." -ForegroundColor DarkGray
     }
 
     $config | ConvertTo-Json -Depth 10 |
         Set-Content -Path $ConfigPath -Encoding UTF8
+
+    if ($config['DisableEnhancementsOnStart']) {
+        try {
+            $helper = Join-Path $InstallDir "Toggle-AudioEnhancements.ps1"
+            $proc = Start-Process -FilePath (Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe") `
+                -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$helper`" -DeviceId `"$($config['HeadsetId'])`" -Action Disable" `
+                -Verb RunAs -WindowStyle Hidden -PassThru -ErrorAction Stop
+            $proc.WaitForExit()
+            if ($proc.ExitCode -eq 0) {
+                Write-Host "      Enhancements deshabilitados y verificados." -ForegroundColor Green
+            }
+            else {
+                Write-Warning "El helper de enhancements no confirmo el cambio (codigo $($proc.ExitCode))."
+            }
+        }
+        catch {
+            Write-Warning "No se pudieron deshabilitar los enhancements ahora (UAC cancelado o error): $($_.Exception.Message)"
+            Write-Host "      Puedes hacerlo luego desde el icono de bandeja." -ForegroundColor DarkGray
+        }
+    }
 
     Write-Host "[6/7] Configurando inicio invisible..." -ForegroundColor Yellow
 
