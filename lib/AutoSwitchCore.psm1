@@ -96,28 +96,19 @@ function ConvertFrom-SvclCsv {
         return @()
     }
 
-    $header = ConvertFrom-CsvLine -Line $lines[0]
-    if ($header.Count -eq 0) {
+    # ConvertFrom-Csv nativo de PowerShell: maneja comillas, headers con
+    # espacios y campos con comas de forma fiable.
+    try {
+        $csv = $lines -join [Environment]::NewLine
+        $objects = @($csv | ConvertFrom-Csv)
+        if ($objects.Count -eq 0) {
+            return @()
+        }
+        return ,$objects
+    }
+    catch {
         return @()
     }
-
-    $result = @()
-    for ($i = 1; $i -lt $lines.Count; $i++) {
-        $fields = ConvertFrom-CsvLine -Line $lines[$i]
-        $row = [ordered]@{}
-        for ($c = 0; $c -lt $header.Count; $c++) {
-            $name = $header[$c].Trim()
-            if ($name -eq "") { continue }
-            $value = ""
-            if ($c -lt $fields.Count) { $value = $fields[$c] }
-            $row[$name] = $value
-        }
-        if ($row.Count -gt 0) {
-            $result += [pscustomobject]$row
-        }
-    }
-
-    return ,$result
 }
 
 function ConvertFrom-CsvLine {
@@ -295,22 +286,30 @@ function Get-SvclRenderDevice {
         return @()
     }
 
-    # Acceso directo a propiedades: $_.Type / $_.Direction (no llevan espacios).
-    # Si la columna no existe en una version vieja de svcl, el valor es $null
-    # y la fila no pasa el filtro; el fallback de abajo cubre ese caso.
-    $hasTypeColumn = @($rows | Where-Object { $null -ne $_.PSObject.Properties['Type'] }).Count -gt 0
+    # Filtro con bucle explicito (sin Where-Object con $_): mas predecible.
+    $render = [System.Collections.Generic.List[object]]::new()
+    $hasTypeColumn = $false
 
-    $render = @($rows | Where-Object {
-        ($_.Type    -ieq 'Device') -and
-        ($_.Direction -ieq 'Render')
-    })
+    foreach ($row in $rows) {
+        $typeProp = $row.PSObject.Properties['Type']
+        $dirProp  = $row.PSObject.Properties['Direction']
+
+        if ($null -ne $typeProp) { $hasTypeColumn = $true }
+
+        $typeVal = if ($null -ne $typeProp) { [string]$typeProp.Value } else { '' }
+        $dirVal  = if ($null -ne $dirProp)  { [string]$dirProp.Value }  else { '' }
+
+        if ($typeVal -ieq 'Device' -and $dirVal -ieq 'Render') {
+            $render.Add($row)
+        }
+    }
 
     if ($render.Count -eq 0 -and -not $hasTypeColumn) {
         # Fallback defensivo SOLO si la version de svcl no expone Type/Direction.
-        return $rows
+        return ,@($rows)
     }
 
-    return ,$render
+    return ,$render.ToArray()
 }
 
 function Get-EndpointFxState {
