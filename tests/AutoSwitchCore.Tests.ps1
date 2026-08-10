@@ -107,9 +107,9 @@ Describe 'ConvertFrom-SvclCsv' {
     }
 }
 
-Describe 'Get-SvclRenderDevices' {
+Describe 'Get-SvclRenderDevice' {
     It 'filters to Device + Direction=Render only' {
-        $devices = Get-SvclRenderDevices -CsvText $script:FixtureCsv
+        $devices = Get-SvclRenderDevice -CsvText $script:FixtureCsv
         $devices.Count | Should -Be 3
         # No debe incluir el microfono (Capture) ni la app (Application).
         ($devices | Where-Object { $_.Name -match 'Microphone' }).Count | Should -Be 0
@@ -117,7 +117,7 @@ Describe 'Get-SvclRenderDevices' {
     }
 
     It 'keeps the real column names' {
-        $devices = Get-SvclRenderDevices -CsvText $script:FixtureCsv
+        $devices = Get-SvclRenderDevice -CsvText $script:FixtureCsv
         $devices[0].PSObject.Properties.Name -contains 'Device State' | Should -Be $true
         $devices[0].PSObject.Properties.Name -contains 'Item ID' | Should -Be $true
         $devices[0].PSObject.Properties.Name -contains 'Type' | Should -Be $true
@@ -125,7 +125,7 @@ Describe 'Get-SvclRenderDevices' {
     }
 
     It 'returns empty for empty input' {
-        Get-SvclRenderDevices -CsvText "" | Should -BeNullOrEmpty
+        Get-SvclRenderDevice -CsvText "" | Should -BeNullOrEmpty
     }
 }
 

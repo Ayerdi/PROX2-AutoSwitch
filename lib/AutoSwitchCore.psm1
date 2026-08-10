@@ -270,7 +270,7 @@ function New-GHubTimeoutToken {
     return $cts
 }
 
-function Get-SvclRenderDevices {
+function Get-SvclRenderDevice {
     <#
     .SYNOPSIS
         Filtra la exportacion /scomma de svcl.exe a solo endpoints de salida
@@ -459,4 +459,4 @@ function Get-ConfigDetectionMode {
     return $null
 }
 
-Export-ModuleMember -Function Get-RenderItemIdFromText, Resolve-HeadsetState, Test-ValidAudioConfig, New-GHubTimeoutToken, ConvertFrom-SvclCsv, ConvertFrom-CsvLine, Get-CsvColumn, Resolve-EndpointState, Resolve-DetectedState, Get-SvclRenderDevices, Get-EndpointFxState, Get-ConfigDetectionMode
+Export-ModuleMember -Function Get-RenderItemIdFromText, Resolve-HeadsetState, Test-ValidAudioConfig, New-GHubTimeoutToken, ConvertFrom-SvclCsv, ConvertFrom-CsvLine, Get-CsvColumn, Resolve-EndpointState, Resolve-DetectedState, Get-SvclRenderDevice, Get-EndpointFxState, Get-ConfigDetectionMode

@@ -341,7 +341,7 @@ try {
         throw "No se pudo leer la lista de dispositivos de audio de Windows (svcl /scomma)."
     }
 
-    $renderRows = @(Get-SvclRenderDevices -CsvText $csvText)
+    $renderRows = @(Get-SvclRenderDevice -CsvText $csvText)
     if ($renderRows.Count -eq 0) {
         throw "No se encontraron dispositivos de salida (render) en la lista de Windows."
     }
