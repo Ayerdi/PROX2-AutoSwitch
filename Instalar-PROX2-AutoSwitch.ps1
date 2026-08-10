@@ -586,9 +586,8 @@ Selecciona manualmente en Windows la salida que quieres usar cuando los PRO X 2 
 
     if ($config['DisableEnhancementsOnStart']) {
         try {
-            $helper = Join-Path $InstallDir "Toggle-AudioEnhancements.ps1"
             $proc = Start-Process -FilePath (Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe") `
-                -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$helper`" -DeviceId `"$($config['HeadsetId'])`" -Action Disable" `
+                -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$HelperPath`" -DeviceId `"$($config['HeadsetId'])`" -Action Disable" `
                 -Verb RunAs -WindowStyle Hidden -PassThru -ErrorAction Stop
             $proc.WaitForExit()
             if ($proc.ExitCode -eq 0) {
