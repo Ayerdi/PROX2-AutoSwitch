@@ -184,7 +184,10 @@ function Get-CsvColumn {
     )
 
     foreach ($name in $Names) {
-        $p = $Row.PSObject.Properties[$name]
+        $p = $null
+        foreach ($prop in $Row.PSObject.Properties) {
+            if ($prop.Name -ieq $name) { $p = $prop; break }
+        }
         if ($null -ne $p) {
             return [string]$p.Value
         }
@@ -282,7 +285,9 @@ function Get-SvclRenderDevice {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)][string]$CsvText
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$CsvText
     )
 
     $rows = @(ConvertFrom-SvclCsv -Text $CsvText)
