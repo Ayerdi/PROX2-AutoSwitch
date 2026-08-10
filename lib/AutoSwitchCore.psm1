@@ -286,7 +286,7 @@ function Get-EndpointFxState {
     try {
         $typeName = 'AutoSwitch.IPropertyStore'
 
-        if (-not ('AutoSwitch.IPropertyStore' -as [type])) {
+        if (-not ($typeName -as [type])) {
             Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;

@@ -5,7 +5,7 @@ $InstallDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ConfigPath = Join-Path $InstallDir "config.json"
 $SvclPath   = Join-Path $InstallDir "svcl.exe"
 $LogPath    = Join-Path $InstallDir "autoswitch.log"
-$HelperPath = Join-Path $InstallDir "Toggle-AudioEnhancements.ps1"
+$script:HelperPath = Join-Path $InstallDir "Toggle-AudioEnhancements.ps1"
 
 if (-not (Test-Path $ConfigPath)) { exit 10 }
 if (-not (Test-Path $SvclPath))   { exit 11 }
