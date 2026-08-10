@@ -542,6 +542,7 @@ function Start-WorkerLoop {
     $lastState = $null
     $misses = 0
     $availabilityLogged = $false
+    $script:WorkerBatteryPath = $null
 
     Write-AutoSwitchLog "Worker iniciado (modo $script:DetectionMode)."
 
@@ -570,25 +571,30 @@ function Start-WorkerLoop {
             }
         }
         else {
-            # LogitechGHub
+            # LogitechGHub: conexion PERSISTENTE. Se conecta una vez, se resuelve
+            # el batteryPath una vez, y solo se reconecta (re-resolviendo el
+            # deviceId, que puede cambiar tras una reconexion) si algo falla.
             try {
-                Connect-GHub
-                $batteryPath = Get-ProX2BatteryPath
+                if (-not $script:WorkerBatteryPath) {
+                    Connect-GHub
+                    $script:WorkerBatteryPath = Get-ProX2BatteryPath
 
-                if ($availabilityLogged) {
-                    Write-AutoSwitchLog "Conexion con G HUB recuperada."
+                    if ($availabilityLogged) {
+                        Write-AutoSwitchLog "Conexion con G HUB recuperada."
+                    }
+                    else {
+                        Write-AutoSwitchLog "Conectado con G HUB."
+                    }
+                    $availabilityLogged = $false
                 }
-                else {
-                    Write-AutoSwitchLog "Conectado con G HUB."
-                }
-                $availabilityLogged = $false
 
-                $battery = Invoke-GHubGet -Path $batteryPath
+                $battery = Invoke-GHubGet -Path $script:WorkerBatteryPath
                 $isOn = $null -ne $battery.payload
                 $known = $true
             }
             catch {
                 Close-GHubConnection
+                $script:WorkerBatteryPath = $null
                 if (-not $availabilityLogged) {
                     Write-AutoSwitchLog ((
                         "G HUB/AutoSwitch no disponible: {0}. " +

@@ -358,7 +358,10 @@ function Get-EndpointFxState {
     )
 
     try {
-        $typeName = 'AutoSwitch.CoreAudio'
+        # Sentinel = un tipo que SI se declara en el Add-Type. 'AutoSwitch.CoreAudio'
+        # no existe y haria que el Add-Type se reintentara en cada llamada, fallando
+        # en la segunda (los tipos ya existen) y devolviendo $null.
+        $typeName = 'AutoSwitch.IMMDeviceEnumerator'
 
         if (-not ($typeName -as [type])) {
             Add-Type -TypeDefinition @'
