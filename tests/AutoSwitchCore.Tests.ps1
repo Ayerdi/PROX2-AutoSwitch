@@ -127,7 +127,7 @@ Describe 'Resolve-EndpointState' {
 
     It 'maps any other value to Unknown' {
         Resolve-EndpointState -State 'Error' | Should -Be 'Unknown'
-        Resolve-EndpointState -State '' | Should -Be 'Unknown'
+        Resolve-EndpointState -State ' ' | Should -Be 'Unknown'
         Resolve-EndpointState -State 'Active ' | Should -Be 'Connected'
     }
 }

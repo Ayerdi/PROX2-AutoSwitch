@@ -81,7 +81,9 @@ function ConvertFrom-SvclCsv {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)][string]$Text
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$Text
     )
 
     $lines = @(
