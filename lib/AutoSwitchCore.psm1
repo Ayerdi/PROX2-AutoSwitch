@@ -295,19 +295,18 @@ function Get-SvclRenderDevice {
         return @()
     }
 
+    # Acceso directo a propiedades: $_.Type / $_.Direction (no llevan espacios).
+    # Si la columna no existe en una version vieja de svcl, el valor es $null
+    # y la fila no pasa el filtro; el fallback de abajo cubre ese caso.
+    $hasTypeColumn = @($rows | Where-Object { $null -ne $_.PSObject.Properties['Type'] }).Count -gt 0
+
     $render = @($rows | Where-Object {
-        $type = Get-CsvColumn -Row $_ -Names @('Type')
-        $dir  = Get-CsvColumn -Row $_ -Names @('Direction')
-
-        $typeOk = $null -eq $type -or $type -match 'Device'
-        $dirOk  = $null -ne $dir -and $dir -match 'Render'
-
-        $typeOk -and $dirOk
+        ($_.Type    -ieq 'Device') -and
+        ($_.Direction -ieq 'Render')
     })
 
-    if ($render.Count -eq 0) {
-        # Fallback defensivo: si la version de svcl no tiene Type/Direction,
-        # devolver todas las filas (el llamador filtra por Item ID de todos modos).
+    if ($render.Count -eq 0 -and -not $hasTypeColumn) {
+        # Fallback defensivo SOLO si la version de svcl no expone Type/Direction.
         return $rows
     }
 
