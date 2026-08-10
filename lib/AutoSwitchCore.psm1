@@ -270,15 +270,56 @@ function New-GHubTimeoutToken {
     return $cts
 }
 
+function Get-SvclRenderDevices {
+    <#
+    .SYNOPSIS
+        Filtra la exportacion /scomma de svcl.exe a solo endpoints de salida
+        (render) reales: Type='Device' y Direction='Render' (o 'Render' como
+        subcadena, segun la version de svcl).
+    .DESCRIPTION
+        Devuelve [pscustomobject[]] con las filas filtradas. Cada fila conserva
+        las columnas reales de svcl: Name, Type, Direction, Device State, Item ID.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$CsvText
+    )
+
+    $rows = @(ConvertFrom-SvclCsv -Text $CsvText)
+    if ($rows.Count -eq 0) {
+        return @()
+    }
+
+    $render = @($rows | Where-Object {
+        $type = Get-CsvColumn -Row $_ -Names @('Type')
+        $dir  = Get-CsvColumn -Row $_ -Names @('Direction')
+
+        $typeOk = $null -eq $type -or $type -match 'Device'
+        $dirOk  = $null -ne $dir -and $dir -match 'Render'
+
+        $typeOk -and $dirOk
+    })
+
+    if ($render.Count -eq 0) {
+        # Fallback defensivo: si la version de svcl no tiene Type/Direction,
+        # devolver todas las filas (el llamador filtra por Item ID de todos modos).
+        return $rows
+    }
+
+    return ,$render
+}
+
 function Get-EndpointFxState {
     <#
     .SYNOPSIS
         Lee el estado actual de PKEY_AudioEndpoint_Disable_SysFx de un endpoint
         sin necesitar administrador.
     .DESCRIPTION
-        Devuelve $true si los enhancements estan deshabilitados (SysFx=1),
-        $false si estan habilitados (SysFx=0 o valor ausente) y $null si no se
-        pudo leer (endpoint inexistente o error). Nunca lanza.
+        Implementa IMMDeviceEnumerator/IMMDevice/IPropertyStore con las IID/GUID
+        reales de Windows Core Audio. Devuelve $true si los enhancements estan
+        deshabilitados (SysFx=1), $false si estan habilitados (SysFx=0 o valor
+        ausente) y $null si no se pudo leer (endpoint inexistente o error).
+        Nunca lanza.
     #>
     [CmdletBinding()]
     param(
@@ -286,26 +327,15 @@ function Get-EndpointFxState {
     )
 
     try {
-        $typeName = 'AutoSwitch.IPropertyStore'
+        $typeName = 'AutoSwitch.CoreAudio'
 
         if (-not ($typeName -as [type])) {
             Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
-using System.Runtime.InteropServices.ComTypes;
 
 namespace AutoSwitch
 {
-    [ComImport, Guid("886d8eeb-8cf2-4446-8d02-cdba1dbdcf99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    public interface IPropertyStore
-    {
-        int GetCount(out uint cProps);
-        int GetAt(uint iProp, out PROPERTYKEY pkey);
-        int GetValue(ref PROPERTYKEY key, out PROPVARIANT pv);
-        int SetValue(ref PROPERTYKEY key, ref PROPVARIANT pv);
-        int Commit();
-    }
-
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
     public struct PROPERTYKEY
     {
@@ -322,45 +352,72 @@ namespace AutoSwitch
     }
 
     [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
-    public class MMDeviceEnumerator { }
+    public class MMDeviceEnumeratorComObject { }
+
+    [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"),
+     InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IMMDeviceEnumerator
+    {
+        int EnumAudioEndpoints(int dataFlow, int dwStateMask, out IntPtr devices);
+        int GetDefaultAudioEndpoint(int dataFlow, int role, out IntPtr device);
+        int GetDevice(string pwstrId, out IntPtr device);
+        int RegisterEndpointNotificationCallback(IntPtr client);
+        int UnregisterEndpointNotificationCallback(IntPtr client);
+    }
+
+    [ComImport, Guid("D666063F-1587-4E43-81F1-B948E807363F"),
+     InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IMMDevice
+    {
+        int Activate(ref Guid iid, int dwClsCtx, IntPtr pActivationParams, out IntPtr pInterface);
+        int OpenPropertyStore(int stgmAccess, out IntPtr ppProperties);
+        int GetId(out IntPtr ppstrId);
+        int GetState(out int pdwState);
+    }
+
+    [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"),
+     InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IPropertyStore
+    {
+        int GetCount(out uint cProps);
+        int GetAt(uint iProp, out PROPERTYKEY pkey);
+        int GetValue(ref PROPERTYKEY key, out PROPVARIANT pv);
+        int SetValue(ref PROPERTYKEY key, ref PROPVARIANT pv);
+        int Commit();
+    }
 }
 '@ -ErrorAction Stop
         }
 
-        $enumerator = New-Object AutoSwitch.MMDeviceEnumerator
-        $enumeratorType = $enumerator.GetType()
-        $getDevice = $enumeratorType.GetMethod('GetDevice')
+        $enumerator = New-Object AutoSwitch.MMDeviceEnumeratorComObject
+        $enumeratorIface = [AutoSwitch.IMMDeviceEnumerator]$enumerator
 
-        if ($null -eq $getDevice) {
-            $ifaceType = [type]::GetTypeFromProgID('AutoSwitch.IMMDeviceEnumerator')
-            if ($null -ne $ifaceType) {
-                $getDevice = $ifaceType.GetMethod('GetDevice')
-            }
-        }
-
-        if ($null -eq $getDevice) {
+        $devicePtr = [IntPtr]::Zero
+        $hr = $enumeratorIface.GetDevice($DeviceId, [ref]$devicePtr)
+        if ($hr -ne 0 -or $devicePtr -eq [IntPtr]::Zero) {
             return $null
         }
 
-        $device = $getDevice.Invoke($enumerator, @([object]$DeviceId))
-        if ($null -eq $device) {
+        $device = [System.Runtime.InteropServices.Marshal]::GetObjectForIUnknown($devicePtr)
+        $deviceIface = [AutoSwitch.IMMDevice]$device
+
+        $storePtr = [IntPtr]::Zero
+        $hrStore = $deviceIface.OpenPropertyStore(0, [ref]$storePtr)  # STGM_READ = 0
+        if ($hrStore -ne 0 -or $storePtr -eq [IntPtr]::Zero) {
             return $null
         }
 
-        $store = $device.GetType().InvokeMember(
-            'OpenPropertyStore',
-            [System.Reflection.BindingFlags]'InvokeMethod',
-            $null, $device, @([object]([System.Runtime.InteropServices.ComTypes.STGM]::STGM_READ))
-        )
+        $store = [System.Runtime.InteropServices.Marshal]::GetObjectForIUnknown($storePtr)
+        $storeIface = [AutoSwitch.IPropertyStore]$store
 
         $pkey = New-Object AutoSwitch.PROPERTYKEY
         $pkey.fmtid = [guid]'1da5d803-d492-4edd-8c23-e0c0ffee7f0e'
         $pkey.pid = 5
 
         $pv = New-Object AutoSwitch.PROPVARIANT
-        $hr = $store.GetValue([ref]$pkey, [ref]$pv)
+        $hrGet = $storeIface.GetValue([ref]$pkey, [ref]$pv)
 
-        if ($hr -ne 0) {
+        if ($hrGet -ne 0) {
             return $false
         }
 
@@ -402,4 +459,4 @@ function Get-ConfigDetectionMode {
     return $null
 }
 
-Export-ModuleMember -Function Get-RenderItemIdFromText, Resolve-HeadsetState, Test-ValidAudioConfig, New-GHubTimeoutToken, ConvertFrom-SvclCsv, ConvertFrom-CsvLine, Get-CsvColumn, Resolve-EndpointState, Resolve-DetectedState, Get-EndpointFxState, Get-ConfigDetectionMode
+Export-ModuleMember -Function Get-RenderItemIdFromText, Resolve-HeadsetState, Test-ValidAudioConfig, New-GHubTimeoutToken, ConvertFrom-SvclCsv, ConvertFrom-CsvLine, Get-CsvColumn, Resolve-EndpointState, Resolve-DetectedState, Get-SvclRenderDevices, Get-EndpointFxState, Get-ConfigDetectionMode

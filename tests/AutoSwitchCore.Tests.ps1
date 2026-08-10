@@ -3,6 +3,7 @@
 
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot '..\lib\AutoSwitchCore.psm1') -Force
+    $script:FixtureCsv = Get-Content -Raw (Join-Path $PSScriptRoot 'fixtures\svcl-export.csv')
 }
 
 Describe 'Get-RenderItemIdFromText' {
@@ -90,24 +91,41 @@ Describe 'New-GHubTimeoutToken' {
 }
 
 Describe 'ConvertFrom-SvclCsv' {
-    It 'parses header and rows with quoted fields and internal commas' {
-        $csv = @'
-Name,State,Item ID,Default
-"2- Jabra Evolve 65","Active","{0.0.0.00000000}.{ed043b5e-65dc-4ba6-a847-310517ac1849}","Render"
-"Altavoces, AMAZON","Active","{0.0.0.00000000}.{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}","Render"
-'@
-        $rows = ConvertFrom-SvclCsv -Text $csv
-        $rows.Count | Should -Be 2
+    It 'parses a real svcl export (quoted fields, real column names)' {
+        $rows = ConvertFrom-SvclCsv -Text $script:FixtureCsv
+        $rows.Count | Should -Be 5
         $rows[0].Name | Should -Be '2- Jabra Evolve 65'
-        $rows[0].State | Should -Be 'Active'
+        $rows[0].Type | Should -Be 'Device'
+        $rows[0].Direction | Should -Be 'Render'
+        $rows[0].'Device State' | Should -Be 'Active'
         $rows[0].'Item ID' | Should -Be '{0.0.0.00000000}.{ed043b5e-65dc-4ba6-a847-310517ac1849}'
-        $rows[1].Name | Should -Be 'Altavoces, AMAZON'
-        $rows[1].Default | Should -Be 'Render'
     }
 
     It 'returns empty for header-only or empty input' {
-        ConvertFrom-SvclCsv -Text "Name,State" | Should -BeNullOrEmpty
+        ConvertFrom-SvclCsv -Text "Name,Type,Direction" | Should -BeNullOrEmpty
         ConvertFrom-SvclCsv -Text "" | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Get-SvclRenderDevices' {
+    It 'filters to Device + Direction=Render only' {
+        $devices = Get-SvclRenderDevices -CsvText $script:FixtureCsv
+        $devices.Count | Should -Be 3
+        # No debe incluir el microfono (Capture) ni la app (Application).
+        ($devices | Where-Object { $_.Name -match 'Microphone' }).Count | Should -Be 0
+        ($devices | Where-Object { $_.Name -match 'Application' }).Count | Should -Be 0
+    }
+
+    It 'keeps the real column names' {
+        $devices = Get-SvclRenderDevices -CsvText $script:FixtureCsv
+        $devices[0].PSObject.Properties.Name -contains 'Device State' | Should -Be $true
+        $devices[0].PSObject.Properties.Name -contains 'Item ID' | Should -Be $true
+        $devices[0].PSObject.Properties.Name -contains 'Type' | Should -Be $true
+        $devices[0].PSObject.Properties.Name -contains 'Direction' | Should -Be $true
+    }
+
+    It 'returns empty for empty input' {
+        Get-SvclRenderDevices -CsvText "" | Should -BeNullOrEmpty
     }
 }
 

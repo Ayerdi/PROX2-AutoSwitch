@@ -298,35 +298,6 @@ function Get-DefaultRenderItemId {
     return $id
 }
 
-function Get-DefaultRenderName {
-    $text = Get-DefaultColumn "Name"
-    $lines = @($text -split "(`r`n|`n|`r)") |
-        ForEach-Object { $_.Trim() } |
-        Where-Object { $_ -ne "" }
-
-    if ($lines.Count -eq 0) { return "<desconocido>" }
-    return $lines[-1]
-}
-
-function Capture-DefaultOutput {
-    param([Parameter(Mandatory=$true)][string]$PromptText)
-
-    Write-Host ""
-    Write-Host $PromptText -ForegroundColor Cyan
-    [void](Read-Host "Cuando sea la salida predeterminada de Windows, pulsa ENTER")
-
-    $name = Get-DefaultRenderName
-    $id   = Get-DefaultRenderItemId
-
-    Write-Host "      Capturado: $name" -ForegroundColor Green
-    Write-Host "      Item ID:   $id" -ForegroundColor DarkGray
-
-    return [pscustomobject]@{
-        Name   = $name
-        ItemId = $id
-    }
-}
-
 function Test-SetDefault {
     param(
         [Parameter(Mandatory=$true)][string]$Id,
@@ -357,180 +328,160 @@ function Test-SetDefault {
 }
 
 try {
-    # --- Deteccion del modo ---
-    # Intentamos primero el modo Logitech G HUB (PRO X 2 y otros Logitech);
-    # si no hay G HUB o no aparece un PRO X 2, pasamos al modo universal
-    # WindowsEndpoint (lista de endpoints de Windows).
+    # --- Paso 3: seleccionar headset y fallback SIEMPRE primero ---
+    # No se decide el DetectionMode hasta haber elegido el dispositivo y
+    # validado que Windows (o G HUB) puede observar su estado fisico.
     $DetectionMode = $null
     $ghubHeadset = $null
 
-    Write-Host "[3/7] Detectando el auricular..." -ForegroundColor Yellow
+    Write-Host "[3/7] Seleccionando auricular y fallback..." -ForegroundColor Yellow
 
-    try {
-        Connect-GHub
-        $devices = Invoke-GHubGet -Path "/devices/list"
-        $deviceInfos = @($devices.payload.deviceInfos)
-
-        $candidates = @($deviceInfos | Where-Object {
-            $_.extendedDisplayName -match "PRO\s*X\s*2"
-        })
-
-        if ($candidates.Count -gt 0) {
-            if ($candidates.Count -eq 1) {
-                $ghubHeadset = $candidates[0]
-            }
-            else {
-                Write-Host ""
-                Write-Host "Se encontraron varios candidatos:" -ForegroundColor Yellow
-                for ($i = 0; $i -lt $candidates.Count; $i++) {
-                    Write-Host "[$($i + 1)] $($candidates[$i].extendedDisplayName)"
-                }
-
-                do {
-                    $choice = Read-Host "Elige el numero del PRO X 2"
-                    $parsed = 0
-                    $valid = [int]::TryParse($choice, [ref]$parsed) -and
-                             $parsed -ge 1 -and
-                             $parsed -le $candidates.Count
-                } until ($valid)
-
-                $ghubHeadset = $candidates[$parsed - 1]
-            }
-
-            Write-Host "      G HUB: $($ghubHeadset.extendedDisplayName)" -ForegroundColor Green
-            $DetectionMode = "LogitechGHub"
-        }
-    }
-    catch {
-        # G HUB no disponible o sin PRO X 2: se ignora y seguimos con WindowsEndpoint.
-        Write-Host "      G HUB no disponible o sin PRO X 2; probando deteccion universal..." -ForegroundColor DarkGray
+    $csvText = (& $SvclPath /scomma "" 2>&1 | Out-String).Trim()
+    if ([string]::IsNullOrWhiteSpace($csvText)) {
+        throw "No se pudo leer la lista de dispositivos de audio de Windows (svcl /scomma)."
     }
 
-    if (-not $DetectionMode) {
-        # --- Modo universal: elegir headset y fallback desde la lista de endpoints ---
-        Write-Host "      Usando la lista de dispositivos de audio de Windows..." -ForegroundColor DarkGray
+    $renderRows = @(Get-SvclRenderDevices -CsvText $csvText)
+    if ($renderRows.Count -eq 0) {
+        throw "No se encontraron dispositivos de salida (render) en la lista de Windows."
+    }
 
-        $csvText = (& $SvclPath /scomma "" 2>&1 | Out-String).Trim()
-        $rows = @(ConvertFrom-SvclCsv -Text $csvText)
-        if ($rows.Count -eq 0) {
-            throw "No se pudo leer la lista de dispositivos de audio de Windows (svcl /scomma)."
-        }
+    Write-Host ""
+    Write-Host "Dispositivos de salida detectados:" -ForegroundColor Yellow
+    for ($i = 0; $i -lt $renderRows.Count; $i++) {
+        $name = Get-CsvColumn -Row $renderRows[$i] -Names @('Name')
+        $state = Get-CsvColumn -Row $renderRows[$i] -Names @('Device State')
+        Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $name, $state)
+    }
 
-        $renderRows = @($rows | Where-Object {
-            $def = Get-CsvColumn -Row $_ -Names @('Default')
-            ($null -eq $def) -or ($def -match 'Render')
-        })
-        if ($renderRows.Count -eq 0) { $renderRows = $rows }
+    $chosenHeadset = $null
+    do {
+        $choice = Read-Host "Elige el numero del AURICULAR (headset)"
+        $parsed = 0
+        $valid = [int]::TryParse($choice, [ref]$parsed) -and
+                 $parsed -ge 1 -and
+                 $parsed -le $renderRows.Count
+    } until ($valid)
+    $chosenHeadset = $renderRows[$parsed - 1]
 
-        Write-Host ""
-        Write-Host "Dispositivos de salida detectados:" -ForegroundColor Yellow
-        for ($i = 0; $i -lt $renderRows.Count; $i++) {
-            $name = Get-CsvColumn -Row $renderRows[$i] -Names @('Name', 'DeviceName')
-            Write-Host ("  [{0}] {1}" -f ($i + 1), $name)
-        }
+    $chosenSpeaker = $null
+    do {
+        $choice = Read-Host "Elige el numero del dispositivo de FALLBACK (altavoces)"
+        $parsed = 0
+        $valid = [int]::TryParse($choice, [ref]$parsed) -and
+                 $parsed -ge 1 -and
+                 $parsed -le $renderRows.Count
+    } until ($valid)
+    $chosenSpeaker = $renderRows[$parsed - 1]
 
-        $chosenHeadset = $null
-        do {
-            $choice = Read-Host "Elige el numero del AURICULAR (headset)"
-            $parsed = 0
-            $valid = [int]::TryParse($choice, [ref]$parsed) -and
-                     $parsed -ge 1 -and
-                     $parsed -le $renderRows.Count
-        } until ($valid)
-        $chosenHeadset = $renderRows[$parsed - 1]
+    $headsetId   = Get-CsvColumn -Row $chosenHeadset -Names @('Item ID')
+    $speakerId   = Get-CsvColumn -Row $chosenSpeaker -Names @('Item ID')
+    $headsetName = Get-CsvColumn -Row $chosenHeadset -Names @('Name')
+    $speakerName = Get-CsvColumn -Row $chosenSpeaker -Names @('Name')
 
-        $chosenSpeaker = $null
-        do {
-            $choice = Read-Host "Elige el numero del dispositivo de FALLBACK (altavoces)"
-            $parsed = 0
-            $valid = [int]::TryParse($choice, [ref]$parsed) -and
-                     $parsed -ge 1 -and
-                     $parsed -le $renderRows.Count
-        } until ($valid)
-        $chosenSpeaker = $renderRows[$parsed - 1]
+    if (-not (Test-ValidAudioConfig -HeadsetId $headsetId -SpeakerId $speakerId)) {
+        throw "Has elegido el mismo dispositivo para headset y fallback. Repite la instalacion."
+    }
 
-        $headsetId = Get-CsvColumn -Row $chosenHeadset -Names @('Item ID')
-        $speakerId = Get-CsvColumn -Row $chosenSpeaker -Names @('Item ID')
+    Write-Host "      Headset:  $headsetName" -ForegroundColor Green
+    Write-Host "      Fallback: $speakerName" -ForegroundColor Green
 
-        if (-not (Test-ValidAudioConfig -HeadsetId $headsetId -SpeakerId $speakerId)) {
-            throw "Has elegido el mismo dispositivo para headset y fallback. Repite la instalacion."
-        }
+    # --- Validar el ciclo ON -> OFF -> ON del headset ---
+    # El headset debe estar ENCENDIDO ahora. Pedimos OFF y luego ON, y
+    # comprobamos que Windows refleja el cambio en cada transicion.
+    Write-Host ""
+    Write-Host "Comprobando que Windows refleja el estado fisico del headset..." -ForegroundColor Cyan
+    Write-Host "      El headset debe estar ENCENDIDO ahora. Comprobando..." -ForegroundColor DarkGray
 
-        $headsetName = Get-CsvColumn -Row $chosenHeadset -Names @('Name', 'DeviceName')
-        $speakerName = Get-CsvColumn -Row $chosenSpeaker -Names @('Name', 'DeviceName')
-
-        # Auto-detectar si Windows refleja el estado fisico del headset.
-        $before = Get-CsvColumn -Row $chosenHeadset -Names @('State', 'DeviceState')
-        Write-Host ""
-        Write-Host "Apaga el auricular y pulsa ENTER para comprobar si Windows detecta el cambio..." -ForegroundColor Cyan
-        [void](Read-Host)
-        $csvText2 = (& $SvclPath /scomma "" 2>&1 | Out-String).Trim()
-        $rows2 = @(ConvertFrom-SvclCsv -Text $csvText2)
-        $afterRow = $rows2 | Where-Object {
+    function Get-HeadsetCsvState {
+        param([string]$ItemId)
+        $txt = (& $SvclPath /scomma "" 2>&1 | Out-String).Trim()
+        $r = @(ConvertFrom-SvclCsv -Text $txt) | Where-Object {
             $id = Get-CsvColumn -Row $_ -Names @('Item ID')
-            $null -ne $id -and $id -eq $headsetId
+            $null -ne $id -and $id.Trim().ToLowerInvariant() -eq $ItemId.ToLowerInvariant()
         } | Select-Object -First 1
-        $after = if ($afterRow) { Get-CsvColumn -Row $afterRow -Names @('State', 'DeviceState') } else { $null }
+        if (-not $r) { return 'Disconnected' }
+        $st = Get-CsvColumn -Row $r -Names @('Device State')
+        if ($null -eq $st) { return 'Unknown' }
+        return Resolve-EndpointState -State $st
+    }
 
-        $beforeState = Resolve-EndpointState -State $before
-        $afterState  = if ($null -eq $after) { 'Disconnected' } else { Resolve-EndpointState -State $after }
+    Start-Sleep -Milliseconds 500
+    $sOn1 = Get-HeadsetCsvState -ItemId $headsetId
 
-        if ($beforeState -eq 'Connected' -and $afterState -eq 'Disconnected') {
-            $DetectionMode = "WindowsEndpoint"
-            Write-Host "      Windows refleja el estado fisico (Active -> Unplugged): modo universal." -ForegroundColor Green
-        }
-        else {
-            Write-Host "      Windows NO refleja el estado fisico de este auricular." -ForegroundColor DarkGray
-            # Fallback a G HUB solo si es un Logitech y G HUB responde.
+    Write-Host ""
+    Write-Host "Apaga el headset y pulsa ENTER..." -ForegroundColor Cyan
+    [void](Read-Host)
+    Start-Sleep -Milliseconds 800
+    $sOff = Get-HeadsetCsvState -ItemId $headsetId
+
+    Write-Host "Vuelve a encender el headset y pulsa ENTER..." -ForegroundColor Cyan
+    [void](Read-Host)
+    Start-Sleep -Milliseconds 800
+    $sOn2 = Get-HeadsetCsvState -ItemId $headsetId
+
+    Write-Host ""
+    Write-Host ("      Estado ON (inicial):  {0}" -f $sOn1) -ForegroundColor DarkGray
+    Write-Host ("      Estado OFF:           {0}" -f $sOff) -ForegroundColor DarkGray
+    Write-Host ("      Estado ON (final):    {0}" -f $sOn2) -ForegroundColor DarkGray
+
+    if ($sOn1 -eq 'Connected' -and $sOff -eq 'Disconnected' -and $sOn2 -eq 'Connected') {
+        $DetectionMode = "WindowsEndpoint"
+        Write-Host "      Windows refleja el ciclo ON->OFF->ON: modo universal." -ForegroundColor Green
+    }
+    else {
+        Write-Host "      Windows NO refleja el ciclo fisico de este auricular." -ForegroundColor DarkGray
+
+        # Fallback a G HUB: SOLO si el usuario confirma que el headset elegido
+        # es un Logitech PRO X 2 listado por G HUB. Nunca se asocia $logi[0].
+        Write-Host ""
+        $conf = Read-Host "Este auricular es un Logitech PRO X 2 detectado por G HUB? (s/N)"
+        if ($conf -match '^(s|si|sí|y|yes)$') {
             try {
                 Connect-GHub
                 $devices = Invoke-GHubGet -Path "/devices/list"
                 $deviceInfos = @($devices.payload.deviceInfos)
-                $logi = @($deviceInfos | Where-Object { $_.extendedDisplayName -match "Logitech|PRO\s*X" })
-                if ($logi.Count -gt 0) {
-                    $ghubHeadset = $logi[0]
-                    $DetectionMode = "LogitechGHub"
-                    Write-Host "      Detectado Logitech con G HUB: modo G HUB." -ForegroundColor Green
-                }
-            }
-            catch { }
-        }
 
-        if (-not $DetectionMode) {
-            throw "Windows no puede detectar el estado fisico de este auricular y no hay metodo compatible (ni G HUB). No se instalara."
+                Write-Host ""
+                Write-Host "Dispositivos que reporta G HUB:" -ForegroundColor Yellow
+                for ($i = 0; $i -lt $deviceInfos.Count; $i++) {
+                    Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $deviceInfos[$i].extendedDisplayName, $deviceInfos[$i].id)
+                }
+
+                $ghubChoice = 0
+                do {
+                    $gc = Read-Host "Elige el numero del PRO X 2 que corresponde a '$headsetName'"
+                    $ghubValid = [int]::TryParse($gc, [ref]$ghubChoice) -and
+                                 $ghubChoice -ge 1 -and
+                                 $ghubChoice -le $deviceInfos.Count
+                } until ($ghubValid)
+
+                $ghubHeadset = $deviceInfos[$ghubChoice - 1]
+                $DetectionMode = "LogitechGHub"
+                Write-Host "      G HUB: $($ghubHeadset.extendedDisplayName)" -ForegroundColor Green
+            }
+            catch {
+                Write-Host "      No se pudo conectar con G HUB. Detalle: $($_.Exception.Message)" -ForegroundColor Red
+            }
         }
+    }
+
+    if (-not $DetectionMode) {
+        throw "Windows no puede detectar el estado fisico de este auricular y no hay metodo compatible (ni G HUB confirmado). No se instalara."
     }
 
     Write-Host ""
     Write-Host "[4/7] Calibrando salidas de Windows..." -ForegroundColor Yellow
     Write-Host "No se guardan IDs antiguos: se capturan los del Windows actual." -ForegroundColor DarkGray
 
-    if ($DetectionMode -eq 'LogitechGHub') {
-        # Flujo PRO X 2 original: captura manual del headset y del fallback.
-        $headsetOutput = Capture-DefaultOutput @"
-PASO A - AURICULARES
-Enciende los PRO X 2 y selecciona manualmente en Windows la salida de los auriculares.
-"@
-
-        $speakerOutput = Capture-DefaultOutput @"
-PASO B - ALTAVOCES
-Selecciona manualmente en Windows la salida que quieres usar cuando los PRO X 2 esten apagados.
-"@
-
-        if (-not (Test-ValidAudioConfig -HeadsetId $headsetOutput.ItemId -SpeakerId $speakerOutput.ItemId)) {
-            throw "Has capturado el mismo dispositivo dos veces. Repite la instalacion."
-        }
+    # En ambos modos ya tenemos los IDs capturados de la lista de Windows.
+    $headsetOutput = [pscustomobject]@{
+        Name   = $headsetName
+        ItemId = $headsetId
     }
-    else {
-        # Modo universal: ya capturamos los IDs de la lista de Windows.
-        $headsetOutput = [pscustomobject]@{
-            Name   = $headsetName
-            ItemId = $headsetId
-        }
-        $speakerOutput = [pscustomobject]@{
-            Name   = $speakerName
-            ItemId = $speakerId
-        }
+    $speakerOutput = [pscustomobject]@{
+        Name   = $speakerName
+        ItemId = $speakerId
     }
 
     Write-Host ""

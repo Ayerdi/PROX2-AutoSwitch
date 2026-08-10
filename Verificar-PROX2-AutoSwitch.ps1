@@ -105,7 +105,7 @@ if (Test-Path $ConfigPath) {
                     $null -ne $id -and $id.Trim().ToLowerInvariant() -eq [string]$cfg.HeadsetId
                 } | Select-Object -First 1
                 if ($row) {
-                    $st = Get-CsvColumn -Row $row -Names @('State', 'DeviceState')
+                    $st = Get-CsvColumn -Row $row -Names @('Device State', 'State')
                     Write-Host "  Estado headset: $st"
                 }
                 else {

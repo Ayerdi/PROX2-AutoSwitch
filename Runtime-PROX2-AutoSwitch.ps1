@@ -63,11 +63,16 @@ if (-not $Config.PSObject.Properties['DetectionMode']) {
 }
 
 # Impide dos instancias del runtime para el mismo usuario.
+# El worker (AUTOSWITCH_WORKER=1) es un proceso hijo legitimo del runtime y
+# no debe competir por el mutex.
 $createdNew = $false
-$mutexName = "Local\PROX2AutoSwitch_" + [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-$mutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$createdNew)
-if (-not $createdNew) {
-    exit 0
+$mutex = $null
+if ($env:AUTOSWITCH_WORKER -ne '1') {
+    $mutexName = "Local\PROX2AutoSwitch_" + [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $mutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$createdNew)
+    if (-not $createdNew) {
+        exit 0
+    }
 }
 
 $script:Ws  = $null
@@ -352,7 +357,7 @@ function Get-HeadsetEndpointState {
         return 'Disconnected'
     }
 
-    $state = Get-CsvColumn -Row $row -Names @('State', 'DeviceState')
+    $state = Get-CsvColumn -Row $row -Names @('Device State', 'State')
     if ($null -eq $state) {
         return 'Unknown'
     }
@@ -360,17 +365,15 @@ function Get-HeadsetEndpointState {
     return Resolve-EndpointState -State $state
 }
 
-# --- Tray icon + Timer (message pump) ---
+# --- Tray icon + Timer (message pump) + worker process ---
+# El polling corre en un proceso PowerShell aparte (worker) para no bloquear
+# el hilo de WinForms. El Timer del hilo de UI solo marca estado; el worker
+# hace polling con su propio guard anti-concurrencia (no lanza un poll si el
+# anterior sigue en marcha).
 
 $script:TrayIcon = $null
 $script:MenuItemAutoSwitch = $null
 $script:MenuItemEnhancements = $null
-$script:AutoSwitchEnabled = $true
-$script:PollTimer = $null
-$script:LastState = $null
-$script:Misses = 0
-$script:AvailabilityLogged = $false
-$script:AudioOpInProgress = $false
 
 function Get-EnhancementsAction {
     # Lee el estado actual de SysFx del headset y devuelve 'Disable' o 'Enable'.
@@ -444,9 +447,10 @@ function Invoke-EnhancementsToggle {
 }
 
 function Invoke-AutoSwitchToggle {
-    $script:AutoSwitchEnabled = -not $script:AutoSwitchEnabled
+    $newState = -not (Test-Path $script:EnabledFlag)
+    Set-AutoSwitchEnabledState -Enabled $newState
     if ($script:MenuItemAutoSwitch) {
-        if ($script:AutoSwitchEnabled) {
+        if ($newState) {
             $script:MenuItemAutoSwitch.Text = "AutoSwitch: Enabled"
             $script:MenuItemAutoSwitch.Checked = $true
         }
@@ -455,111 +459,171 @@ function Invoke-AutoSwitchToggle {
             $script:MenuItemAutoSwitch.Checked = $false
         }
     }
-    Write-AutoSwitchLog ("AutoSwitch {0} por el usuario." -f $(if ($script:AutoSwitchEnabled) { 'activado' } else { 'desactivado' }))
+    Write-AutoSwitchLog ("AutoSwitch {0} por el usuario." -f $(if ($newState) { 'activado' } else { 'desactivado' }))
 }
 
 function Stop-Runtime {
+    Stop-Worker
     try { $script:TrayIcon.Visible = $false } catch {}
-    try { $script:PollTimer.Stop() } catch {}
     [System.Windows.Forms.Application]::Exit()
 }
 
-function Invoke-PollOnce {
-    if (-not $script:AutoSwitchEnabled) {
-        return
-    }
+# --- Worker: proceso separado que hace el polling ---
+# El polling (svcl/G HUB, Set-AudioOutput) corre en un proceso PowerShell
+# aparte (AUTOSWITCH_WORKER=1) para no bloquear el hilo de WinForms (tray).
+# La comunicacion con el proceso principal es por archivos de control:
+#   $ControlDir\enabled.flag   - el tray lo crea/borra (AutoSwitch ON/OFF)
+#   $ControlDir\stop.flag      - el tray lo crea al salir
+# El propio worker tiene un guard anti-polls-concurrentes: si una lectura
+# (p. ej. un /SetDefault lento o G HUB en timeout) se pasa del intervalo,
+# no se lanza otro poll hasta que termine.
 
-    $isOn = $false
-    $known = $false
+$script:ControlDir = Join-Path $InstallDir "control"
+$script:EnabledFlag = Join-Path $script:ControlDir "enabled.flag"
+$script:StopFlag    = Join-Path $script:ControlDir "stop.flag"
+$script:WorkerProcess = $null
 
-    if ($script:DetectionMode -eq 'WindowsEndpoint') {
-        try {
-            $endpoint = Get-HeadsetEndpointState
-            if ($endpoint -eq 'Connected') {
-                $isOn = $true
-                $known = $true
-            }
-            elseif ($endpoint -eq 'Disconnected') {
-                $isOn = $false
-                $known = $true
-            }
-            # Unknown -> no tocar nada.
-        }
-        catch {
-            if (-not $script:AvailabilityLogged) {
-                Write-AutoSwitchLog ("WindowsEndpoint no disponible: {0}. Se reintentara." -f $_.Exception.Message)
-                $script:AvailabilityLogged = $true
-            }
-        }
+function Start-Worker {
+    # Lanza el mismo script en modo worker (env var). Asi el worker tiene
+    # acceso a TODAS las funciones (G HUB, audio, endpoint) sin duplicarlas.
+    try { New-Item -ItemType Directory -Path $script:ControlDir -Force | Out-Null } catch {}
+
+    # Estado inicial: AutoSwitch ON.
+    try { New-Item -ItemType File -Path $script:EnabledFlag -Force | Out-Null } catch {}
+    try { Remove-Item $script:StopFlag -Force -ErrorAction SilentlyContinue } catch {}
+
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+    $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$($MyInvocation.MyCommand.Path)`""
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.EnvironmentVariables['AUTOSWITCH_WORKER'] = '1'
+    $psi.EnvironmentVariables['AUTOSWITCH_CONTROL'] = $script:ControlDir
+
+    $script:WorkerProcess = [System.Diagnostics.Process]::Start($psi)
+}
+
+function Set-AutoSwitchEnabledState {
+    param([bool]$Enabled)
+    if ($Enabled) {
+        try { New-Item -ItemType File -Path $script:EnabledFlag -Force | Out-Null } catch {}
     }
     else {
-        # LogitechGHub
-        try {
-            Connect-GHub
-            $batteryPath = Get-ProX2BatteryPath
+        try { Remove-Item $script:EnabledFlag -Force -ErrorAction SilentlyContinue } catch {}
+    }
+}
 
-            if ($script:AvailabilityLogged) {
-                Write-AutoSwitchLog "Conexion con G HUB recuperada."
+function Stop-Worker {
+    try { New-Item -ItemType File -Path $script:StopFlag -Force | Out-Null } catch {}
+    try {
+        if ($script:WorkerProcess -and -not $script:WorkerProcess.HasExited) {
+            $script:WorkerProcess.WaitForExit(5000) | Out-Null
+            if (-not $script:WorkerProcess.HasExited) {
+                $script:WorkerProcess.Kill()
             }
-            else {
-                Write-AutoSwitchLog "Conectado con G HUB."
-            }
-            $script:AvailabilityLogged = $false
+            $script:WorkerProcess.Dispose()
+        }
+    } catch {}
+}
 
-            $battery = Invoke-GHubGet -Path $batteryPath
-            $isOn = $null -ne $battery.payload
-            $known = $true
+# --- Bucle del worker (solo cuando AUTOSWITCH_WORKER=1) ---
+# Se ejecuta al final del script; las funciones G HUB/audio/endpoint ya estan
+# definidas arriba porque es el mismo script.
+
+function Start-WorkerLoop {
+    $controlDir = $env:AUTOSWITCH_CONTROL
+    $enabledFlag = Join-Path $controlDir "enabled.flag"
+    $stopFlag    = Join-Path $controlDir "stop.flag"
+
+    $lastState = $null
+    $misses = 0
+    $availabilityLogged = $false
+
+    Write-AutoSwitchLog "Worker iniciado (modo $script:DetectionMode)."
+
+    while (-not (Test-Path $stopFlag)) {
+        $enabled = Test-Path $enabledFlag
+        if (-not $enabled) {
+            Start-Sleep -Milliseconds ([int]$Config.PollMilliseconds)
+            continue
         }
-        catch {
-            Close-GHubConnection
-            if (-not $script:AvailabilityLogged) {
-                Write-AutoSwitchLog ((
-                    "G HUB/AutoSwitch no disponible: {0}. " +
-                    "Se reintentara; mientras el estado sea desconocido no se cambia la salida."
-                ) -f $_.Exception.Message)
-                $script:AvailabilityLogged = $true
+
+        $isOn = $false
+        $known = $false
+
+        if ($script:DetectionMode -eq 'WindowsEndpoint') {
+            try {
+                $endpoint = Get-HeadsetEndpointState
+                if ($endpoint -eq 'Connected') { $isOn = $true; $known = $true }
+                elseif ($endpoint -eq 'Disconnected') { $isOn = $false; $known = $true }
+                # Unknown -> no tocar nada.
             }
-            return
+            catch {
+                if (-not $availabilityLogged) {
+                    Write-AutoSwitchLog ("WindowsEndpoint no disponible: {0}. Se reintentara." -f $_.Exception.Message)
+                    $availabilityLogged = $true
+                }
+            }
         }
+        else {
+            # LogitechGHub
+            try {
+                Connect-GHub
+                $batteryPath = Get-ProX2BatteryPath
+
+                if ($availabilityLogged) {
+                    Write-AutoSwitchLog "Conexion con G HUB recuperada."
+                }
+                else {
+                    Write-AutoSwitchLog "Conectado con G HUB."
+                }
+                $availabilityLogged = $false
+
+                $battery = Invoke-GHubGet -Path $batteryPath
+                $isOn = $null -ne $battery.payload
+                $known = $true
+            }
+            catch {
+                Close-GHubConnection
+                if (-not $availabilityLogged) {
+                    Write-AutoSwitchLog ((
+                        "G HUB/AutoSwitch no disponible: {0}. " +
+                        "Se reintentara; mientras el estado sea desconocido no se cambia la salida."
+                    ) -f $_.Exception.Message)
+                    $availabilityLogged = $true
+                }
+            }
+        }
+
+        if ($known) {
+            # Debounce: solo se decide OFF tras OffMissThreshold lecturas.
+            $state = Resolve-HeadsetState `
+                -PayloadPresent $isOn `
+                -Misses $misses `
+                -OffMissThreshold ([int]$Config.OffMissThreshold)
+            $misses = $state.Misses
+
+            if ($state.Decision -and ($null -eq $lastState -or $state.IsOn -ne $lastState)) {
+                try {
+                    if ($state.IsOn) {
+                        Set-AudioOutput -DeviceId ([string]$Config.HeadsetId) -Label ([string]$Config.HeadsetName)
+                    }
+                    else {
+                        Set-AudioOutput -DeviceId ([string]$Config.SpeakerId) -Label ([string]$Config.SpeakerName)
+                    }
+                    $lastState = $state.IsOn
+                }
+                catch {
+                    Write-AutoSwitchLog ("No se pudo cambiar la salida de audio: {0}. Se reintentara." -f $_.Exception.Message)
+                }
+            }
+        }
+
+        Start-Sleep -Milliseconds ([int]$Config.PollMilliseconds)
     }
 
-    if (-not $known) {
-        return
-    }
-
-    # Debounce: solo se decide OFF tras OffMissThreshold lecturas consecutivas.
-    $state = Resolve-HeadsetState `
-        -PayloadPresent $isOn `
-        -Misses $script:Misses `
-        -OffMissThreshold ([int]$Config.OffMissThreshold)
-
-    $script:Misses = $state.Misses
-
-    if ($state.Decision -and
-        ($null -eq $script:LastState -or $state.IsOn -ne $script:LastState)) {
-        $script:AudioOpInProgress = $true
-        try {
-            if ($state.IsOn) {
-                Set-AudioOutput `
-                    -DeviceId ([string]$Config.HeadsetId) `
-                    -Label ([string]$Config.HeadsetName)
-            }
-            else {
-                Set-AudioOutput `
-                    -DeviceId ([string]$Config.SpeakerId) `
-                    -Label ([string]$Config.SpeakerName)
-            }
-            $script:LastState = $state.IsOn
-        }
-        catch {
-            Write-AutoSwitchLog (
-                "No se pudo cambiar la salida de audio: {0}. Se reintentara." -f $_.Exception.Message
-            )
-        }
-        finally {
-            $script:AudioOpInProgress = $false
-        }
-    }
+    Close-GHubConnection
+    Write-AutoSwitchLog "Worker detenido."
 }
 
 function Initialize-TrayAndTimer {
@@ -592,16 +656,18 @@ function Initialize-TrayAndTimer {
     $script:TrayIcon.ContextMenuStrip = $menu
 
     Update-EnhancementsMenu
-
-    $script:PollTimer = New-Object System.Windows.Forms.Timer
-    $script:PollTimer.Interval = [int]$Config.PollMilliseconds
-    $script:PollTimer.Add_Tick({ Invoke-PollOnce })
-    $script:PollTimer.Start()
 }
 
 Write-AutoSwitchLog "PRO X 2 AutoSwitch iniciado (modo $script:DetectionMode)."
 
+if ($env:AUTOSWITCH_WORKER -eq '1') {
+    # Modo worker: solo el bucle de polling. No toca la bandeja.
+    Start-WorkerLoop
+    exit 0
+}
+
 try {
+    Start-Worker
     Initialize-TrayAndTimer
 
     if ($Config.DisableEnhancementsOnStart) {
@@ -615,6 +681,7 @@ try {
     [System.Windows.Forms.Application]::Run()
 }
 finally {
+    Stop-Worker
     try { $script:TrayIcon.Visible = $false } catch {}
     Close-GHubConnection
     try {
