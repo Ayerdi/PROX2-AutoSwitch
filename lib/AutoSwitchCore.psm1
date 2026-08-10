@@ -269,10 +269,11 @@ function Test-SvclExportValid {
     .SYNOPSIS
         True si el texto es una exportacion /scomma de svcl valida.
     .DESCRIPTION
-        Un export valido tiene una cabecera reconocible (al menos la columna
-        'Name' o 'Item ID') y al menos una fila de datos. Un texto vacio o
-        basura no es un export valido -> el llamador debe tratarlo como
-        'Unknown' (no como 'Disconnected').
+        Un export valido debe tener al menos una fila de datos cuya cabecera
+        exponga las columnas que el runtime necesita: 'Item ID' y
+        'Device State'. Un texto vacio, basura o con cabecera incompleta no es
+        un export valido -> el llamador debe tratarlo como 'Unknown' (no como
+        'Disconnected').
     #>
     [CmdletBinding()]
     param(
@@ -290,12 +291,12 @@ function Test-SvclExportValid {
         return $false
     }
 
-    # La primera fila debe exponer al menos Name o Item ID (cabecera de svcl).
+    # La primera fila debe exponer la cabecera minima que usa el runtime.
     $first = $rows[0]
-    $hasName = $null -ne $first.PSObject.Properties['Name']
-    $hasId   = $null -ne $first.PSObject.Properties['Item ID']
+    $hasItemId    = $null -ne $first.PSObject.Properties['Item ID']
+    $hasDeviceState = $null -ne $first.PSObject.Properties['Device State']
 
-    return ($hasName -or $hasId)
+    return ($hasItemId -and $hasDeviceState)
 }
 
 function Get-SvclRenderDevice {

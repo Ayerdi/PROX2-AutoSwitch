@@ -149,6 +149,12 @@ Describe 'Test-SvclExportValid' {
     It 'rejects a header-only export (no data rows)' {
         Test-SvclExportValid -CsvText "Name,Type,Direction" | Should -Be $false
     }
+
+    It 'rejects an export missing Item ID or Device State' {
+        # Cabecera con filas pero sin las columnas que el runtime necesita.
+        Test-SvclExportValid -CsvText "Name,Volume`nSpeakers,50" | Should -Be $false
+        Test-SvclExportValid -CsvText "Name,Item ID`nSpeakers,{0.0.0.00000000}.{GUID}" | Should -Be $false
+    }
 }
 
 Describe 'Get-SvclDeviceLabel' {
