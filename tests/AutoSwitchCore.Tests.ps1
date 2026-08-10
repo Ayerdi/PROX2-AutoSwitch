@@ -91,10 +91,11 @@ Describe 'New-GHubTimeoutToken' {
 }
 
 Describe 'ConvertFrom-SvclCsv' {
-    It 'parses a real svcl export (quoted fields, real column names)' {
+    It 'parses a real svcl export (Name and Device Name are separate)' {
         $rows = ConvertFrom-SvclCsv -Text $script:FixtureCsv
         $rows.Count | Should -Be 5
-        $rows[0].Name | Should -Be '2- Jabra Evolve 65'
+        $rows[0].Name | Should -Be 'Auriculares'
+        $rows[0].'Device Name' | Should -Be '2- Jabra Evolve 65'
         $rows[0].Type | Should -Be 'Device'
         $rows[0].Direction | Should -Be 'Render'
         $rows[0].'Device State' | Should -Be 'Active'
@@ -122,10 +123,28 @@ Describe 'Get-SvclRenderDevice' {
         $devices[0].PSObject.Properties.Name -contains 'Item ID' | Should -Be $true
         $devices[0].PSObject.Properties.Name -contains 'Type' | Should -Be $true
         $devices[0].PSObject.Properties.Name -contains 'Direction' | Should -Be $true
+        $devices[0].PSObject.Properties.Name -contains 'Device Name' | Should -Be $true
     }
 
     It 'returns empty for empty input' {
         Get-SvclRenderDevice -CsvText "" | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Get-SvclDeviceLabel' {
+    It 'combines Device Name and Name when both exist' {
+        $row = [pscustomobject]@{ Name = 'Auriculares'; 'Device Name' = '2- Jabra Evolve 65' }
+        Get-SvclDeviceLabel -Row $row | Should -Be '2- Jabra Evolve 65 — Auriculares'
+    }
+
+    It 'falls back to Name when Device Name is missing' {
+        $row = [pscustomobject]@{ Name = 'Altavoces' }
+        Get-SvclDeviceLabel -Row $row | Should -Be 'Altavoces'
+    }
+
+    It 'falls back to Device Name when Name is missing or identical' {
+        $row = [pscustomobject]@{ Name = 'Speakers (Application)'; 'Device Name' = 'Speakers (Application)' }
+        Get-SvclDeviceLabel -Row $row | Should -Be 'Speakers (Application)'
     }
 }
 

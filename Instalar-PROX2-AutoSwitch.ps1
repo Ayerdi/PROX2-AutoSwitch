@@ -349,9 +349,9 @@ try {
     Write-Host ""
     Write-Host "Dispositivos de salida detectados:" -ForegroundColor Yellow
     for ($i = 0; $i -lt $renderRows.Count; $i++) {
-        $name = Get-CsvColumn -Row $renderRows[$i] -Names @('Name')
+        $label = Get-SvclDeviceLabel -Row $renderRows[$i]
         $state = Get-CsvColumn -Row $renderRows[$i] -Names @('Device State')
-        Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $name, $state)
+        Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $label, $state)
     }
 
     $chosenHeadset = $null
@@ -376,8 +376,8 @@ try {
 
     $headsetId   = Get-CsvColumn -Row $chosenHeadset -Names @('Item ID')
     $speakerId   = Get-CsvColumn -Row $chosenSpeaker -Names @('Item ID')
-    $headsetName = Get-CsvColumn -Row $chosenHeadset -Names @('Name')
-    $speakerName = Get-CsvColumn -Row $chosenSpeaker -Names @('Name')
+    $headsetName = Get-SvclDeviceLabel -Row $chosenHeadset
+    $speakerName = Get-SvclDeviceLabel -Row $chosenSpeaker
 
     if (-not (Test-ValidAudioConfig -HeadsetId $headsetId -SpeakerId $speakerId)) {
         throw "Has elegido el mismo dispositivo para headset y fallback. Repite la instalacion."
@@ -443,22 +443,33 @@ try {
                 $deviceInfos = @($devices.payload.deviceInfos)
 
                 Write-Host ""
-                Write-Host "Dispositivos que reporta G HUB:" -ForegroundColor Yellow
-                for ($i = 0; $i -lt $deviceInfos.Count; $i++) {
-                    Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $deviceInfos[$i].extendedDisplayName, $deviceInfos[$i].id)
+                # Filtrar SOLO candidatos PRO X 2: evita que se elija por
+                # accidente un raton/teclado Logitech y se vigile su bateria.
+                $ghubCandidates = @($deviceInfos | Where-Object {
+                    $_.extendedDisplayName -match 'PRO\s*X\s*2'
+                })
+
+                if ($ghubCandidates.Count -eq 0) {
+                    Write-Host "      G HUB no reporta ningun PRO X 2." -ForegroundColor Red
                 }
+                else {
+                    Write-Host "PRO X 2 detectados por G HUB:" -ForegroundColor Yellow
+                    for ($i = 0; $i -lt $ghubCandidates.Count; $i++) {
+                        Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $ghubCandidates[$i].extendedDisplayName, $ghubCandidates[$i].id)
+                    }
 
-                $ghubChoice = 0
-                do {
-                    $gc = Read-Host "Elige el numero del PRO X 2 que corresponde a '$headsetName'"
-                    $ghubValid = [int]::TryParse($gc, [ref]$ghubChoice) -and
-                                 $ghubChoice -ge 1 -and
-                                 $ghubChoice -le $deviceInfos.Count
-                } until ($ghubValid)
+                    $ghubChoice = 0
+                    do {
+                        $gc = Read-Host "Elige el numero del PRO X 2 que corresponde a '$headsetName'"
+                        $ghubValid = [int]::TryParse($gc, [ref]$ghubChoice) -and
+                                     $ghubChoice -ge 1 -and
+                                     $ghubChoice -le $ghubCandidates.Count
+                    } until ($ghubValid)
 
-                $ghubHeadset = $deviceInfos[$ghubChoice - 1]
-                $DetectionMode = "LogitechGHub"
-                Write-Host "      G HUB: $($ghubHeadset.extendedDisplayName)" -ForegroundColor Green
+                    $ghubHeadset = $ghubCandidates[$ghubChoice - 1]
+                    $DetectionMode = "LogitechGHub"
+                    Write-Host "      G HUB: $($ghubHeadset.extendedDisplayName)" -ForegroundColor Green
+                }
             }
             catch {
                 Write-Host "      No se pudo conectar con G HUB. Detalle: $($_.Exception.Message)" -ForegroundColor Red

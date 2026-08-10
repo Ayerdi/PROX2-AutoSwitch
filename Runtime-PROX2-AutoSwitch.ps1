@@ -1,7 +1,11 @@
 ﻿#requires -Version 5.1
 $ErrorActionPreference = "Stop"
 
-$InstallDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+# Ruta canonica del script: $PSCommandPath (no $MyInvocation.MyCommand.Path,
+# que dentro de una funcion describe la invocacion y puede quedar vacio).
+$script:RuntimePath = $PSCommandPath
+
+$InstallDir = Split-Path -Parent $script:RuntimePath
 $ConfigPath = Join-Path $InstallDir "config.json"
 $SvclPath   = Join-Path $InstallDir "svcl.exe"
 $LogPath    = Join-Path $InstallDir "autoswitch.log"
@@ -494,7 +498,7 @@ function Start-Worker {
 
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
-    $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$($MyInvocation.MyCommand.Path)`""
+    $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$script:RuntimePath`""
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
     $psi.EnvironmentVariables['AUTOSWITCH_WORKER'] = '1'

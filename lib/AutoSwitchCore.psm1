@@ -312,6 +312,34 @@ function Get-SvclRenderDevice {
     return $render.ToArray()
 }
 
+function Get-SvclDeviceLabel {
+    <#
+    .SYNOPSIS
+        Construye la etiqueta visible de una fila de svcl.
+    .DESCRIPTION
+        svcl separa Name (p. ej. 'Auriculares') de Device Name
+        (p. ej. '2- Jabra Evolve 65'). Si existe Device Name se muestra
+        'Device Name — Name'; si no, solo Name.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][object]$Row
+    )
+
+    $name = Get-CsvColumn -Row $Row -Names @('Name')
+    $deviceName = Get-CsvColumn -Row $Row -Names @('Device Name')
+
+    if ([string]::IsNullOrWhiteSpace($deviceName)) {
+        return $name
+    }
+
+    if ([string]::IsNullOrWhiteSpace($name) -or $name -ieq $deviceName) {
+        return $deviceName
+    }
+
+    return "$deviceName — $name"
+}
+
 function Get-EndpointFxState {
     <#
     .SYNOPSIS
@@ -462,4 +490,4 @@ function Get-ConfigDetectionMode {
     return $null
 }
 
-Export-ModuleMember -Function Get-RenderItemIdFromText, Resolve-HeadsetState, Test-ValidAudioConfig, New-GHubTimeoutToken, ConvertFrom-SvclCsv, ConvertFrom-CsvLine, Get-CsvColumn, Resolve-EndpointState, Resolve-DetectedState, Get-SvclRenderDevice, Get-EndpointFxState, Get-ConfigDetectionMode
+Export-ModuleMember -Function Get-RenderItemIdFromText, Resolve-HeadsetState, Test-ValidAudioConfig, New-GHubTimeoutToken, ConvertFrom-SvclCsv, ConvertFrom-CsvLine, Get-CsvColumn, Resolve-EndpointState, Resolve-DetectedState, Get-SvclRenderDevice, Get-SvclDeviceLabel, Get-EndpointFxState, Get-ConfigDetectionMode
