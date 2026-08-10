@@ -108,6 +108,17 @@ Describe 'ConvertFrom-SvclCsv' {
 }
 
 Describe 'Get-SvclRenderDevice' {
+    It 'DIAG: shows what the filter returns' {
+        $devices = Get-SvclRenderDevice -CsvText $script:FixtureCsv
+        $names = @($devices | ForEach-Object { $_.Name })
+        Write-Host "DIAG count=$($devices.Count) names=$($names -join ' | ')"
+        if ($devices.Count -gt 0) {
+            Write-Host "DIAG props=$($devices[0].PSObject.Properties.Name -join ',')"
+            Write-Host "DIAG first=$($devices[0] | ConvertTo-Json -Compress)"
+        }
+        $true | Should -Be $true
+    }
+
     It 'filters to Device + Direction=Render only' {
         $devices = Get-SvclRenderDevice -CsvText $script:FixtureCsv
         $devices.Count | Should -Be 3
