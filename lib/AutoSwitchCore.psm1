@@ -104,7 +104,7 @@ function ConvertFrom-SvclCsv {
         if ($objects.Count -eq 0) {
             return @()
         }
-        return ,$objects
+        return $objects
     }
     catch {
         return @()
@@ -306,10 +306,10 @@ function Get-SvclRenderDevice {
 
     if ($render.Count -eq 0 -and -not $hasTypeColumn) {
         # Fallback defensivo SOLO si la version de svcl no expone Type/Direction.
-        return ,@($rows)
+        return @($rows)
     }
 
-    return ,$render.ToArray()
+    return $render.ToArray()
 }
 
 function Get-EndpointFxState {
