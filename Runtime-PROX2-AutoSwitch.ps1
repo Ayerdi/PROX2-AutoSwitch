@@ -342,10 +342,17 @@ function Get-HeadsetEndpointState {
     .SYNOPSIS
         Devuelve 'Connected' / 'Disconnected' / 'Unknown' del endpoint del headset.
     .DESCRIPTION
-        Busca la fila cuyo Item ID coincide con Config.HeadsetId (mas robusto
-        que el nombre) y normaliza su columna State/DeviceState.
+        - Export valido + fila con Item ID coincidente -> estado normalizado.
+        - Export valido + fila ausente (endpoint no presente) -> Disconnected.
+        - Export invalido/vacio (svcl fallo, basura) -> Unknown (no tocar nada).
     #>
     $csv = Get-SvclCsvExport
+
+    if (-not (Test-SvclExportValid -CsvText $csv)) {
+        # svcl no devolvio un export valido: estado desconocido, NO asumir off.
+        return 'Unknown'
+    }
+
     $rows = ConvertFrom-SvclCsv -Text $csv
 
     $row = $rows |
@@ -356,7 +363,7 @@ function Get-HeadsetEndpointState {
         Select-Object -First 1
 
     if (-not $row) {
-        # El endpoint no aparece en la lista: para Windows significa
+        # Export valido pero el endpoint no aparece: para Windows significa
         # que no esta presente -> Disconnected.
         return 'Disconnected'
     }

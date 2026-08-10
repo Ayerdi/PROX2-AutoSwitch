@@ -396,6 +396,9 @@ try {
     function Get-HeadsetCsvState {
         param([string]$ItemId)
         $txt = (& $SvclPath /scomma "" 2>&1 | Out-String).Trim()
+        # Export invalido/vacio -> Unknown (no asumir off). Solo si el export
+        # es valido y la fila falta, el endpoint no esta presente -> Disconnected.
+        if (-not (Test-SvclExportValid -CsvText $txt)) { return 'Unknown' }
         $r = @(ConvertFrom-SvclCsv -Text $txt) | Where-Object {
             $id = Get-CsvColumn -Row $_ -Names @('Item ID')
             $null -ne $id -and $id.Trim().ToLowerInvariant() -eq $ItemId.ToLowerInvariant()

@@ -264,6 +264,40 @@ function New-GHubTimeoutToken {
     return $cts
 }
 
+function Test-SvclExportValid {
+    <#
+    .SYNOPSIS
+        True si el texto es una exportacion /scomma de svcl valida.
+    .DESCRIPTION
+        Un export valido tiene una cabecera reconocible (al menos la columna
+        'Name' o 'Item ID') y al menos una fila de datos. Un texto vacio o
+        basura no es un export valido -> el llamador debe tratarlo como
+        'Unknown' (no como 'Disconnected').
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$CsvText
+    )
+
+    if ([string]::IsNullOrWhiteSpace($CsvText)) {
+        return $false
+    }
+
+    $rows = @(ConvertFrom-SvclCsv -Text $CsvText)
+    if ($rows.Count -eq 0) {
+        return $false
+    }
+
+    # La primera fila debe exponer al menos Name o Item ID (cabecera de svcl).
+    $first = $rows[0]
+    $hasName = $null -ne $first.PSObject.Properties['Name']
+    $hasId   = $null -ne $first.PSObject.Properties['Item ID']
+
+    return ($hasName -or $hasId)
+}
+
 function Get-SvclRenderDevice {
     <#
     .SYNOPSIS
@@ -392,32 +426,32 @@ namespace AutoSwitch
      InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     public interface IMMDeviceEnumerator
     {
-        int EnumAudioEndpoints(int dataFlow, int dwStateMask, out IntPtr devices);
-        int GetDefaultAudioEndpoint(int dataFlow, int role, out IntPtr device);
-        int GetDevice(string pwstrId, out IntPtr device);
-        int RegisterEndpointNotificationCallback(IntPtr client);
-        int UnregisterEndpointNotificationCallback(IntPtr client);
+        [PreserveSig] int EnumAudioEndpoints(int dataFlow, int dwStateMask, out IntPtr devices);
+        [PreserveSig] int GetDefaultAudioEndpoint(int dataFlow, int role, out IntPtr device);
+        [PreserveSig] int GetDevice(string pwstrId, out IntPtr device);
+        [PreserveSig] int RegisterEndpointNotificationCallback(IntPtr client);
+        [PreserveSig] int UnregisterEndpointNotificationCallback(IntPtr client);
     }
 
     [ComImport, Guid("D666063F-1587-4E43-81F1-B948E807363F"),
      InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     public interface IMMDevice
     {
-        int Activate(ref Guid iid, int dwClsCtx, IntPtr pActivationParams, out IntPtr pInterface);
-        int OpenPropertyStore(int stgmAccess, out IntPtr ppProperties);
-        int GetId(out IntPtr ppstrId);
-        int GetState(out int pdwState);
+        [PreserveSig] int Activate(ref Guid iid, int dwClsCtx, IntPtr pActivationParams, out IntPtr pInterface);
+        [PreserveSig] int OpenPropertyStore(int stgmAccess, out IntPtr ppProperties);
+        [PreserveSig] int GetId(out IntPtr ppstrId);
+        [PreserveSig] int GetState(out int pdwState);
     }
 
     [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"),
      InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     public interface IPropertyStore
     {
-        int GetCount(out uint cProps);
-        int GetAt(uint iProp, out PROPERTYKEY pkey);
-        int GetValue(ref PROPERTYKEY key, out PROPVARIANT pv);
-        int SetValue(ref PROPERTYKEY key, ref PROPVARIANT pv);
-        int Commit();
+        [PreserveSig] int GetCount(out uint cProps);
+        [PreserveSig] int GetAt(uint iProp, out PROPERTYKEY pkey);
+        [PreserveSig] int GetValue(ref PROPERTYKEY key, out PROPVARIANT pv);
+        [PreserveSig] int SetValue(ref PROPERTYKEY key, ref PROPVARIANT pv);
+        [PreserveSig] int Commit();
     }
 }
 '@ -ErrorAction Stop
@@ -493,4 +527,4 @@ function Get-ConfigDetectionMode {
     return $null
 }
 
-Export-ModuleMember -Function Get-RenderItemIdFromText, Resolve-HeadsetState, Test-ValidAudioConfig, New-GHubTimeoutToken, ConvertFrom-SvclCsv, ConvertFrom-CsvLine, Get-CsvColumn, Resolve-EndpointState, Resolve-DetectedState, Get-SvclRenderDevice, Get-SvclDeviceLabel, Get-EndpointFxState, Get-ConfigDetectionMode
+Export-ModuleMember -Function Get-RenderItemIdFromText, Resolve-HeadsetState, Test-ValidAudioConfig, New-GHubTimeoutToken, ConvertFrom-SvclCsv, ConvertFrom-CsvLine, Get-CsvColumn, Resolve-EndpointState, Resolve-DetectedState, Test-SvclExportValid, Get-SvclRenderDevice, Get-SvclDeviceLabel, Get-EndpointFxState, Get-ConfigDetectionMode

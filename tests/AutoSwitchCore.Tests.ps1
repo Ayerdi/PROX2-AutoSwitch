@@ -131,6 +131,26 @@ Describe 'Get-SvclRenderDevice' {
     }
 }
 
+Describe 'Test-SvclExportValid' {
+    It 'accepts a real svcl export' {
+        Test-SvclExportValid -CsvText $script:FixtureCsv | Should -Be $true
+    }
+
+    It 'rejects empty or whitespace-only output' {
+        Test-SvclExportValid -CsvText "" | Should -Be $false
+        Test-SvclExportValid -CsvText "   " | Should -Be $false
+    }
+
+    It 'rejects garbage that is not a svcl export' {
+        Test-SvclExportValid -CsvText "No items found" | Should -Be $false
+        Test-SvclExportValid -CsvText "ERROR: something went wrong" | Should -Be $false
+    }
+
+    It 'rejects a header-only export (no data rows)' {
+        Test-SvclExportValid -CsvText "Name,Type,Direction" | Should -Be $false
+    }
+}
+
 Describe 'Get-SvclDeviceLabel' {
     It 'combines Device Name and Name when both exist' {
         $row = [pscustomobject]@{ Name = 'Auriculares'; 'Device Name' = '2- Jabra Evolve 65' }

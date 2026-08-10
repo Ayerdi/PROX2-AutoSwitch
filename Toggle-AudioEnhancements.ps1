@@ -65,18 +65,18 @@ namespace AutoSwitch
      InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     public interface IPolicyConfig
     {
-        int GetMixFormat(string pszDeviceName, out IntPtr ppFormat);
-        int GetDeviceFormat(string pszDeviceName, bool bDefault, out IntPtr ppFormat);
-        int ResetDeviceFormat(string pszDeviceName);
-        int SetDeviceFormat(string pszDeviceName, IntPtr pEndpointFormat, IntPtr pMixFormat);
-        int GetProcessingPeriod(string pszDeviceName, bool bDefault, out IntPtr pmftDefaultPeriod, out IntPtr pmftMinimumPeriod);
-        int SetProcessingPeriod(string pszDeviceName, IntPtr pmftPeriod);
-        int GetShareMode(string pszDeviceName, out IntPtr pMode);
-        int SetShareMode(string pszDeviceName, IntPtr pMode);
-        int GetPropertyValue(string pszDeviceName, bool bFxStore, ref PROPERTYKEY key, out PROPVARIANT pv);
-        int SetPropertyValue(string pszDeviceName, bool bFxStore, ref PROPERTYKEY key, ref PROPVARIANT pv);
-        int SetDefaultEndpoint(string pszDeviceName, int eRole);
-        int SetEndpointVisibility(string pszDeviceName, bool bVisible);
+        [PreserveSig] int GetMixFormat(string pszDeviceName, out IntPtr ppFormat);
+        [PreserveSig] int GetDeviceFormat(string pszDeviceName, bool bDefault, out IntPtr ppFormat);
+        [PreserveSig] int ResetDeviceFormat(string pszDeviceName);
+        [PreserveSig] int SetDeviceFormat(string pszDeviceName, IntPtr pEndpointFormat, IntPtr pMixFormat);
+        [PreserveSig] int GetProcessingPeriod(string pszDeviceName, bool bDefault, out IntPtr pmftDefaultPeriod, out IntPtr pmftMinimumPeriod);
+        [PreserveSig] int SetProcessingPeriod(string pszDeviceName, IntPtr pmftPeriod);
+        [PreserveSig] int GetShareMode(string pszDeviceName, out IntPtr pMode);
+        [PreserveSig] int SetShareMode(string pszDeviceName, IntPtr pMode);
+        [PreserveSig] int GetPropertyValue(string pszDeviceName, bool bFxStore, ref PROPERTYKEY key, out PROPVARIANT pv);
+        [PreserveSig] int SetPropertyValue(string pszDeviceName, bool bFxStore, ref PROPERTYKEY key, ref PROPVARIANT pv);
+        [PreserveSig] int SetDefaultEndpoint(string pszDeviceName, int eRole);
+        [PreserveSig] int SetEndpointVisibility(string pszDeviceName, bool bVisible);
     }
 }
 '@ -ErrorAction Stop
