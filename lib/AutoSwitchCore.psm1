@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 # AutoSwitchCore.psm1 - logica pura y testeable del PRO X 2 AutoSwitch.
 # Sin dependencias de G HUB ni de svcl.exe, para poder probarse con Pester.
 

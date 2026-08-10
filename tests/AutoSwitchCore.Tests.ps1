@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 # Pester tests para lib/AutoSwitchCore.psm1
 
 BeforeAll {
