@@ -86,11 +86,12 @@ vendor software is needed.
 
 10. **Runtime loop**: the polling runs in a **separate worker process**
     (`AUTOSWITCH_WORKER=1`, same script re-executed) so the WinForms message pump
-    (`Application.Run()`) and the tray icon stay responsive. The worker is a single
-    synchronous loop (`Start-Sleep PollMilliseconds`), which is itself the guard against
-    concurrent polls — it never starts a new poll while the previous one is still running.
-    The main process communicates via control flags (`control/enabled.flag`,
-    `control/stop.flag`). Do NOT run svcl/G HUB/Set-AudioOutput on the UI thread.
+    (`Application.Run()` over an invisible main `Form`) and the tray icon stay responsive.
+    The worker is a single synchronous loop (`Start-Sleep PollMilliseconds`), which is itself the guard
+    against concurrent polls — it never starts a new poll while the previous one is still running.
+    The main process communicates via control flags (`control/enabled.flag`, `control/stop.flag`).
+    Do NOT run svcl/G HUB/Set-AudioOutput on the UI thread. Pass `[System.Windows.Forms.Application]::Run($form)`
+    an invisible `Form`; `Application.Run()` without a Form is not reliably kept alive across all .NET builds.
 
 11. **Audio Enhancements**: toggled only for the configured `HeadsetId` via a temporary elevated
     helper (`Toggle-AudioEnhancements.ps1`, `Start-Process -Verb RunAs`) that writes

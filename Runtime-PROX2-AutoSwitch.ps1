@@ -476,6 +476,7 @@ function Invoke-AutoSwitchToggle {
 function Stop-Runtime {
     Stop-Worker
     try { $script:TrayIcon.Visible = $false } catch {}
+    try { if ($script:MainForm) { $script:MainForm.Close() } } catch {}
     [System.Windows.Forms.Application]::Exit()
 }
 
@@ -648,9 +649,33 @@ function Initialize-TrayAndTimer {
     Add-Type -AssemblyName System.Drawing
 
     $script:TrayIcon = New-Object System.Windows.Forms.NotifyIcon
-    $script:TrayIcon.Icon = [System.Drawing.SystemIcons]::Application
+
+    # Icono propio de la app (icono de auricular azul). Si el .ico no existe
+    # en disco, caemos a SystemIcons.Application para que siempre haya uno.
+    try {
+        $iconFile = Join-Path $InstallDir "icon.ico"
+        if (Test-Path $iconFile) {
+            $script:TrayIcon.Icon = [System.Drawing.Icon]::new($iconFile)
+        }
+        else {
+            $script:TrayIcon.Icon = [System.Drawing.SystemIcons]::Application
+        }
+    }
+    catch {
+        $script:TrayIcon.Icon = [System.Drawing.SystemIcons]::Application
+    }
+
     $script:TrayIcon.Text = "Audio AutoSwitch"
     $script:TrayIcon.Visible = $true
+
+    # Form invisible que sostiene el message pump de WinForms. Application.Run()
+    # sin Form no siempre mantiene el NotifyIcon visible activo en todos los
+    # builds de .NET; con un Form oculto el pump es robusto y la bandeja no se cae.
+    $script:MainForm = New-Object System.Windows.Forms.Form
+    $script:MainForm.WindowState = 'Minimized'
+    $script:MainForm.ShowInTaskbar = $false
+    $script:MainForm.Visible = $false
+    $script:MainForm.FormBorderStyle = 'None'
 
     $menu = New-Object System.Windows.Forms.ContextMenuStrip
 
@@ -673,6 +698,7 @@ function Initialize-TrayAndTimer {
     $script:TrayIcon.ContextMenuStrip = $menu
 
     Update-EnhancementsMenu
+    Write-AutoSwitchLog "Tray configurada; message pump activo."
 }
 
 Write-AutoSwitchLog "PRO X 2 AutoSwitch iniciado (modo $script:DetectionMode)."
@@ -695,7 +721,10 @@ try {
         }
     }
 
-    [System.Windows.Forms.Application]::Run()
+    # Message pump principal sostenido por un Form invisible. La bandeja de
+    # notificaciones procesa eventos aqui; se mantiene activa hasta Exit.
+    [System.Windows.Forms.Application]::Run($script:MainForm)
+    Write-AutoSwitchLog "Message pump finalizado (Exit)."
 }
 finally {
     Stop-Worker

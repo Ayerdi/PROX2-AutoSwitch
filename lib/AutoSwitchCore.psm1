@@ -323,25 +323,14 @@ function Get-SvclRenderDevice {
 
     # Filtro con bucle explicito (sin Where-Object con $_): mas predecible.
     $render = [System.Collections.Generic.List[object]]::new()
-    $hasTypeColumn = $false
 
     foreach ($row in $rows) {
-        $typeProp = $row.PSObject.Properties['Type']
-        $dirProp  = $row.PSObject.Properties['Direction']
-
-        if ($null -ne $typeProp) { $hasTypeColumn = $true }
-
-        $typeVal = if ($null -ne $typeProp) { [string]$typeProp.Value } else { '' }
-        $dirVal  = if ($null -ne $dirProp)  { [string]$dirProp.Value }  else { '' }
+        $typeVal = Get-CsvColumn -Row $row -Names @('Type')
+        $dirVal  = Get-CsvColumn -Row $row -Names @('Direction')
 
         if ($typeVal -ieq 'Device' -and $dirVal -ieq 'Render') {
             $render.Add($row)
         }
-    }
-
-    if ($render.Count -eq 0 -and -not $hasTypeColumn) {
-        # Fallback defensivo SOLO si la version de svcl no expone Type/Direction.
-        return @($rows)
     }
 
     return $render.ToArray()
