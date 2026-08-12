@@ -1,6 +1,6 @@
 # Audio AutoSwitch
 
-**Versión estable: v1.2.4 · Windows 10/11 x64**
+**Versión estable: v1.2.5 · Windows 10/11 x64**
 
 Audio AutoSwitch cambia automáticamente la salida predeterminada de Windows cuando un auricular inalámbrico compatible se enciende o apaga, y añade controles desde la bandeja para AutoSwitch y Audio Enhancements.
 
