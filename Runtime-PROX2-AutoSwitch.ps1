@@ -524,22 +524,49 @@ function Get-HeadsetStateForId {
         Igual que Get-HeadsetEndpointState pero para un Item ID arbitrario
         (el del headset que se esta seleccionando en el wizard).
     #>
-    param([Parameter(Mandatory = $true)][string]$ItemId)
+    param(
+        [Parameter(Mandatory = $true)][string]$ItemId,
+        [switch]$Diagnose
+    )
 
     $csv = Get-SvclCsvExport
-    if (-not (Test-SvclExportValid -CsvText $csv)) { return 'Unknown' }
+    if (-not (Test-SvclExportValid -CsvText $csv)) {
+        if ($Diagnose) { Write-AutoSwitchLog ("Get-HeadsetStateForId: svcl export invalido/vacio para {0}" -f $ItemId) }
+        return 'Unknown'
+    }
 
-    $row = @(ConvertFrom-SvclCsv -Text $csv) |
+    $rows = @(ConvertFrom-SvclCsv -Text $csv)
+    $row = $rows |
         Where-Object {
             $id = Get-CsvColumn -Row $_ -Names @('Item ID')
             $null -ne $id -and $id.Trim().ToLowerInvariant() -eq $ItemId.Trim().ToLowerInvariant()
         } |
         Select-Object -First 1
 
-    if (-not $row) { return 'Disconnected' }
+    if (-not $row) {
+        if ($Diagnose) {
+            # Que hay en la exportacion? Render devices con sus estados e IDs.
+            $lines = @()
+            foreach ($r in $rows) {
+                $name  = Get-CsvColumn -Row $r -Names @('Device Name', 'Name')
+                $id    = Get-CsvColumn -Row $r -Names @('Item ID')
+                $st    = Get-CsvColumn -Row $r -Names @('Device State', 'State')
+                $type  = Get-CsvColumn -Row $r -Names @('Type')
+                $dir   = Get-CsvColumn -Row $r -Names @('Direction')
+                $lines += "[$type/$dir] '$name' id='$id' state='$st'"
+            }
+            Write-AutoSwitchLog ("Get-HeadsetStateForId: NO se encontro {0} en la exportacion. Fila(s) disponibles:`n{1}" -f $ItemId, ($lines -join "`n"))
+        }
+        return 'Disconnected'
+    }
 
     $state = Get-CsvColumn -Row $row -Names @('Device State', 'State')
-    if ($null -eq $state) { return 'Unknown' }
+    if ($null -eq $state) {
+        if ($Diagnose) { Write-AutoSwitchLog ("Get-HeadsetStateForId: fila para {0} sin columna de estado" -f $ItemId) }
+        return 'Unknown'
+    }
+
+    if ($Diagnose) { Write-AutoSwitchLog ("Get-HeadsetStateForId: {0} -> '{1}'" -f $ItemId, $state) }
     return Resolve-EndpointState -State $state
 }
 
@@ -567,6 +594,9 @@ function Wait-ForHeadsetState {
         Start-Sleep -Milliseconds $PollIntervalMs
     } while ((Get-Date) -lt $deadline)
 
+    # Timeout: el estado observado no alcanzo el esperado. Diagnostico con contexto.
+    Write-AutoSwitchLog ("Wait-ForHeadsetState: timeout esperando '{0}' para {1}. Ultimo estado observado: {2}" -f $Expected, $ItemId, $last)
+    [void](Get-HeadsetStateForId -ItemId $ItemId -Diagnose)
     return $last
 }
 
