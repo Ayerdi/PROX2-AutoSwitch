@@ -15,4 +15,4 @@ Please **do not** open a public issue for a security problem that involves crede
 ## Scope
 
 - The SHA-256 pin for `svcl-x64.zip` lives in `Instalar-PROX2-AutoSwitch.ps1` (`$ExpectedSha256`). If NirSoft ships a new version, update it from the official hashes page — do not remove the check.
-- The project persists **no** Windows `Item ID`s across installs and **no** G HUB `deviceId`. Nothing in the repo contains machine-specific secrets.
+- `config.json` stores the current machine's Windows audio `Item ID`s because they are required to target endpoints; they are local identifiers, not secrets, and must not be copied between machines. Reconfigure may refresh the headset ID after endpoint recreation. The project does **not** persist the volatile G HUB `deviceId`, and repository/releases contain no user-specific IDs or credentials.

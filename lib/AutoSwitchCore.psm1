@@ -364,6 +364,49 @@ function Get-SvclDeviceLabel {
     return "$deviceName — $name"
 }
 
+function Find-SvclRenderDeviceByIdentity {
+    <#
+    .SYNOPSIS
+        Encuentra un endpoint Render por identidad estable de svcl.
+    .DESCRIPTION
+        Bluetooth puede recrear un endpoint y cambiar su Item ID. Para
+        re-resolverlo sin confundir dos salidas del mismo dispositivo se
+        comparan, cuando existen, AMBAS columnas: Device Name y Name.
+        Devuelve $null si no hay identidad suficiente o no existe coincidencia.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Rows,
+        [string]$DeviceName,
+        [string]$Name
+    )
+
+    if ([string]::IsNullOrWhiteSpace($DeviceName) -and
+        [string]::IsNullOrWhiteSpace($Name)) {
+        return $null
+    }
+
+    foreach ($row in $Rows) {
+        $typeVal = Get-CsvColumn -Row $row -Names @('Type')
+        $dirVal  = Get-CsvColumn -Row $row -Names @('Direction')
+        if ($typeVal -ine 'Device' -or $dirVal -ine 'Render') { continue }
+
+        $rowDeviceName = Get-CsvColumn -Row $row -Names @('Device Name')
+        $rowName       = Get-CsvColumn -Row $row -Names @('Name')
+
+        $deviceMatches = [string]::IsNullOrWhiteSpace($DeviceName) -or
+            ($null -ne $rowDeviceName -and $rowDeviceName.Trim() -ieq $DeviceName.Trim())
+        $nameMatches = [string]::IsNullOrWhiteSpace($Name) -or
+            ($null -ne $rowName -and $rowName.Trim() -ieq $Name.Trim())
+
+        if ($deviceMatches -and $nameMatches) {
+            return $row
+        }
+    }
+
+    return $null
+}
+
 function Get-EndpointFxState {
     <#
     .SYNOPSIS

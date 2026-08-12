@@ -16,7 +16,7 @@ Relevant points:
 - When several items share a name, `Item ID` or `Command-Line Friendly ID` can be used.
 - `/GetColumnValue` returns the value of a column.
 - `/Stdout` applied to `Set`-type commands shows the found items.
-- `/scomma "<filename>"` exports the item list in CSV to stdout/file (with `/Columns` you can choose columns). We use `/scomma ""` to list all render items and read their `State`/`DeviceState` and `Item ID`.
+- `/scomma "<filename>"` exports the item list in CSV to stdout/file (with `/Columns` you can choose columns). We use `/scomma ""` to list all items, filter `Type=Device` + `Direction=Render`, and read `Device State`, `Item ID`, `Device Name` and `Name`. `Device Name` and `Name` are separate columns and must not be conflated with the UI label `Device Name — Name`.
 - `/SetBooleanFxProperty` (v1.26+) toggles **individual** effects (Loudness Equalization, Headphone Virtualization, etc.). It is **NOT** the global "Disable audio enhancements" switch — do not use it for that.
 
 ## Audio enhancements — `PKEY_AudioEndpoint_Disable_SysFx`
@@ -58,6 +58,17 @@ Its README documents:
 - `SUBSCRIBE /battery/state/changed`.
 
 This source **does not turn the G HUB API into an official Logitech API**. Treat it as an undocumented, potentially changing interface.
+
+## WindowsEndpoint / Jabra hardware evidence
+
+Project hardware tests on a Jabra Evolve 65:
+
+- 2026-08-10: Windows exposed the render endpoint as `Active` while connected and `Unplugged` while powered off; returning ON restored `Active`. This validates the generic `WindowsEndpoint` path for that device.
+- 2026-08-12: `Reconfigure...` was exercised from a PRO X 2 (`LogitechGHub`) configuration to the Jabra (`WindowsEndpoint`), followed by OFF → ON, process restart, and another OFF → ON. The runtime switched correctly and reloaded the new config.
+- Bluetooth/Core Audio may take several seconds to report the final ON state. A diagnostic run timed out immediately before the next `svcl` read reported `Active`, which motivated bounded polling windows rather than fixed 500/800 ms sleeps.
+- An `Item ID` observed in one cycle is **not a portable/stable identity guarantee**. The reconfigure path treats `Device Name` + `Name` as fallback identity only when the captured ID disappears, then persists the latest observed ID.
+
+These are empirical project observations, not vendor guarantees for all Jabra/Bluetooth headsets.
 
 ## PRO X 2 specific evidence
 

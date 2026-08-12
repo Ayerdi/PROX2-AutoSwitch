@@ -5,6 +5,7 @@
 > AutoSwitch universal con `DetectionMode` (`WindowsEndpoint` | `LogitechGHub`), polling en un
 > proceso worker separado (`AUTOSWITCH_WORKER=1`), icono de bandeja y toggle de Audio Enhancements.
 > Ver el CHANGELOG v1.2.0 y `AGENT.md`. Se conserva como contexto histórico del razonamiento de providers.
+> **Corrección histórica (v1.2.3+):** la primera prueba del Jabra mantuvo el mismo `Item ID`, pero pruebas posteriores demostraron que Bluetooth/Core Audio puede recrear endpoints. No uses la estabilidad del GUID como premisa. Reconfigure debe re-resolver por `Device Name` + `Name` y persistir el ID observado.
 > **Problema de fondo:** cambiar la detección para que el AutoSwitch funcione con cualquier auricular, no solo Logitech PRO X 2, manteniendo intacto lo que ya funciona.
 
 ## Contexto: por qué existe esta issue
@@ -19,7 +20,7 @@ En una prueba real con unos **Jabra Evolve 65** se observó que Windows ya cambi
 | APAGADOS | `Unplugged` |
 | ENCENDIDOS otra vez | `Active` |
 
-El **Item ID del endpoint no cambia** entre estados:
+En aquella prueba concreta, el **Item ID del endpoint no cambió** entre esos tres estados (esto fue una observación, **no una garantía**):
 
 ```text
 {0.0.0.00000000}.{ed043b5e-65dc-4ba6-a847-310517ac1849}
@@ -150,7 +151,7 @@ Dejar de preguntar implícitamente por "PRO X 2 + altavoces". El flujo nuevo es:
 
 - **`State` puede no reflejar el estado físico en todos los auriculares** (algunos se quedan `Active` apagados). Mitigación: la auto-detección del instalador descarta ese caso y no deja instalar con `WindowsEndpoint` si no se observa `Active → Unplugged`.
 - **`svcl.exe /GetColumnValue ... State`**: confirmar en SOURCES.md el valor exacto que devuelve (columna `State`). Si cambia el formato de salida, `Get-RenderItemIdFromText` y la normalización se actualizan; los tests Pester lo protegen.
-- **Windows puede recrear endpoints** (Item ID cambia): el instalador ya captura IDs del Windows actual; no perseguir cambios de ID en runtime en esta issue.
+- **Windows puede recrear endpoints** (Item ID cambia): la issue original lo dejó fuera de alcance. La implementación posterior de Reconfigure (v1.2.3+) añadió recuperación acotada por `Device Name` + `Name` y persistencia del ID nuevo.
 
 ## Archivos afectados (estimación)
 
