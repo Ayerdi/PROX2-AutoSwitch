@@ -1,8 +1,8 @@
 # Audio AutoSwitch
 
-**Stable release: v1.2.4 · Windows 10/11 x64**
+**Stable release: v1.2.5 · Windows 10/11 x64**
 
-Audio AutoSwitch changes the Windows default output automatically when a compatible wireless headset turns on/off, and provides tray controls for switching behavior and Windows Audio Enhancements.
+Audio AutoSwitch changes the Windows default output automatically when a compatible wireless headset turns on or off, and provides tray controls for switching behavior and Windows Audio Enhancements.
 
 ## Start here
 
