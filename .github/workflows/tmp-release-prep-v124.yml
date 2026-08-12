@@ -1,0 +1,64 @@
+name: tmp-release-prep-v124
+
+on:
+  push:
+    paths:
+      - '.github/workflows/tmp-release-prep-v124.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  prep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/v1.2.4
+          fetch-depth: 0
+
+      - name: Finalize README and changelog for v1.2.4
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          p = Path('README.md')
+          s = p.read_text(encoding='utf-8')
+          old = '''### Recommended: download the ZIP (v1.2.4+)
+
+Releases built with this onboarding flow publish both the versioned archive and a stable **`Audio-AutoSwitch.zip`** name. Until v1.2.4 is published, v1.2.3 remains the latest stable release and does not contain the `.cmd` launchers yet.
+
+1. Open the [latest release](https://github.com/Ayerdi/PROX2-AutoSwitch/releases/latest) and download `Audio-AutoSwitch.zip` (v1.2.4+).
+'''
+          new = '''### Recommended: download the ZIP
+
+Releases publish both a versioned archive and a stable **`Audio-AutoSwitch.zip`** name for the simplest install path.
+
+1. Open the [latest release](https://github.com/Ayerdi/PROX2-AutoSwitch/releases/latest) and download `Audio-AutoSwitch.zip`.
+'''
+          if old not in s:
+              raise SystemExit('README v1.2.4 pre-release block not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+
+          p = Path('CHANGELOG.md')
+          s = p.read_text(encoding='utf-8')
+          marker = '## [Unreleased]\n\n### Added\n'
+          replacement = '## [Unreleased]\n\n## [1.2.4] - 2026-08-13\n\n### Added\n'
+          if marker not in s:
+              raise SystemExit('CHANGELOG Unreleased block not found')
+          s = s.replace(marker, replacement, 1)
+          p.write_text(s, encoding='utf-8')
+          PY
+          git diff --check
+
+      - name: Commit release prep
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md CHANGELOG.md
+          git commit -m "docs: finalize v1.2.4 release"
+          git push origin HEAD:release/v1.2.4
