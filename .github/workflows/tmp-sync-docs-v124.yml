@@ -1,0 +1,268 @@
+name: tmp-sync-docs-v124
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/tmp-sync-docs-v124.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout main
+          git pull --ff-only origin main
+
+      - name: Update Wiki documentation
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" /tmp/autoswitch-wiki
+          cd /tmp/autoswitch-wiki
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          START = '<!-- autoswitch-v124-simple-flow:start -->'
+          END = '<!-- autoswitch-v124-simple-flow:end -->'
+
+          def upsert(path, body):
+              p = Path(path)
+              if not p.exists():
+                  raise SystemExit(f'Missing expected wiki page: {path}')
+              text = p.read_text(encoding='utf-8')
+              block = START + '\n' + body.strip() + '\n' + END
+              if START in text and END in text:
+                  text = re.sub(re.escape(START) + r'.*?' + re.escape(END), block, text, count=1, flags=re.S)
+              else:
+                  lines = text.splitlines()
+                  insert_at = 1 if lines and lines[0].startswith('#') else 0
+                  lines[insert_at:insert_at] = ['', block, '']
+                  text = '\n'.join(lines)
+                  if not text.endswith('\n'):
+                      text += '\n'
+              p.write_text(text, encoding='utf-8')
+
+          upsert('Home.md', r'''
+          ## Quick start / Inicio rápido (v1.2.4+)
+
+          **Recommended / Recomendado:** download `Audio-AutoSwitch.zip` from the latest GitHub Release, extract it to a normal folder, and double-click **`Install.cmd`**.
+
+          The same package also includes **`Verify.cmd`** for diagnostics and **`Uninstall.cmd`** for removal. The `.cmd` files are only small launchers; the actual logic remains in the PowerShell scripts included in the release.
+
+          PowerShell users can still use the one-command bootstrap:
+
+          ```powershell
+          powershell.exe -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Ayerdi/PROX2-AutoSwitch/main/install.ps1 | iex"
+          ```
+          ''')
+
+          upsert('Guia-Instalacion-ES.md', r'''
+          ## Instalación recomendada (v1.2.4+)
+
+          1. Abre la última **GitHub Release** y descarga **`Audio-AutoSwitch.zip`**.
+          2. Extrae el ZIP completo a una carpeta normal; no ejecutes archivos desde dentro del ZIP.
+          3. Haz doble clic en **`Install.cmd`**.
+          4. Elige el auricular y la salida alternativa y completa la comprobación **ON → OFF → ON**.
+          5. Al terminar, apaga y enciende el auricular una vez para confirmar el cambio real de salida.
+
+          `Install.cmd` solo lanza el instalador PowerShell incluido; la lógica de instalación sigue estando en los `.ps1` revisables. El paquete también incluye **`Verify.cmd`** y **`Uninstall.cmd`**.
+
+          ### Alternativa para usuarios de PowerShell
+
+          ```powershell
+          powershell.exe -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Ayerdi/PROX2-AutoSwitch/main/install.ps1 | iex"
+          ```
+
+          Ese bootstrap descarga la última release versionada y su checksum SHA-256, verifica el ZIP y ejecuta el mismo instalador.
+          ''')
+
+          upsert('Install-Guide-EN.md', r'''
+          ## Recommended installation (v1.2.4+)
+
+          1. Open the latest **GitHub Release** and download **`Audio-AutoSwitch.zip`**.
+          2. Extract the complete ZIP to a normal folder; do not run files from inside the ZIP.
+          3. Double-click **`Install.cmd`**.
+          4. Pick the headset and fallback output, then complete the **ON → OFF → ON** check.
+          5. When setup finishes, power the headset off and on once to confirm the real output switch.
+
+          `Install.cmd` only launches the included PowerShell installer; the installation logic remains in the reviewable `.ps1` files. The package also includes **`Verify.cmd`** and **`Uninstall.cmd`**.
+
+          ### PowerShell alternative
+
+          ```powershell
+          powershell.exe -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Ayerdi/PROX2-AutoSwitch/main/install.ps1 | iex"
+          ```
+
+          That bootstrap downloads the latest versioned release and its SHA-256 checksum, verifies the ZIP, and runs the same installer.
+          ''')
+
+          upsert('Verificar-ES.md', r'''
+          ## Verificación recomendada (v1.2.4+)
+
+          En la carpeta extraída de la release, haz doble clic en **`Verify.cmd`**. Es el lanzador recomendado para ejecutar los diagnósticos incluidos.
+
+          Después haz una prueba real: enciende/conecta el auricular y comprueba que Windows lo selecciona; apágalo/desconéctalo y comprueba que, cuando Windows refleje la desconexión y AutoSwitch la confirme, vuelve a la salida alternativa.
+
+          El log está en `%LOCALAPPDATA%\\PROX2AutoSwitch\\autoswitch.log`.
+          ''')
+
+          upsert('Verify-EN.md', r'''
+          ## Recommended verification (v1.2.4+)
+
+          In the extracted release folder, double-click **`Verify.cmd`**. This is the recommended launcher for the included diagnostics.
+
+          Then run a real test: power on/connect the headset and confirm Windows selects it; power it off/disconnect it and confirm that, once Windows reflects the disconnect and AutoSwitch confirms it, output returns to the configured fallback.
+
+          The log is at `%LOCALAPPDATA%\\PROX2AutoSwitch\\autoswitch.log`.
+          ''')
+
+          upsert('Desinstalar-ES.md', r'''
+          ## Desinstalación recomendada (v1.2.4+)
+
+          En la carpeta extraída de la release, haz doble clic en **`Uninstall.cmd`**.
+
+          `Uninstall.cmd` solo lanza el desinstalador PowerShell incluido; elimina el proceso de AutoSwitch, el inicio automático y los archivos instalados usando la misma lógica documentada del proyecto.
+          ''')
+
+          upsert('Uninstall-EN.md', r'''
+          ## Recommended uninstall (v1.2.4+)
+
+          In the extracted release folder, double-click **`Uninstall.cmd`**.
+
+          `Uninstall.cmd` only launches the included PowerShell uninstaller; it removes the AutoSwitch process, autostart entry, and installed files using the same documented project logic.
+          ''')
+          PY
+
+          printf '%s\n' '=== Wiki v1.2.4 launcher markers ==='
+          for f in Home.md Guia-Instalacion-ES.md Install-Guide-EN.md Verificar-ES.md Verify-EN.md Desinstalar-ES.md Uninstall-EN.md; do
+            grep -q 'autoswitch-v124-simple-flow:start' "$f"
+            printf '%s: OK\n' "$f"
+          done
+
+          if ! git diff --quiet; then
+            git add Home.md Guia-Instalacion-ES.md Install-Guide-EN.md Verificar-ES.md Verify-EN.md Desinstalar-ES.md Uninstall-EN.md
+            git commit -m "docs: document v1.2.4 simple launcher flow"
+            git push origin master
+          fi
+          git rev-parse HEAD > /tmp/wiki_sha
+
+      - name: Update Pages and README documentation
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def required_replace(text, old, new, label):
+              if old not in text:
+                  raise SystemExit(f'Missing expected text for {label}')
+              return text.replace(old, new, 1)
+
+          site = Path('site/index.html')
+          text = site.read_text(encoding='utf-8')
+
+          text = required_replace(text, '<span class="pill">install.ps1</span>', '<span class="pill">ZIP · RECOMMENDED</span>', 'recommended pill')
+          text = required_replace(text, '<span class="pill">ZIP</span>', '<span class="pill">PowerShell</span>', 'PowerShell pill')
+
+          verify_old = '''  <section id="verify">\n    <h2><span class="dot">●</span> <span data-i18n="verifyTitle"></span></h2>\n    <div class="card">\n      <pre><code data-i18n="verifyCmd"></code></pre>'''
+          verify_new = '''  <section id="verify">\n    <h2><span class="dot">●</span> <span data-i18n="verifyTitle"></span></h2>\n    <div class="card">\n      <p data-i18n="verifyIntro"></p>\n      <pre><code data-i18n="verifyCmd"></code></pre>'''
+          text = required_replace(text, verify_old, verify_new, 'verify intro')
+
+          if 'id="uninstall"' not in text:
+              uninstall_html = '''  <!-- uninstall -->
+          <section id="uninstall">
+            <h2><span class="dot">●</span> <span data-i18n="uninstallTitle"></span></h2>
+            <div class="card">
+              <p data-i18n="uninstall1"></p>
+              <pre><code data-i18n="uninstallCmd"></code></pre>
+              <button class="copy" data-copy="uninstallCmd"><span data-i18n="copyBtn"></span></button>
+              <p class="muted" data-i18n="uninstall2"></p>
+            </div>
+          </section>
+
+          '''
+              text = required_replace(text, '  <!-- security -->\n', uninstall_html + '  <!-- security -->\n', 'uninstall section')
+
+          replacements = [
+              ('      quickTitle: "Instalación en un clic",', '      quickTitle: "Recomendado: ZIP + Install.cmd",'),
+              ('      quick1: "Abre PowerShell (Windows) y pega esta línea. Descarga la última versión, verifica su SHA-256 contra el checksum publicado y ejecuta el instalador completo.",', '      quick1: "Descarga Audio-AutoSwitch.zip de la última GitHub Release, extrae el ZIP completo a una carpeta normal y haz doble clic en:",'),
+              ('      quickCmd: \'powershell.exe -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Ayerdi/PROX2-AutoSwitch/main/install.ps1 | iex"\',', '      quickCmd: \'Install.cmd\','),
+              ('      quickNote: "El asistente detecta el modo automáticamente. Para Logitech PRO X 2 requiere G HUB abierto; para el resto, basta con que Windows vea el endpoint del auricular. Si svcl.exe ya está instalado, no se vuelve a descargar.",', '      quickNote: "Desde v1.2.4 este es el flujo recomendado. Install.cmd solo lanza el instalador PowerShell incluido; el mismo paquete también trae Verify.cmd y Uninstall.cmd. El asistente detecta automáticamente WindowsEndpoint o el fallback de G HUB para PRO X 2.",'),
+              ('      manualTitle: "Instalación manual (ZIP)",', '      manualTitle: "Alternativa: instalación con un comando",'),
+              ('      manual1: "Descarga el ZIP de la versión más reciente desde GitHub Releases.",', '      manual1: "Si prefieres PowerShell, el bootstrap descarga la última release versionada y su checksum SHA-256, verifica el ZIP y ejecuta el mismo instalador.",'),
+              ('      manual2: "Extrae todo el ZIP a una carpeta normal (no ejecutes desde dentro del ZIP) y ejecuta:",', '      manual2: "Abre PowerShell y pega:",'),
+              ('      manualCmd: \'powershell.exe -ExecutionPolicy Bypass -File ".\\\\Instalar-PROX2-AutoSwitch.ps1"\',', '      manualCmd: \'powershell.exe -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Ayerdi/PROX2-AutoSwitch/main/install.ps1 | iex"\','),
+              ('      verifyCmd: \'powershell.exe -ExecutionPolicy Bypass -File "Verificar-PROX2-AutoSwitch.ps1"\',', '      verifyIntro: "En la carpeta extraída de la release, haz doble clic en Verify.cmd para ejecutar los diagnósticos incluidos. Después puedes hacer esta prueba manual:",\n      verifyCmd: \'Verify.cmd\','),
+              ('      secTitle: "Notas de seguridad",', '      uninstallTitle: "Desinstalar",\n      uninstall1: "En la carpeta extraída de la release, haz doble clic en Uninstall.cmd.",\n      uninstallCmd: \'Uninstall.cmd\',\n      uninstall2: "El archivo .cmd solo lanza el desinstalador PowerShell incluido; no contiene lógica de desinstalación adicional.",\n      secTitle: "Notas de seguridad",'),
+              ('      quickTitle: "One-click install",', '      quickTitle: "Recommended: ZIP + Install.cmd",'),
+              ('      quick1: "Open PowerShell (Windows) and paste this line. It downloads the latest version, verifies its SHA-256 against the published checksum and runs the full installer.",', '      quick1: "Download Audio-AutoSwitch.zip from the latest GitHub Release, extract the complete ZIP to a normal folder, and double-click:",'),
+              ('      quickCmd: \'powershell.exe -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Ayerdi/PROX2-AutoSwitch/main/install.ps1 | iex"\',', '      quickCmd: \'Install.cmd\','),
+              ('      quickNote: "The wizard detects the mode automatically. For Logitech PRO X 2 it requires G HUB open; for anything else, Windows just needs to see the headset endpoint. If svcl.exe is already installed it is not downloaded again.",', '      quickNote: "Since v1.2.4 this is the recommended path. Install.cmd only launches the included PowerShell installer; the same package also includes Verify.cmd and Uninstall.cmd. The wizard automatically selects WindowsEndpoint or the G HUB fallback for PRO X 2.",'),
+              ('      manualTitle: "Manual install (ZIP)",', '      manualTitle: "Alternative: one-command install",'),
+              ('      manual1: "Download the ZIP of the latest release from GitHub Releases.",', '      manual1: "If you prefer PowerShell, the bootstrap downloads the latest versioned release and its SHA-256 checksum, verifies the ZIP, and runs the same installer.",'),
+              ('      manual2: "Extract the whole ZIP to a normal folder (don\'t run from inside the ZIP) and run:",', '      manual2: "Open PowerShell and paste:",'),
+              ('      manualCmd: \'powershell.exe -ExecutionPolicy Bypass -File ".\\\\Instalar-PROX2-AutoSwitch.ps1"\',', '      manualCmd: \'powershell.exe -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Ayerdi/PROX2-AutoSwitch/main/install.ps1 | iex"\','),
+              ('      verifyCmd: \'powershell.exe -ExecutionPolicy Bypass -File "Verificar-PROX2-AutoSwitch.ps1"\',', '      verifyIntro: "In the extracted release folder, double-click Verify.cmd to run the included diagnostics. Then you can perform this manual test:",\n      verifyCmd: \'Verify.cmd\','),
+              ('      secTitle: "Security notes",', '      uninstallTitle: "Uninstall",\n      uninstall1: "In the extracted release folder, double-click Uninstall.cmd.",\n      uninstallCmd: \'Uninstall.cmd\',\n      uninstall2: "The .cmd file only launches the included PowerShell uninstaller; it contains no additional uninstall logic.",\n      secTitle: "Security notes",'),
+          ]
+
+          for i, (old, new) in enumerate(replacements, 1):
+              text = required_replace(text, old, new, f'i18n replacement {i}')
+
+          site.write_text(text, encoding='utf-8')
+
+          readme = Path('README.md')
+          r = readme.read_text(encoding='utf-8')
+          r = required_replace(
+              r,
+              '## Verify it works\n\n```powershell',
+              '## Verify it works\n\nFrom an extracted release package, **double-click `Verify.cmd`**. It launches the same PowerShell verifier documented below.\n\n```powershell',
+              'README verify launcher'
+          )
+          r = required_replace(
+              r,
+              '## Uninstall\n\nFrom the package:\n\n```powershell',
+              '## Uninstall\n\nFrom an extracted release package, **double-click `Uninstall.cmd`**. The equivalent PowerShell command is:\n\n```powershell',
+              'README uninstall launcher'
+          )
+          readme.write_text(r, encoding='utf-8')
+          PY
+
+          printf '%s\n' '=== Main docs markers ==='
+          grep -q 'ZIP · RECOMMENDED' site/index.html
+          grep -q "quickCmd: 'Install.cmd'" site/index.html
+          grep -q "verifyCmd: 'Verify.cmd'" site/index.html
+          grep -q "uninstallCmd: 'Uninstall.cmd'" site/index.html
+          grep -q 'double-click `Verify.cmd`' README.md
+          grep -q 'double-click `Uninstall.cmd`' README.md
+          printf '%s\n' 'Pages + README: OK'
+
+      - name: Commit documentation sync and self-cleanup
+        run: |
+          set -euo pipefail
+          WIKI_SHA="$(cat /tmp/wiki_sha)"
+          cat > .github/wiki-sync-status.txt <<EOF
+          v1.2.4 documentation sync completed
+          wiki_commit=${WIKI_SHA}
+          wiki_pages=Home.md,Guia-Instalacion-ES.md,Install-Guide-EN.md,Verificar-ES.md,Verify-EN.md,Desinstalar-ES.md,Uninstall-EN.md
+          pages_markers=Install.cmd,Verify.cmd,Uninstall.cmd
+          readme_markers=Verify.cmd,Uninstall.cmd
+          EOF
+          rm -f .github/workflows/tmp-sync-docs-v124.yml
+          git add README.md site/index.html .github/wiki-sync-status.txt .github/workflows/tmp-sync-docs-v124.yml
+          git commit -m "docs: align Pages and Wiki flow with v1.2.4"
+          git push origin main
