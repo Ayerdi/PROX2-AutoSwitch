@@ -35,9 +35,11 @@ function Write-AutoSwitchLog {
 try {
     $targetValue = if ($Action -eq 'Disable') { 1 } else { 0 }
 
-    # IPolicyConfig (CLSID 870af99c-171d-4f9e-af0d-e63df40c2bc9) permite
-    # SetPropertyValue sobre el property store de efectos del endpoint.
-    Add-Type -TypeDefinition @'
+    # Toda la logica COM vive en C# (donde el cast a IPolicyConfig es nativo y
+    # fiable). En PowerShell 5.1 el cast de un RCW COM a una interfaz
+    # [ComImport] custom falla ("No se puede convertir..."), por eso se expone
+    # un unico metodo estatico que hace Set + verifica internamente.
+    $source = @'
 using System;
 using System.Runtime.InteropServices;
 
@@ -78,52 +80,64 @@ namespace AutoSwitch
         [PreserveSig] int SetDefaultEndpoint(string pszDeviceName, int eRole);
         [PreserveSig] int SetEndpointVisibility(string pszDeviceName, bool bVisible);
     }
+
+    public static class AudioEnhancements
+    {
+        private static readonly Guid PKEY_AudioEndpoint_Disable_SysFx =
+            new Guid("1da5d803-d492-4edd-8c23-e0c0ffee7f0e");
+        private const uint PID_SYSFX = 5;
+
+        public static int SetSysFx(string deviceId, bool disable)
+        {
+            object comObj = new CPolicyConfigVistaClient();
+            IPolicyConfig policy = (IPolicyConfig)comObj;
+
+            PROPERTYKEY pkey = new PROPERTYKEY();
+            pkey.fmtid = PKEY_AudioEndpoint_Disable_SysFx;
+            pkey.pid = PID_SYSFX;
+
+            PROPVARIANT pv = new PROPVARIANT();
+            pv.vt = 19; // VT_UI4
+            pv.ulVal = disable ? 1u : 0u;
+
+            int hrSet = policy.SetPropertyValue(deviceId, true, ref pkey, ref pv);
+            if (hrSet != 0)
+            {
+                return hrSet; // negativo (error) -> PowerShell detecta != 0
+            }
+
+            // Verificar releendo la propiedad.
+            PROPVARIANT pvCheck = new PROPVARIANT();
+            int hrGet = policy.GetPropertyValue(deviceId, true, ref pkey, out pvCheck);
+            if (hrGet != 0)
+            {
+                return -hrGet; // fallo en lectura -> exit 1
+            }
+
+            bool effective = pvCheck.ulVal != 0;
+            if (effective != disable)
+            {
+                return -2; // el cambio no se aplico (valor leido distinto del objetivo)
+            }
+
+            return 0;
+        }
+    }
 }
-'@ -ErrorAction Stop
+'@
 
-    # La coclass [ComImport] se crea con Activator + GetTypeFromCLSID; el cast
-    # a IPolicyConfig usa QueryInterface sobre el RCW. (New-Object + cast falla
-    # en PS 5.1, y hacer que la clase implemente la interfaz no compila.)
-    $clsid = [guid]'870af99c-171d-4f9e-af0d-e63df40c2bc9'
-    $policyConfig = [Activator]::CreateInstance([type]::GetTypeFromCLSID($clsid))
-    $policy = [AutoSwitch.IPolicyConfig]$policyConfig
+    Add-Type -TypeDefinition $source -ErrorAction Stop
 
-    $pkey = New-Object AutoSwitch.PROPERTYKEY
-    $pkey.fmtid = [guid]'1da5d803-d492-4edd-8c23-e0c0ffee7f0e'
-    $pkey.pid = 5
-
-    # Escribir el valor objetivo en el FxStore del endpoint.
-    $pv = New-Object AutoSwitch.PROPVARIANT
-    $pv.vt = 19          # VT_UI4
-    $pv.uiVal = $targetValue
-
-    $hrSet = $policy.SetPropertyValue($DeviceId, $true, [ref]$pkey, [ref]$pv)
-    if ($hrSet -ne 0) {
-        Write-AutoSwitchLog ("Enhancements: SetPropertyValue fallo con HRESULT 0x{0:X8} para {1}" -f $hrSet, $DeviceId)
-        exit 1
-    }
-
-    # Verificar releendo la propiedad.
-    $pvCheck = New-Object AutoSwitch.PROPVARIANT
-    $hrGet = $policy.GetPropertyValue($DeviceId, $true, [ref]$pkey, [ref]$pvCheck)
-
-    $effective = $false
-    if ($hrGet -eq 0) {
-        $effective = ($pvCheck.ulVal -ne 0)
-    }
-
+    $hr = [AutoSwitch.AudioEnhancements]::SetSysFx($DeviceId, ($targetValue -eq 1))
     $actionText = if ($Action -eq 'Disable') { 'deshabilitados' } else { 'habilitados' }
 
-    if ($hrGet -ne 0 -or $effective -ne ($targetValue -ne 0)) {
-        Write-AutoSwitchLog (
-            "Enhancements: no se pudo verificar el cambio ({0}). HRESULT={1} ValorLeido={2}" -f
-            $actionText, $hrGet, $effective
-        )
-        exit 1
+    if ($hr -eq 0) {
+        Write-AutoSwitchLog ("Enhancements {0} en {1} (SysFx={2})." -f $actionText, $DeviceId, $targetValue)
+        exit 0
     }
 
-    Write-AutoSwitchLog ("Enhancements {0} en {1} (SysFx={2})." -f $actionText, $DeviceId, $effective)
-    exit 0
+    Write-AutoSwitchLog ("Enhancements: no se pudo {0} en {1}. Resultado={2} (0x{2:X8})." -f $actionText, $DeviceId, $hr)
+    exit 1
 }
 catch {
     try {

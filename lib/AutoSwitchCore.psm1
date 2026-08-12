@@ -385,7 +385,7 @@ function Get-EndpointFxState {
         # Sentinel = un tipo que SI se declara en el Add-Type. 'AutoSwitch.CoreAudio'
         # no existe y haria que el Add-Type se reintentara en cada llamada, fallando
         # en la segunda (los tipos ya existen) y devolviendo $null.
-        $typeName = 'AutoSwitch.IMMDeviceEnumerator'
+        $typeName = 'AutoSwitch.EndpointFx'
 
         if (-not ($typeName -as [type])) {
             Add-Type -TypeDefinition @'
@@ -443,44 +443,61 @@ namespace AutoSwitch
         [PreserveSig] int SetValue(ref PROPERTYKEY key, ref PROPVARIANT pv);
         [PreserveSig] int Commit();
     }
+
+    public static class EndpointFx
+    {
+        private static readonly Guid PKEY_AudioEndpoint_Disable_SysFx =
+            new Guid("1da5d803-d492-4edd-8c23-e0c0ffee7f0e");
+        private const uint PID_SYSFX = 5;
+
+        // Devuelve: 1 = SysFx deshabilitado, 0 = SysFx habilitado,
+        //          -1 = no se pudo leer (endpoint inexistente / COM fallo).
+        public static int ReadSysFx(string deviceId)
+        {
+            object comObj = new MMDeviceEnumeratorComObject();
+            IMMDeviceEnumerator enumerator = (IMMDeviceEnumerator)comObj;
+
+            IntPtr devicePtr = IntPtr.Zero;
+            int hr = enumerator.GetDevice(deviceId, out devicePtr);
+            if (hr != 0 || devicePtr == IntPtr.Zero)
+            {
+                return -1;
+            }
+
+            IMMDevice device = (IMMDevice)Marshal.GetObjectForIUnknown(devicePtr);
+
+            IntPtr storePtr = IntPtr.Zero;
+            int hrStore = device.OpenPropertyStore(0, out storePtr); // STGM_READ = 0
+            if (hrStore != 0 || storePtr == IntPtr.Zero)
+            {
+                return -1;
+            }
+
+            IPropertyStore store = (IPropertyStore)Marshal.GetObjectForIUnknown(storePtr);
+
+            PROPERTYKEY pkey = new PROPERTYKEY();
+            pkey.fmtid = PKEY_AudioEndpoint_Disable_SysFx;
+            pkey.pid = PID_SYSFX;
+
+            PROPVARIANT pv = new PROPVARIANT();
+            int hrGet = store.GetValue(ref pkey, out pv);
+            if (hrGet != 0)
+            {
+                return 0; // propiedad no presente -> enhancements habilitados
+            }
+
+            return pv.ulVal != 0 ? 1 : 0;
+        }
+    }
 }
 '@ -ErrorAction Stop
         }
 
-        $enumerator = [System.Activator]::CreateInstance(
-            [type]::GetTypeFromCLSID([guid]'BCDE0395-E52F-467C-8E3D-C4579291692E'))
-        $enumeratorIface = [AutoSwitch.IMMDeviceEnumerator]$enumerator
-
-        $devicePtr = [IntPtr]::Zero
-        $hr = $enumeratorIface.GetDevice($DeviceId, [ref]$devicePtr)
-        if ($hr -ne 0 -or $devicePtr -eq [IntPtr]::Zero) {
+        $fx = [AutoSwitch.EndpointFx]::ReadSysFx($DeviceId)
+        if ($fx -lt 0) {
             return $null
         }
-
-        $device = [System.Runtime.InteropServices.Marshal]::GetObjectForIUnknown($devicePtr)
-        $deviceIface = [AutoSwitch.IMMDevice]$device
-
-        $storePtr = [IntPtr]::Zero
-        $hrStore = $deviceIface.OpenPropertyStore(0, [ref]$storePtr)  # STGM_READ = 0
-        if ($hrStore -ne 0 -or $storePtr -eq [IntPtr]::Zero) {
-            return $null
-        }
-
-        $store = [System.Runtime.InteropServices.Marshal]::GetObjectForIUnknown($storePtr)
-        $storeIface = [AutoSwitch.IPropertyStore]$store
-
-        $pkey = New-Object AutoSwitch.PROPERTYKEY
-        $pkey.fmtid = [guid]'1da5d803-d492-4edd-8c23-e0c0ffee7f0e'
-        $pkey.pid = 5
-
-        $pv = New-Object AutoSwitch.PROPVARIANT
-        $hrGet = $storeIface.GetValue([ref]$pkey, [ref]$pv)
-
-        if ($hrGet -ne 0) {
-            return $false
-        }
-
-        return ($pv.ulVal -ne 0)
+        return ($fx -eq 1)
     }
     catch {
         return $null
