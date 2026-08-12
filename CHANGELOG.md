@@ -4,6 +4,12 @@ Todas las versiones notables de este proyecto se documentan aquí.
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Este proyecto se adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-08-12
+
+### Fixed
+- **`Reconfigure...` del tray ahora ejecuta el wizard completo de detección** en vez de solo intercambiar `HeadsetId`/`SpeakerId`. La versión anterior dejaba el `DetectionMode` y la asociación G HUB antiguos, lo que producía dos estados rotos: un PRO X 2 reconfigurado a Jabra seguía vigilando el PRO X 2, y un Jabra reconfigurado a PRO X 2 seguía en `WindowsEndpoint` (Windows siempre reporta el endpoint del PRO X 2 `Active`, así que el apagado nunca se detectaba). Ahora valida el ciclo `ON → OFF → ON`, determina `WindowsEndpoint` o `LogitechGHub` (con confirmación del PRO X 2 vía G HUB), y actualiza `DetectionMode`, `GHubDisplayName` y `EnhancementsDeviceId`. Si no hay método compatible, deja la config intacta.
+- **README dentro del ZIP/tag desfasado**: la v1.2.0 incluyó un README que describía el flujo "G HUB primero" del instalador; el flujo real es universal-first. Corregido en el repo y en esta release.
+
 ## [1.2.0] - 2026-08-12
 
 ### Added

@@ -123,7 +123,7 @@ Once running, an icon appears in the system tray:
 - **Headset / Fallback / Next switch** — info lines showing the configured devices and which output AutoSwitch would switch to right now (refreshed every 5 s).
 - **AutoSwitch: Enabled / Disabled** — pause or resume switching without quitting.
 - **Disable / Enable Audio Enhancements for <headset>** — toggles the global Windows audio enhancements of the configured headset endpoint (a UAC prompt appears; the menu updates only if the change is verified).
-- **Reconfigure...** — pick a new headset and fallback from the current Windows output devices without reinstalling. It saves `config.json` and the worker picks up the change on the next poll.
+- **Reconfigure...** — re-run the detection wizard without reinstalling: pick a new headset and fallback from the current Windows output devices, turn the headset OFF and back ON, and it re-determines the detection mode (`WindowsEndpoint` or `LogitechGHub` with a G HUB PRO X 2 match). It saves `config.json` (including `DetectionMode`, the G HUB association and the enhancements target) and the worker picks it up on the next poll. If no compatible method is found for the new headset, the config is left untouched.
 - **Exit** — stop AutoSwitch.
 
 ### Important
