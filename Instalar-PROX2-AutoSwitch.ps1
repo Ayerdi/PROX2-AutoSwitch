@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 $ErrorActionPreference = "Stop"
 
 # PowerShell 5.1 on old .NET can negotiate TLS 1.0/1.1 and fail against
