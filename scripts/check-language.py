@@ -29,7 +29,11 @@ SPANISH_PATTERNS = [
         r"configuraci[oó]n|reconfiguraci[oó]n|verificaci[oó]n|conectado|desconectado|"
         r"encendido|apagado|selecciona|seleccionar|salida de audio|"
         r"prueba|modo universal|versi[oó]n estable|exportacion|transicion|"
-        r"reconexion|icono|notificaciones|menu|hilo|bucle|unico|lectura"
+        r"reconexion|icono|notificaciones|hilo|bucle|unico|lectura|migracion|"
+        r"peticion|esperando|cerro|limite global|eventos asincronos|devuelve|"
+        r"detectado|segundo intento|consiguio|estado del endpoint|exporta|fila|"
+        r"ausente|desconocido|preseleccionar|cambio fisico|ultimo estado|"
+        r"encontrado por|nuevo item|reintentar|submen[uú]"
         r")\b",
         re.IGNORECASE,
     ),
@@ -47,9 +51,7 @@ SPANISH_STOPWORDS = {
 # Localized labels and multilingual input literals are compatibility metadata,
 # not repository prose. Keep them while requiring surrounding documentation to
 # remain English.
-ALLOWED_FRAGMENTS = (
-    "Español",
-)
+ALLOWED_FRAGMENTS = ("Español",)
 ALLOWED_LINE_PATTERNS = (
     re.compile(r"\^\(s\|si\|sí\|y\|yes\)\$", re.IGNORECASE),
 )
