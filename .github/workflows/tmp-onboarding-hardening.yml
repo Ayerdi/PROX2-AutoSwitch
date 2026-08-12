@@ -18,7 +18,16 @@ jobs:
           fetch-depth: 0
 
       - name: Apply onboarding hardening
-        run: python3 .github/tmp_onboarding_hardening.py
+        shell: bash
+        run: |
+          set +e
+          python3 .github/tmp_onboarding_hardening.py
+          code=$?
+          set -e
+          if [ "$code" -ne 0 ] && [ "$code" -ne 1 ]; then
+            exit "$code"
+          fi
+          python3 .github/tmp_onboarding_finish.py
 
       - name: Commit final branch state
         shell: bash
@@ -26,7 +35,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          rm -f .github/tmp_onboarding_hardening.py .github/workflows/tmp-onboarding-hardening.yml
+          rm -f .github/tmp_onboarding_hardening.py .github/tmp_onboarding_finish.py .github/workflows/tmp-onboarding-hardening.yml
           rm -f .github/tmp_add_tray_image.py .github/tmp_tray_reconcile.py .github/tmp_tray_final_reconcile.py
           rm -f .github/workflows/tmp-add-tray-image.yml .github/workflows/tmp-tray-reconcile.yml .github/workflows/tmp-tray-final-reconcile.yml
           git add -A
