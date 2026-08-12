@@ -1,6 +1,6 @@
 # SOURCES
 
-Verified on August 7, 2026 (updated August 10, 2026).
+Verified on August 7, 2026 (updated August 12, 2026).
 
 ## NirSoft — SoundVolumeCommandLine
 
@@ -24,6 +24,7 @@ Relevant points:
 - Property key: `{1da5d803-d492-4edd-8c23-e0c0ffee7f0e}, 5` (`PKEY_AudioEndpoint_Disable_SysFx`).
 - Setting it to `1` disables the system effects of the endpoint (the "Disable audio enhancements" switch).
 - Reading the value does not require elevation; **writing** it (via `IPolicyConfig::SetPropertyValue` on the FxStore) requires elevation (UAC).
+- **The value lives in the endpoint's FxStore**, reachable only through `IPolicyConfig` with `bFxStore=true`. The endpoint `IPropertyStore` (`IMMDevice::OpenPropertyStore`) does **not** contain it — reading it there always reports "enabled". This project reads it with `IPolicyConfig::GetPropertyValue(deviceId, true, ...)` in C# (see `AutoSwitch.EndpointFx.ReadSysFx`).
 - References:
   - https://learn.microsoft.com/en-us/windows/win32/coreaudio/pkey-audioendpoint-disable-sysfx
   - https://learn.microsoft.com/en-us/answers/questions/669471/how-to-control-enable-audio-enhancements-with-code (verified sample with `IPolicyConfig`, CLSID `870af99c-171d-4f9e-af0d-e63df40c2bc9`, IID `f8679f50-850a-41cf-9c72-430f290290c8`)

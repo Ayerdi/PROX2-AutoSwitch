@@ -2,10 +2,9 @@
 
 > **Estado:** **SUPERSEDED.** Este documento fue el diseño original para añadir detección universal.
 > La implementación final (v1.2.0) lo integró de forma más amplia: el proyecto es ahora un
-> AutoSwitch universal con `DetectionMode` (`WindowsEndpoint` | `LogitechGHub`), polling por
-> `System.Windows.Forms.Timer`, icono de bandeja y toggle de Audio Enhancements. Ver el plan
-> en `~/.commandcode/plans/universal-audio-autoswitch.md` y el CHANGELOG v1.2.0. Se conserva
-> como contexto histórico del razonamiento de providers.
+> AutoSwitch universal con `DetectionMode` (`WindowsEndpoint` | `LogitechGHub`), polling en un
+> proceso worker separado (`AUTOSWITCH_WORKER=1`), icono de bandeja y toggle de Audio Enhancements.
+> Ver el CHANGELOG v1.2.0 y `AGENT.md`. Se conserva como contexto histórico del razonamiento de providers.
 > **Problema de fondo:** cambiar la detección para que el AutoSwitch funcione con cualquier auricular, no solo Logitech PRO X 2, manteniendo intacto lo que ya funciona.
 
 ## Contexto: por qué existe esta issue

@@ -133,8 +133,6 @@ Windows audio `Item ID`s are **not reused** across installs. The installer is de
 
 The `dev000000XX` ID from G HUB isn't persisted either. The runtime keeps the `extendedDisplayName` and discovers the current `deviceId` at startup.
 
-> The PowerShell scripts are the original working versions and their on-screen messages are in Spanish. They work unchanged on any locale; only the UI text is Spanish.
-
 ## Where it installs
 
 ```text
@@ -144,14 +142,17 @@ The `dev000000XX` ID from G HUB isn't persisted either. The runtime keeps the `e
 Main contents:
 
 ```text
-PROX2AutoSwitch.ps1
+PROX2AutoSwitch.ps1        # runtime (tray)
 config.json
 svcl.exe
-Toggle-AudioEnhancements.ps1
+Toggle-AudioEnhancements.ps1   # helper elevado (UAC) de enhancements
+icon.ico
 Iniciar-Oculto.vbs
 autoswitch.log
 Desinstalar-PROX2-AutoSwitch.ps1
 Verificar-PROX2-AutoSwitch.ps1
+lib\AutoSwitchCore.psm1    # lógica compartida
+control\                   # flags de comunicación tray <-> worker
 ```
 
 Autostart is created in the user's Startup folder as:
@@ -193,11 +194,11 @@ Two consecutive OFF readings are required before treating the headset as disconn
 Expected example:
 
 ```text
-PRO X 2 AutoSwitch iniciado.
-PRO X 2 detectado por G HUB: PRO X 2 Lightspeed Gaming Headset (dev...)
-Conectado con G HUB.
-Salida cambiada -> ...
-Salida cambiada -> ...
+PRO X 2 AutoSwitch started (mode LogitechGHub).
+Connected to G HUB.
+PRO X 2 detected by G HUB: PRO X 2 Lightspeed Gaming Headset (dev...)
+Output changed -> PRO X 2 LIGHTSPEED — Cascos Gaming
+Output changed -> High Definition Audio Device — Altavoces AMAZON
 ```
 
 ## Uninstall
@@ -244,13 +245,15 @@ then extract only:
 ## Repository layout
 
 - `install.ps1` — one-click bootstrap: fetches the latest release ZIP and its `.sha256`, verifies the hash, then runs the installer.
-- `Instalar-PROX2-AutoSwitch.ps1` — clean install from scratch (universal + G HUB paths, auto detection mode).
-- `Runtime-PROX2-AutoSwitch.ps1` — the runtime copied to `%LOCALAPPDATA%` (tray icon + `WinForms.Timer` polling).
+- `Instalar-PROX2-AutoSwitch.ps1` — clean install (universal + G HUB paths, auto detection mode). Skips the `svcl.exe` download if it is already installed.
+- `Runtime-PROX2-AutoSwitch.ps1` — the runtime copied to `%LOCALAPPDATA%`: tray icon + invisible `Form` message pump, with the polling in a separate worker process (`AUTOSWITCH_WORKER=1`).
 - `Toggle-AudioEnhancements.ps1` — elevated helper (UAC) that disables/enables the headset's Audio Enhancements.
 - `Desinstalar-PROX2-AutoSwitch.ps1` — removes process, autostart and files (with truthful per-step reporting).
 - `Verificar-PROX2-AutoSwitch.ps1` — quick diagnostics.
-- `lib/AutoSwitchCore.psm1` — shared pure logic (Item ID extraction, CSV parse, endpoint state mapping, OFF debounce, config validation/migration) used by installer, runtime and tests.
-- `tests/` — Pester coverage for the pure logic.
+- `lib/AutoSwitchCore.psm1` — shared pure logic (Item ID extraction, CSV parse, endpoint state mapping, OFF debounce, config validation/migration, C# COM interop) used by installer, runtime and tests.
+- `assets/icon.ico` — tray icon.
+- `docs/` — design notes (the `WindowsEndpointProvider.md` is superseded; see CHANGELOG v1.2.0).
+- `tests/` — Pester coverage for the pure logic (with a real `svcl /scomma` fixture).
 - `site/` — the [GitHub Pages site](https://ayerdi.github.io/PROX2-AutoSwitch/), ES/EN.
 - `AGENT.md` — context so an AI agent can maintain/rebuild the project.
 - `SOURCES.md` — verified technical references.

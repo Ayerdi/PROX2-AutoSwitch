@@ -96,10 +96,26 @@ vendor software is needed.
 11. **Audio Enhancements**: toggled only for the configured `HeadsetId` via a temporary elevated
     helper (`Toggle-AudioEnhancements.ps1`, `Start-Process -Verb RunAs`) that writes
     `PKEY_AudioEndpoint_Disable_SysFx` (1da5d803-d492-4edd-8c23-e0c0ffee7f0e, 5) through
-    `IPolicyConfig::SetPropertyValue`, verifies, and exits. The runtime itself is never elevated.
-    The menu label updates only after a verified success (UAC cancel → no visual change).
+    `IPolicyConfig::SetPropertyValue(deviceId, bFxStore=true)`, verifies, and exits. The runtime itself
+    is never elevated. The menu label updates only after a verified success (UAC cancel → no visual change).
     Do **NOT** use `svcl /SetBooleanFxProperty` for this (individual effects only, not the global
     "Disable audio enhancements" switch).
+
+12. **COM interop lives in C#**: PowerShell 5.1 cannot cast a COM RCW to a custom `[ComImport]` interface
+    (`New-Object`, `Activator` or `GetTypeFromCLSID` all fail with "No se puede convertir…"). The cast is
+    native in C#, so both the helper and `lib/AutoSwitchCore.psm1` compile the whole COM block with
+    `Add-Type` and expose a static method (`AutoSwitch.AudioEnhancements.SetSysFx`,
+    `AutoSwitch.EndpointFx.ReadSysFx`). Read the SysFx state with `IPolicyConfig::GetPropertyValue` on the
+    **FxStore** (`bFxStore=true`) — the endpoint `IPropertyStore` does **not** contain
+    `PKEY_AudioEndpoint_Disable_SysFx`, so reading it there always reports "enabled".
+
+13. **`Add-Type` sentinel**: guard with a type that is actually declared in the block (e.g.
+    `AutoSwitch.EndpointFx`). Using a non-existent sentinel makes the compiler re-run on every call and
+    fail on the second one.
+
+14. **Paths**: launch the worker with `$PSCommandPath` (captured once as `$script:RuntimePath` at the top
+    of the runtime). `$MyInvocation.MyCommand.Path` inside a function can be empty in PS 5.1. Files with
+    non-ASCII characters must be saved with a UTF-8 BOM (PSScriptAnalyzer requirement).
 
 ## Local G HUB API used
 
@@ -230,7 +246,7 @@ Before changing the hash:
 
 ## Possible future improvements
 
-- Event-driven `IMMNotificationClient` for instant `Active ↔ Unplugged` (needs C# `Add-Type`; the runtime is PS-only today).
+- Event-driven `IMMNotificationClient` for instant `Active ↔ Unplugged` (could replace the 1.5 s polling; the COM interop pattern in `lib/AutoSwitchCore.psm1` already compiles C#).
 - Subscribe to `/battery/state/changed` to reduce polling.
 - Recalibration without reinstalling.
 - More vendor-specific providers (Jabra Direct, BT APIs) for headsets Windows cannot detect.
