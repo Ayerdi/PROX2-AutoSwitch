@@ -24,7 +24,7 @@ jobs:
 
           replacements = {
               Path('AGENT.md'): {
-                  '("No se puede convertir…")': '(the COM interface cast fails at runtime)',
+                  'No se puede convertir…': 'the COM interface cast fails at runtime',
               },
               Path('Runtime-PROX2-AutoSwitch.ps1'): {
                   '# Un reintento por si Windows estaba recreando el endpoint.': '# Retry once in case Windows was recreating the endpoint.',
