@@ -895,7 +895,8 @@ function Initialize-TrayAndTimer {
     $script:MenuItemInfoNext.Enabled = $false
     [void]$menu.Items.Add($script:MenuItemInfoNext)
 
-    [void]$menu.Items.Add(New-Object System.Windows.Forms.ToolStripSeparator)
+    $sep = New-Object System.Windows.Forms.ToolStripSeparator
+    [void]$menu.Items.Add($sep)
 
     $script:MenuItemAutoSwitch = New-Object System.Windows.Forms.ToolStripMenuItem
     $script:MenuItemAutoSwitch.Text = "AutoSwitch: Enabled"
