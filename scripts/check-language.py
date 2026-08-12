@@ -39,10 +39,14 @@ SPANISH_STOPWORDS = {
     "tambien", "una", "uno", "ya",
 }
 
-# Localized language labels and literal OS/runtime strings can remain where they
-# are needed for navigation or compatibility diagnostics.
+# Localized labels and multilingual input literals are compatibility metadata,
+# not repository prose. Keep them while requiring surrounding documentation to
+# remain English.
 ALLOWED_FRAGMENTS = (
     "Español",
+)
+ALLOWED_LINE_PATTERNS = (
+    re.compile(r"\^\(s\|si\|sí\|y\|yes\)\$", re.IGNORECASE),
 )
 
 
@@ -61,6 +65,8 @@ def is_text_file(path: Path) -> bool:
 
 
 def looks_spanish(line: str) -> bool:
+    if any(pattern.search(line) for pattern in ALLOWED_LINE_PATTERNS):
+        return False
     candidate = line
     for fragment in ALLOWED_FRAGMENTS:
         candidate = candidate.replace(fragment, "Spanish")
