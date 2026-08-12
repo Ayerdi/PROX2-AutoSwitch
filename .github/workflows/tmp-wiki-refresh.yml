@@ -1,0 +1,55 @@
+name: tmp-wiki-refresh
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/tmp-wiki-refresh.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  refresh-wiki:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Clone and update wiki
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/wiki
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" /tmp/wiki
+          python3 .github/tmp_wiki_refresh.py
+          cd /tmp/wiki
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          echo "=== Wiki files after refresh ==="
+          find . -maxdepth 1 -type f -name '*.md' -printf '%f\n' | sort
+          echo "=== Wiki diff summary ==="
+          git diff --cached --stat
+          if git diff --cached --quiet; then
+            echo "Wiki already up to date."
+          else
+            git commit -m "docs: refresh wiki for v1.2.3 and current main"
+            git push origin HEAD
+            echo "WIKI_COMMIT=$(git rev-parse HEAD)"
+          fi
+
+      - name: Remove one-shot tooling from main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/tmp_wiki_refresh.py .github/workflows/tmp-wiki-refresh.yml
+          git commit -m "chore: remove wiki refresh tooling"
+          git push origin HEAD:main
