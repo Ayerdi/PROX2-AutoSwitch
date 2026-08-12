@@ -38,7 +38,7 @@ try {
     # All COM logic lives in C# (where casting to IPolicyConfig is native and
     # fiable). En PowerShell 5.1 el cast de un RCW COM a una interfaz
     # a custom [ComImport] cast is unreliable in PowerShell 5.1), so this exposes
-    # un unico metodo estatico que hace Set + verifica internamente.
+    # one static method that performs Set + internal verification.
     $source = @'
 using System;
 using System.Runtime.InteropServices;

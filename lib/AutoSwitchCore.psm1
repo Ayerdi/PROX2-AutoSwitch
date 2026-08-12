@@ -514,12 +514,12 @@ namespace AutoSwitch
             new Guid("1da5d803-d492-4edd-8c23-e0c0ffee7f0e");
         private const uint PID_SYSFX = 5;
 
-        // Devuelve: 1 = SysFx deshabilitado, 0 = SysFx habilitado,
+        // Returns: 1 = SysFx disabled, 0 = SysFx enabled,
         //          -1 = read failed (missing endpoint / COM failure).
         // IMPORTANTE: se lee con IPolicyConfig.GetPropertyValue(deviceId,
         // bFxStore=true), the SAME store written by the elevated helper. The
         // IPropertyStore del endpoint (OpenPropertyStore) NO contiene
-        // PKEY_AudioEndpoint_Disable_SysFx, por lo que leeria siempre
+        // PKEY_AudioEndpoint_Disable_SysFx, so reading it there would always
         // "habilitados" aunque esten deshabilitados.
         public static int ReadSysFx(string deviceId)
         {
@@ -558,12 +558,12 @@ namespace AutoSwitch
 function Get-ConfigDetectionMode {
     <#
     .SYNOPSIS
-        Resuelve el DetectionMode de una config, con migracion implicita.
+        Resolve DetectionMode from a config, including implicit migration.
     .DESCRIPTION
-        Si $Config ya tiene DetectionMode, lo devuelve validado
-        ('WindowsEndpoint' o 'LogitechGHub'). Si no existe, devuelve
+        If $Config already has DetectionMode, return the validated value
+        ('WindowsEndpoint' or 'LogitechGHub'). If absent, return
         'LogitechGHub' (comportamiento de configs v1.1.0 y anteriores).
-        Devuelve $null si el valor existente no es valido.
+        Return $null when an existing value is invalid.
     #>
     [CmdletBinding()]
     param(
