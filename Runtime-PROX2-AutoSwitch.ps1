@@ -581,7 +581,7 @@ function Wait-ForHeadsetState {
     param(
         [Parameter(Mandatory = $true)][string]$ItemId,
         [Parameter(Mandatory = $true)][string]$Expected,
-        [int]$TimeoutSeconds = 6,
+        [int]$TimeoutSeconds = 12,
         [int]$PollIntervalMs = 500
     )
 
@@ -749,28 +749,28 @@ function Show-ReconfigureDialog {
             $lblStatus.Refresh()
 
             [System.Windows.Forms.MessageBox]::Show(
-                "Turn the headset ON now, wait a few seconds, then click OK.",
+                "Turn the headset ON now, then click OK.`n(It can take several seconds for Windows to notice.)",
                 "Audio AutoSwitch",
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Information
             ) | Out-Null
-            $s1 = Wait-ForHeadsetState -ItemId $newHeadsetId -Expected 'Connected'
+            $s1 = Wait-ForHeadsetState -ItemId $newHeadsetId -Expected 'Connected' -TimeoutSeconds 15
 
             [System.Windows.Forms.MessageBox]::Show(
-                "Turn the headset OFF now, wait a few seconds, then click OK.",
+                "Turn the headset OFF now, then click OK.`n(It can take several seconds for Windows to notice.)",
                 "Audio AutoSwitch",
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Information
             ) | Out-Null
-            $s2 = Wait-ForHeadsetState -ItemId $newHeadsetId -Expected 'Disconnected'
+            $s2 = Wait-ForHeadsetState -ItemId $newHeadsetId -Expected 'Disconnected' -TimeoutSeconds 15
 
             [System.Windows.Forms.MessageBox]::Show(
-                "Turn the headset back ON now, wait a few seconds, then click OK.",
+                "Turn the headset back ON now, then click OK.`n(It can take several seconds for Windows to notice.)",
                 "Audio AutoSwitch",
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Information
             ) | Out-Null
-            $s3 = Wait-ForHeadsetState -ItemId $newHeadsetId -Expected 'Connected'
+            $s3 = Wait-ForHeadsetState -ItemId $newHeadsetId -Expected 'Connected' -TimeoutSeconds 20
 
             $lblStatus.Text = "Step 2/3: ON=$s1  OFF=$s2  ON=$s3"
             $lblStatus.Refresh()
