@@ -123,8 +123,10 @@ The installer will:
 
 Once running, an icon appears in the system tray:
 
+- **Headset / Fallback / Next switch** — info lines showing the configured devices and which output AutoSwitch would switch to right now (refreshed every 5 s).
 - **AutoSwitch: Enabled / Disabled** — pause or resume switching without quitting.
 - **Disable / Enable Audio Enhancements for <headset>** — toggles the global Windows audio enhancements of the configured headset endpoint (a UAC prompt appears; the menu updates only if the change is verified).
+- **Reconfigure...** — pick a new headset and fallback from the current Windows output devices without reinstalling. It saves `config.json` and the worker picks up the change on the next poll.
 - **Exit** — stop AutoSwitch.
 
 ### Important
