@@ -38,14 +38,48 @@ jobs:
               if cooked.count("'''") % 2 == 1:
                   inside_triple = not inside_triple
           script = '\n'.join(out) + '\n'
-          script = script.replace(
-              'Polling runs in a separate worker process so the tray stays responsive.',
-              'Polling runs in a separate worker process so the tray never blocks.'
-          )
-          script = script.replace(
-              "Windows audio Item IDs are not reused across installs: the installer captures the current machine's IDs. Don't copy config.json from another PC.",
-              "Windows audio Item IDs are not reused across installs: the installer captures them from your current Windows. Don't copy config.json from another machine."
-          )
+
+          # Replace the site subsection of the generated patch with exact copy
+          # from the current file. Documentation copy changes more often than
+          # code, so keep strict matching local to each current string.
+          site_start = script.index("p = 'site/index.html'\n")
+          site_end = script.index("write(p, t)\n", site_start) + len("write(p, t)\n")
+          site_patch = r'''p = 'site/index.html'
+t = read(p)
+site_replacements = [
+    ('what4: "Icono de bandeja: ver el auricular y el fallback configurados, activar/pausar AutoSwitch, reconfigurar con el asistente de detección (sin reinstalar) y deshabilitar/habilitar los Audio Enhancements del auricular.",',
+     'what4: "Icono de bandeja: ver el auricular y el fallback, activar/pausar AutoSwitch, reconfigurar sin reinstalar (con polling Bluetooth y refresco del endpoint si Windows lo recrea) y deshabilitar/habilitar los Audio Enhancements.",'),
+    ('howIntro: "Dos modos de detección, elegidos automáticamente al instalar: WindowsEndpoint (el estado Active ↔ Unplugged del endpoint de Windows) y LogitechGHub (payload de batería de G HUB para el PRO X 2). El polling corre en un proceso worker separado para no bloquear la bandeja.",',
+     'howIntro: "Dos modos de detección, elegidos automáticamente: WindowsEndpoint (estado Active ↔ Unplugged) y LogitechGHub (payload de batería para PRO X 2). Reconfigure valida ON→OFF→ON con esperas acotadas; si Bluetooth recrea el endpoint, vuelve a resolver su identidad y actualiza el Item ID. El polling normal corre en un worker separado.",'),
+    ('idNote: "Los Item ID de audio de Windows no se reutilizan entre instalaciones: el instalador captura los del Windows actual. No copies config.json de otro equipo.",',
+     'idNote: "Los Item ID son locales y pueden cambiar tras drivers o recreación del endpoint. Una instalación limpia captura los actuales y Reconfigure puede refrescar el del auricular. No copies config.json de otro equipo.",'),
+    ('v2: "Espera ~1–2 segundos. Windows debería seleccionar los auriculares.",',
+     'v2: "Espera unos segundos; algunos Bluetooth tardan más al reconectar. Windows debería seleccionar los auriculares.",'),
+    ('v4: "Tras dos comprobaciones consecutivas (~3 segundos), Windows debería seleccionar la salida alternativa.",',
+     'v4: "Cuando Windows refleje la desconexión y dos comprobaciones consecutivas la confirmen (normalmente pocos segundos), debería seleccionar la salida alternativa.",'),
+    ('what4: "Tray icon: see the configured headset and fallback, enable/pause AutoSwitch, reconfigure with the detection wizard (no reinstall) and disable/enable the headset\'s Audio Enhancements.",',
+     'what4: "Tray icon: see the headset/fallback, enable/pause AutoSwitch, reconfigure without reinstalling (with Bluetooth polling and endpoint refresh if Windows recreates it), and disable/enable Audio Enhancements.",'),
+    ('howIntro: "Two detection modes, chosen automatically at install: WindowsEndpoint (the endpoint\'s Active ↔ Unplugged state) and LogitechGHub (G HUB battery payload for PRO X 2). Polling runs in a separate worker process so the tray never blocks.",',
+     'howIntro: "Two detection modes, chosen automatically: WindowsEndpoint (Active ↔ Unplugged) and LogitechGHub (G HUB battery payload for PRO X 2). Reconfigure validates ON→OFF→ON with bounded waits; if Bluetooth recreates the endpoint, it re-resolves its identity and updates the Item ID. Normal polling runs in a separate worker.",'),
+    ('idNote: "Windows audio Item IDs are not reused across installs: the installer captures them from your current Windows. Don\'t copy config.json from another machine.",',
+     'idNote: "Windows audio Item IDs are local and can change after driver/endpoint recreation. A clean install captures current IDs and Reconfigure can refresh the headset ID. Don\'t copy config.json from another machine.",'),
+    ('v2: "Wait ~1–2 seconds. Windows should select the headset.",',
+     'v2: "Wait a few seconds; some Bluetooth devices take longer after reconnecting. Windows should select the headset.",'),
+    ('v4: "After two consecutive checks (~3 seconds), Windows should select the alternative output.",',
+     'v4: "Once Windows reflects disconnect and two consecutive checks confirm it (normally a few seconds), Windows should select the alternative output.",'),
+]
+for old, new in site_replacements:
+    if t.count(old) != 1:
+        raise SystemExit('site exact string mismatch: ' + old[:80])
+    t = t.replace(old, new, 1)
+old_footer = '<span><a href="https://github.com/Ayerdi/PROX2-AutoSwitch">github.com/Ayerdi/PROX2-AutoSwitch</a></span>\n'
+new_footer = '<span><a href="https://github.com/Ayerdi/PROX2-AutoSwitch/releases/latest">Latest release</a> · <a href="https://github.com/Ayerdi/PROX2-AutoSwitch">GitHub</a> · <a href="https://github.com/Ayerdi/PROX2-AutoSwitch/wiki">Wiki</a></span>\n'
+if t.count(old_footer) != 1:
+    raise SystemExit('site footer mismatch')
+t = t.replace(old_footer, new_footer, 1)
+write(p, t)
+'''
+          script = script[:site_start] + site_patch + script[site_end:]
           Path('/tmp/docs_patch.py').write_text(script, encoding='utf-8')
           PY
           python3 /tmp/docs_patch.py
