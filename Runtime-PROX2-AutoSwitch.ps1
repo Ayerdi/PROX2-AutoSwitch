@@ -321,7 +321,7 @@ function Set-AudioOutput {
         return
     }
 
-    # Un reintento por si Windows estaba recreando el endpoint.
+    # Retry once in case Windows was recreating the endpoint.
     Start-Sleep -Milliseconds 500
     & $SvclPath /SetDefault $DeviceId all | Out-Null
     Start-Sleep -Milliseconds 350
@@ -369,7 +369,7 @@ function Get-HeadsetEndpointState {
         Select-Object -First 1
 
     if (-not $row) {
-        # Export valido pero el endpoint no aparece: para Windows significa
+        # Valid export but the endpoint is absent: Windows treats this as
         # que no esta presente -> Disconnected.
         return 'Disconnected'
     }
@@ -384,7 +384,7 @@ function Get-HeadsetEndpointState {
 
 # --- Tray icon + Timer (message pump) + worker process ---
 # El polling corre en un proceso PowerShell aparte (worker) para no bloquear
-# el hilo de WinForms. El Timer del hilo de UI solo marca estado; el worker
+# the WinForms thread. The UI-thread timer only marks state; the worker
 # hace polling con su propio guard anti-concurrencia (no lanza un poll si el
 # anterior sigue en marcha).
 
@@ -521,8 +521,8 @@ function Save-Config {
 function Get-HeadsetStateForId {
     <#
     .SYNOPSIS
-        Igual que Get-HeadsetEndpointState pero para un Item ID arbitrario
-        (el del headset que se esta seleccionando en el wizard).
+        Equivalent to Get-HeadsetEndpointState for an arbitrary Item ID
+        (the headset currently being selected in the wizard).
     .DESCRIPTION
         Bluetooth headsets can disappear from the svcl export while off and
         come back with a DIFFERENT Item ID when reconnected. So when the row
@@ -600,7 +600,7 @@ function Get-HeadsetStateForId {
 function Wait-ForHeadsetState {
     <#
     .SYNOPSIS
-        Hace polling del estado del endpoint hasta que coincida con el esperado
+        Polls the endpoint state until it matches the expected state
         o expire el timeout. Un headset Bluetooth (p. ej. Jabra) puede tardar
         varios segundos en reflejar el cambio fisico en Windows; una lectura
         unica a los 500/800 ms lee demasiado pronto. Tambien puede desaparecer
@@ -650,8 +650,8 @@ function Wait-ForHeadsetState {
 function Test-GHubProX2 {
     <#
     .SYNOPSIS
-        Conecta con G HUB y devuelve el candidato PRO X 2 que coincide con el
-        headset seleccionado en el wizard (o el unico, o $null si no hay).
+        Connects to G HUB and returns the PRO X 2 candidate that matches the
+        headset selected in the wizard (or the only candidate, or $null if none exists).
     #>
     try {
         Connect-GHub
@@ -794,8 +794,8 @@ function Show-ReconfigureDialog {
 
             # --- Ciclo ON -> OFF -> ON del headset seleccionado ---
             # El wizard hace polling porque Bluetooth/Core Audio puede tardar
-            # varios segundos en reflejar cada transicion. Si Windows recrea el
-            # endpoint, se re-resuelve por Device Name + Name y se persiste el ID.
+            # several seconds to expose each transition. If Windows recreates the
+            # endpoint, it is re-resolved by Device Name + Name and the new ID is persisted.
             $lblStatus.Text = "Step 1/3: turn the headset ON, then click OK in the prompt."
             $lblStatus.Refresh()
 
@@ -830,8 +830,8 @@ function Show-ReconfigureDialog {
             $lblStatus.Text = "Step 2/3: ON=$s1  OFF=$s2  ON=$s3"
             $lblStatus.Refresh()
 
-            # Si el BT reaparecio con un Item ID nuevo, persistir el observado
-            # (el ultimo FoundId no nulo, preferentemente el del paso 3).
+            # If Bluetooth returned with a new Item ID, persist the observed value
+            # (the last non-null FoundId, preferably the value observed in step 3).
             $observedId = $null
             if ($r3.FoundId) { $observedId = $r3.FoundId }
             elseif ($r1.FoundId) { $observedId = $r1.FoundId }
@@ -898,7 +898,7 @@ function Show-ReconfigureDialog {
             }
 
             Save-Config
-            # Pide al worker que recargue la config en el siguiente ciclo.
+            # Ask the worker to reload configuration on the next cycle.
             try { New-Item -ItemType File -Path $script:ReloadFlag -Force | Out-Null } catch {}
 
             Write-AutoSwitchLog ("Reconfigured: headset={0} fallback={1} mode={2}" -f $Config.HeadsetName, $Config.SpeakerName, $newMode)
@@ -989,10 +989,10 @@ function Stop-Runtime {
 # --- Worker: proceso separado que hace el polling ---
 # El polling (svcl/G HUB, Set-AudioOutput) corre en un proceso PowerShell
 # aparte (AUTOSWITCH_WORKER=1) para no bloquear el hilo de WinForms (tray).
-# La comunicacion con el proceso principal es por archivos de control:
+# Communication with the main process uses control files:
 #   $ControlDir\enabled.flag   - el tray lo crea/borra (AutoSwitch ON/OFF)
 #   $ControlDir\stop.flag      - el tray lo crea al salir
-# El propio worker tiene un guard anti-polls-concurrentes: si una lectura
+# The worker itself prevents concurrent polls: if one read
 # (p. ej. un /SetDefault lento o G HUB en timeout) se pasa del intervalo,
 # no se lanza otro poll hasta que termine.
 
@@ -1045,7 +1045,7 @@ function Stop-Worker {
     } catch {}
 }
 
-# --- Bucle del worker (solo cuando AUTOSWITCH_WORKER=1) ---
+# --- Worker loop (only when AUTOSWITCH_WORKER=1) ---
 # Runs at the end of the script; G HUB/audio/endpoint functions are already
 # definidas arriba porque es el mismo script.
 
@@ -1063,7 +1063,7 @@ function Start-WorkerLoop {
     Write-AutoSwitchLog "Worker started (mode $script:DetectionMode)."
 
     while (-not (Test-Path $stopFlag)) {
-        # El tray pidio recargar la config (reconfiguracion sin reinstalar).
+        # The tray requested a configuration reload (reconfigure without reinstalling).
         if (Test-Path $reloadFlag) {
             try {
                 Remove-Item $reloadFlag -Force -ErrorAction SilentlyContinue
@@ -1071,7 +1071,7 @@ function Start-WorkerLoop {
                 if ($newConfig) {
                     # Actualiza la variable global del script (no crear local).
                     Set-Variable -Name Config -Value $newConfig -Scope 1
-                    # Si la config trae otro modo, el worker lo respeta.
+                    # If configuration specifies another mode, the worker respects it.
                     $newMode = Get-ConfigDetectionMode -Config $newConfig
                     if ($newMode) { $script:DetectionMode = $newMode }
                     $lastState = $null
@@ -1109,9 +1109,9 @@ function Start-WorkerLoop {
             }
         }
         else {
-            # LogitechGHub: conexion PERSISTENTE. Se conecta una vez, se resuelve
-            # el batteryPath una vez, y solo se reconecta (re-resolviendo el
-            # deviceId, que puede cambiar tras una reconexion) si algo falla.
+            # LogitechGHub: PERSISTENT connection. Connect once and resolve
+            # batteryPath once; reconnect only on failure (re-resolving the
+            # deviceId, which may change after reconnection).
             try {
                 if (-not $script:WorkerBatteryPath) {
                     Connect-GHub
@@ -1181,7 +1181,7 @@ function Initialize-TrayAndTimer {
     $script:TrayIcon = New-Object System.Windows.Forms.NotifyIcon
 
     # App-specific icon. If the .ico file does not exist
-    # en disco, caemos a SystemIcons.Application para que siempre haya uno.
+    # on disk, fall back to SystemIcons.Application so an icon is always available.
     try {
         $iconFile = Join-Path $InstallDir "icon.ico"
         if (Test-Path $iconFile) {
@@ -1199,7 +1199,7 @@ function Initialize-TrayAndTimer {
     $script:TrayIcon.Visible = $true
 
     # Form invisible que sostiene el message pump de WinForms. Application.Run()
-    # sin Form no siempre mantiene el NotifyIcon visible activo en todos los
+    # without a Form does not reliably keep NotifyIcon active on every
     # .NET builds; an invisible Form provides a robust message pump for the tray.
     $script:MainForm = New-Object System.Windows.Forms.Form
     $script:MainForm.WindowState = 'Minimized'
@@ -1252,8 +1252,8 @@ function Initialize-TrayAndTimer {
 
     $script:TrayIcon.ContextMenuStrip = $menu
 
-    # Refresca el texto del menu de enhancements periodicamente (el estado
-    # SysFx puede cambiar desde el instalador o un helper externo). Se actualiza
+    # Refresh the Audio Enhancements menu text periodically (the SysFx state
+    # can change through the installer or an external helper). Update it
     # en el hilo de UI; Get-EndpointFxState es una lectura COM ligera.
     $script:MenuTimer = New-Object System.Windows.Forms.Timer
     $script:MenuTimer.Interval = 5000

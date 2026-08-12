@@ -517,7 +517,7 @@ namespace AutoSwitch
         // Devuelve: 1 = SysFx deshabilitado, 0 = SysFx habilitado,
         //          -1 = read failed (missing endpoint / COM failure).
         // IMPORTANTE: se lee con IPolicyConfig.GetPropertyValue(deviceId,
-        // bFxStore=true), el MISMO store donde el helper elevado escribe. El
+        // bFxStore=true), the SAME store written by the elevated helper. The
         // IPropertyStore del endpoint (OpenPropertyStore) NO contiene
         // PKEY_AudioEndpoint_Disable_SysFx, por lo que leeria siempre
         // "habilitados" aunque esten deshabilitados.

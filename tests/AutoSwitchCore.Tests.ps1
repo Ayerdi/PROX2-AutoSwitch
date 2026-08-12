@@ -112,7 +112,7 @@ Describe 'Get-SvclRenderDevice' {
     It 'filters to Device + Direction=Render only' {
         $devices = Get-SvclRenderDevice -CsvText $script:FixtureCsv
         $devices.Count | Should -Be 3
-        # No debe incluir el microfono (Capture) ni la app (Application).
+        # Must exclude the microphone (Capture) and application rows.
         ($devices | Where-Object { $_.Name -match 'Microphone' }).Count | Should -Be 0
         ($devices | Where-Object { $_.Name -match 'Application' }).Count | Should -Be 0
     }
@@ -151,7 +151,7 @@ Describe 'Test-SvclExportValid' {
     }
 
     It 'rejects an export missing Item ID or Device State' {
-        # Cabecera con filas pero sin las columnas que el runtime necesita.
+        # Header/data rows without the columns required by the runtime.
         Test-SvclExportValid -CsvText "Name,Volume`nSpeakers,50" | Should -Be $false
         Test-SvclExportValid -CsvText "Name,Item ID`nSpeakers,{0.0.0.00000000}.{GUID}" | Should -Be $false
     }
