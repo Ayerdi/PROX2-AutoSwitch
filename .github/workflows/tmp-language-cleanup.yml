@@ -1,0 +1,101 @@
+name: Temporary English cleanup
+
+on:
+  push:
+    branches:
+      - agent/repository-standard-v1.2.5
+    paths:
+      - .github/workflows/tmp-language-cleanup.yml
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: agent/repository-standard-v1.2.5
+      - name: Apply reviewed translations
+        shell: python
+        run: |
+          from pathlib import Path
+
+          replacements = {
+              Path('AGENT.md'): {
+                  '("No se puede convertir…")': '(the COM interface cast fails at runtime)',
+              },
+              Path('Runtime-PROX2-AutoSwitch.ps1'): {
+                  '# Un reintento por si Windows estaba recreando el endpoint.': '# Retry once in case Windows was recreating the endpoint.',
+                  '# Export valido pero el endpoint no aparece: para Windows significa': '# Valid export but the endpoint is absent: Windows treats this as',
+                  '# el hilo de WinForms. El Timer del hilo de UI solo marca estado; el worker': '# the WinForms thread. The UI-thread timer only marks state; the worker',
+                  'Igual que Get-HeadsetEndpointState pero para un Item ID arbitrario': 'Equivalent to Get-HeadsetEndpointState for an arbitrary Item ID',
+                  '(el del headset que se esta seleccionando en el wizard).': '(the headset currently being selected in the wizard).',
+                  'Hace polling del estado del endpoint hasta que coincida con el esperado': 'Polls the endpoint state until it matches the expected state',
+                  'Conecta con G HUB y devuelve el candidato PRO X 2 que coincide con el': 'Connects to G HUB and returns the PRO X 2 candidate that matches the',
+                  'headset seleccionado en el wizard (o el unico, o $null si no hay).': 'headset selected in the wizard (or the only candidate, or $null if none exists).',
+                  '# varios segundos en reflejar cada transicion. Si Windows recrea el': '# several seconds to expose each transition. If Windows recreates the',
+                  '# endpoint, se re-resuelve por Device Name + Name y se persiste el ID.': '# endpoint, it is re-resolved by Device Name + Name and the new ID is persisted.',
+                  '# Si el BT reaparecio con un Item ID nuevo, persistir el observado': '# If Bluetooth returned with a new Item ID, persist the observed value',
+                  '# (el ultimo FoundId no nulo, preferentemente el del paso 3).': '# (the last non-null FoundId, preferably the value observed in step 3).',
+                  '# Pide al worker que recargue la config en el siguiente ciclo.': '# Ask the worker to reload configuration on the next cycle.',
+                  '# La comunicacion con el proceso principal es por archivos de control:': '# Communication with the main process uses control files:',
+                  '# El propio worker tiene un guard anti-polls-concurrentes: si una lectura': '# The worker itself prevents concurrent polls: if one read',
+                  '# --- Bucle del worker (solo cuando AUTOSWITCH_WORKER=1) ---': '# --- Worker loop (only when AUTOSWITCH_WORKER=1) ---',
+                  '# El tray pidio recargar la config (reconfiguracion sin reinstalar).': '# The tray requested a configuration reload (reconfigure without reinstalling).',
+                  '# Si la config trae otro modo, el worker lo respeta.': '# If configuration specifies another mode, the worker respects it.',
+                  '# LogitechGHub: conexion PERSISTENTE. Se conecta una vez, se resuelve': '# LogitechGHub: PERSISTENT connection. Connect once and resolve',
+                  '# el batteryPath una vez, y solo se reconecta (re-resolviendo el': '# batteryPath once; reconnect only on failure (re-resolving the',
+                  '# deviceId, que puede cambiar tras una reconexion) si algo falla.': '# deviceId, which may change after reconnection).',
+                  '# en disco, caemos a SystemIcons.Application para que siempre haya uno.': '# on disk, fall back to SystemIcons.Application so an icon is always available.',
+                  '# sin Form no siempre mantiene el NotifyIcon visible activo en todos los': '# without a Form does not reliably keep NotifyIcon active on every',
+                  '# Refresca el texto del menu de enhancements periodicamente (el estado': '# Refresh the Audio Enhancements menu text periodically (the SysFx state',
+                  '# SysFx puede cambiar desde el instalador o un helper externo). Se actualiza': '# can change through the installer or an external helper). Update it',
+              },
+              Path('Toggle-AudioEnhancements.ps1'): {
+                  'Se lanza desde el runtime (o el instalador) con -Verb RunAs. Escribe': 'Launched by the runtime (or installer) with -Verb RunAs. Writes',
+                  'SOLO para el DeviceId indicado, verifica el resultado y sale con codigo:': 'ONLY for the specified DeviceId, verifies the result and exits with code:',
+                  '# Toda la logica COM vive en C# (donde el cast a IPolicyConfig es nativo y': '# All COM logic lives in C# (where casting to IPolicyConfig is native and',
+                  '# [ComImport] custom falla ("No se puede convertir..."), por eso se expone': '# a custom [ComImport] cast is unreliable in PowerShell 5.1), so this exposes',
+                  'return -2; // el cambio no se aplico (valor leido distinto del objetivo)': 'return -2; // change was not applied (read-back value differs from target)',
+              },
+              Path('lib/AutoSwitchCore.psm1'): {
+                  '// bFxStore=true), el MISMO store donde el helper elevado escribe. El': '// bFxStore=true), the SAME store written by the elevated helper. The',
+              },
+              Path('tests/AutoSwitchCore.Tests.ps1'): {
+                  '# No debe incluir el microfono (Capture) ni la app (Application).': '# Must exclude the microphone (Capture) and application rows.',
+                  '# Cabecera con filas pero sin las columnas que el runtime necesita.': '# Header/data rows without the columns required by the runtime.',
+              },
+          }
+
+          encodings = {
+              Path('Runtime-PROX2-AutoSwitch.ps1'): 'utf-8-sig',
+              Path('Toggle-AudioEnhancements.ps1'): 'utf-8-sig',
+              Path('lib/AutoSwitchCore.psm1'): 'utf-8-sig',
+              Path('tests/AutoSwitchCore.Tests.ps1'): 'utf-8-sig',
+          }
+
+          changed = []
+          for path, mapping in replacements.items():
+              encoding = encodings.get(path, 'utf-8')
+              text = path.read_text(encoding=encoding)
+              original = text
+              for old, new in mapping.items():
+                  count = text.count(old)
+                  if count != 1:
+                      raise SystemExit(f'Expected one occurrence in {path}: {old!r}; found {count}')
+                  text = text.replace(old, new)
+              if text != original:
+                  path.write_text(text, encoding=encoding)
+                  changed.append(str(path))
+          print('Updated:', ', '.join(changed))
+
+      - name: Commit cleanup
+        run: |
+          git config user.name "Ayerdi"
+          git config user.email "128999164+Ayerdi@users.noreply.github.com"
+          git add AGENT.md Runtime-PROX2-AutoSwitch.ps1 Toggle-AudioEnhancements.ps1 lib/AutoSwitchCore.psm1 tests/AutoSwitchCore.Tests.ps1
+          git diff --cached --quiet && exit 0
+          git commit -m "refactor: finish English runtime documentation"
+          git push origin HEAD:agent/repository-standard-v1.2.5
