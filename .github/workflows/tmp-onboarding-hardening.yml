@@ -1,0 +1,35 @@
+name: tmp-onboarding-hardening
+
+on:
+  push:
+    paths:
+      - '.github/workflows/tmp-onboarding-hardening.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/onboarding-hardening
+          fetch-depth: 0
+
+      - name: Apply onboarding hardening
+        run: python3 .github/tmp_onboarding_hardening.py
+
+      - name: Commit final branch state
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f .github/tmp_onboarding_hardening.py .github/workflows/tmp-onboarding-hardening.yml
+          rm -f .github/tmp_add_tray_image.py .github/tmp_tray_reconcile.py .github/tmp_tray_final_reconcile.py
+          rm -f .github/workflows/tmp-add-tray-image.yml .github/workflows/tmp-tray-reconcile.yml .github/workflows/tmp-tray-final-reconcile.yml
+          git add -A
+          git diff --cached --check
+          git commit -m "feat: harden onboarding and quick install"
+          git push origin HEAD:agent/onboarding-hardening
