@@ -1,0 +1,360 @@
+from pathlib import Path
+
+
+def read(path):
+    return Path(path).read_text(encoding="utf-8-sig")
+
+
+def write(path, text):
+    enc = "utf-8-sig" if path.endswith((".ps1", ".psm1")) else "utf-8"
+    Path(path).write_text(text, encoding=enc)
+
+
+def replace_once(text, old, new, label):
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"{label}: expected one match, found {count}")
+    return text.replace(old, new, 1)
+
+
+# --- Shared endpoint identity matcher ---
+p = "lib/AutoSwitchCore.psm1"
+t = read(p)
+marker = "function Get-EndpointFxState {\n"
+helper = r'''function Find-SvclRenderDeviceByIdentity {
+    <#
+    .SYNOPSIS
+        Encuentra un endpoint Render por identidad estable de svcl.
+    .DESCRIPTION
+        Bluetooth puede recrear un endpoint y cambiar su Item ID. Para
+        re-resolverlo sin confundir dos salidas del mismo dispositivo se
+        comparan, cuando existen, AMBAS columnas: Device Name y Name.
+        Devuelve $null si no hay identidad suficiente o no existe coincidencia.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Rows,
+        [string]$DeviceName,
+        [string]$Name
+    )
+
+    if ([string]::IsNullOrWhiteSpace($DeviceName) -and
+        [string]::IsNullOrWhiteSpace($Name)) {
+        return $null
+    }
+
+    foreach ($row in $Rows) {
+        $typeVal = Get-CsvColumn -Row $row -Names @('Type')
+        $dirVal  = Get-CsvColumn -Row $row -Names @('Direction')
+        if ($typeVal -ine 'Device' -or $dirVal -ine 'Render') { continue }
+
+        $rowDeviceName = Get-CsvColumn -Row $row -Names @('Device Name')
+        $rowName       = Get-CsvColumn -Row $row -Names @('Name')
+
+        $deviceMatches = [string]::IsNullOrWhiteSpace($DeviceName) -or
+            ($null -ne $rowDeviceName -and $rowDeviceName.Trim() -ieq $DeviceName.Trim())
+        $nameMatches = [string]::IsNullOrWhiteSpace($Name) -or
+            ($null -ne $rowName -and $rowName.Trim() -ieq $Name.Trim())
+
+        if ($deviceMatches -and $nameMatches) {
+            return $row
+        }
+    }
+
+    return $null
+}
+
+'''
+t = replace_once(t, marker, helper + marker, "insert identity helper")
+write(p, t)
+
+
+# --- Runtime Reconfigure identity hardening ---
+p = "Runtime-PROX2-AutoSwitch.ps1"
+t = read(p)
+t = replace_once(
+    t,
+    """        [Parameter(Mandatory = $true)][string]$ItemId,
+        [string]$DeviceName,
+        [switch]$Diagnose
+""",
+    """        [Parameter(Mandatory = $true)][string]$ItemId,
+        [string]$DeviceName,
+        [string]$EndpointName,
+        [switch]$Diagnose
+""",
+    "runtime state params",
+)
+old = r'''    # Fallback por nombre: el Item ID de un BT puede cambiar al reconectar.
+    if (-not $row -and -not [string]::IsNullOrWhiteSpace($DeviceName)) {
+        $wantName = $DeviceName.Trim()
+        $row = $rows |
+            Where-Object {
+                $dn = Get-CsvColumn -Row $_ -Names @('Device Name', 'Name')
+                $null -ne $dn -and $dn.Trim() -ieq $wantName
+            } |
+            Select-Object -First 1
+        if ($row) {
+            $id = Get-CsvColumn -Row $row -Names @('Item ID')
+            if ($Diagnose) {
+                Write-AutoSwitchLog ("Get-HeadsetStateForId: {0} no encontrado por Item ID; coincidencia por nombre '{1}' -> nuevo Item ID {2}" -f $ItemId, $DeviceName, $id)
+            }
+            # Devolver la fila encontrada junto con el Item ID observado.
+            return [pscustomobject]@{
+                State    = (Resolve-EndpointState -State (Get-CsvColumn -Row $row -Names @('Device State', 'State')))
+                FoundId  = $id
+            }
+        }
+    }
+'''
+new = r'''    # Fallback de identidad: un endpoint Bluetooth puede reaparecer con otro
+    # Item ID. No usar la etiqueta visible "Device Name — Name" como si fuera
+    # una columna: resolver por las dos columnas reales evita además confundir
+    # dos endpoints Render del mismo dispositivo.
+    if (-not $row -and
+        (-not [string]::IsNullOrWhiteSpace($DeviceName) -or
+         -not [string]::IsNullOrWhiteSpace($EndpointName))) {
+        $row = Find-SvclRenderDeviceByIdentity -Rows $rows -DeviceName $DeviceName -Name $EndpointName
+        if ($row) {
+            $id = Get-CsvColumn -Row $row -Names @('Item ID')
+            if ($Diagnose) {
+                Write-AutoSwitchLog ("Get-HeadsetStateForId: {0} no encontrado por Item ID; identidad DeviceName='{1}' Name='{2}' -> nuevo Item ID {3}" -f $ItemId, $DeviceName, $EndpointName, $id)
+            }
+            return [pscustomobject]@{
+                State   = (Resolve-EndpointState -State (Get-CsvColumn -Row $row -Names @('Device State', 'State')))
+                FoundId = $id
+            }
+        }
+    }
+'''
+t = replace_once(t, old, new, "runtime identity fallback")
+t = replace_once(
+    t,
+    """        [Parameter(Mandatory = $true)][string]$Expected,
+        [string]$DeviceName,
+        [int]$TimeoutSeconds = 12,
+""",
+    """        [Parameter(Mandatory = $true)][string]$Expected,
+        [string]$DeviceName,
+        [string]$EndpointName,
+        [int]$TimeoutSeconds = 12,
+""",
+    "runtime wait params",
+)
+t = replace_once(
+    t,
+    "        $res = Get-HeadsetStateForId -ItemId $ItemId -DeviceName $DeviceName\n",
+    "        $res = Get-HeadsetStateForId -ItemId $ItemId -DeviceName $DeviceName -EndpointName $EndpointName\n",
+    "runtime wait call",
+)
+t = replace_once(
+    t,
+    "    [void](Get-HeadsetStateForId -ItemId $ItemId -DeviceName $DeviceName -Diagnose)\n",
+    "    [void](Get-HeadsetStateForId -ItemId $ItemId -DeviceName $DeviceName -EndpointName $EndpointName -Diagnose)\n",
+    "runtime diagnose call",
+)
+t = replace_once(
+    t,
+    """            $newHeadsetName = Get-SvclDeviceLabel -Row $devices[$comboHeadset.SelectedIndex]
+            $newSpeakerName = Get-SvclDeviceLabel -Row $devices[$comboFallback.SelectedIndex]
+
+            # --- Ciclo ON -> OFF -> ON del headset seleccionado ---
+            # Se espera el estado esperado con polling (hasta 6 s) en vez de una
+            # lectura unica a los 500/800 ms: un Bluetooth tarda en reflejarse.
+""",
+    """            $selectedHeadsetRow = $devices[$comboHeadset.SelectedIndex]
+            $newHeadsetName = Get-SvclDeviceLabel -Row $selectedHeadsetRow
+            $newHeadsetDeviceName = Get-CsvColumn -Row $selectedHeadsetRow -Names @('Device Name')
+            $newHeadsetEndpointName = Get-CsvColumn -Row $selectedHeadsetRow -Names @('Name')
+            $newSpeakerName = Get-SvclDeviceLabel -Row $devices[$comboFallback.SelectedIndex]
+
+            # --- Ciclo ON -> OFF -> ON del headset seleccionado ---
+            # El wizard hace polling porque Bluetooth/Core Audio puede tardar
+            # varios segundos en reflejar cada transicion. Si Windows recrea el
+            # endpoint, se re-resuelve por Device Name + Name y se persiste el ID.
+""",
+    "runtime stable identity capture",
+)
+for old_call, new_call in [
+    ("Wait-ForHeadsetState -ItemId $newHeadsetId -DeviceName $newHeadsetName -Expected 'Connected' -TimeoutSeconds 15", "Wait-ForHeadsetState -ItemId $newHeadsetId -DeviceName $newHeadsetDeviceName -EndpointName $newHeadsetEndpointName -Expected 'Connected' -TimeoutSeconds 15"),
+    ("Wait-ForHeadsetState -ItemId $newHeadsetId -DeviceName $newHeadsetName -Expected 'Disconnected' -TimeoutSeconds 15", "Wait-ForHeadsetState -ItemId $newHeadsetId -DeviceName $newHeadsetDeviceName -EndpointName $newHeadsetEndpointName -Expected 'Disconnected' -TimeoutSeconds 15"),
+    ("Wait-ForHeadsetState -ItemId $newHeadsetId -DeviceName $newHeadsetName -Expected 'Connected' -TimeoutSeconds 20", "Wait-ForHeadsetState -ItemId $newHeadsetId -DeviceName $newHeadsetDeviceName -EndpointName $newHeadsetEndpointName -Expected 'Connected' -TimeoutSeconds 20"),
+]:
+    t = replace_once(t, old_call, new_call, "runtime wizard wait")
+write(p, t)
+
+
+# --- Regression tests ---
+p = "tests/AutoSwitchCore.Tests.ps1"
+t = read(p)
+marker = "Describe 'Resolve-EndpointState' {\n"
+tests = r'''Describe 'Find-SvclRenderDeviceByIdentity' {
+    It 'matches the Jabra render endpoint by Device Name + Name' {
+        $rows = @(ConvertFrom-SvclCsv -Text $script:FixtureCsv)
+        $row = Find-SvclRenderDeviceByIdentity -Rows $rows -DeviceName '2- Jabra Evolve 65' -Name 'Auriculares'
+        $row | Should -Not -BeNullOrEmpty
+        $row.'Item ID' | Should -Be '{0.0.0.00000000}.{ed043b5e-65dc-4ba6-a847-310517ac1849}'
+    }
+
+    It 'does not confuse two render endpoints from the same device' {
+        $rows = @(
+            [pscustomobject]@{ Type='Device'; Direction='Render'; 'Device Name'='BT Headset'; Name='Stereo'; 'Item ID'='stereo' },
+            [pscustomobject]@{ Type='Device'; Direction='Render'; 'Device Name'='BT Headset'; Name='Hands-Free'; 'Item ID'='handsfree' }
+        )
+        $row = Find-SvclRenderDeviceByIdentity -Rows $rows -DeviceName 'BT Headset' -Name 'Hands-Free'
+        $row.'Item ID' | Should -Be 'handsfree'
+    }
+
+    It 'can match by Name alone when Device Name is unavailable' {
+        $rows = @([pscustomobject]@{ Type='Device'; Direction='Render'; Name='USB Headphones'; 'Item ID'='usb' })
+        $row = Find-SvclRenderDeviceByIdentity -Rows $rows -Name 'USB Headphones'
+        $row.'Item ID' | Should -Be 'usb'
+    }
+
+    It 'returns null when no stable identity was supplied' {
+        $rows = @(ConvertFrom-SvclCsv -Text $script:FixtureCsv)
+        Find-SvclRenderDeviceByIdentity -Rows $rows | Should -BeNullOrEmpty
+    }
+}
+
+'''
+t = replace_once(t, marker, tests + marker, "identity tests")
+write(p, t)
+
+
+# --- Changelog (v1.2.3 remains immutable; this code fix is Unreleased) ---
+p = "CHANGELOG.md"
+t = read(p)
+marker = "## [1.2.3] - 2026-08-12\n"
+unreleased = """## [Unreleased]
+
+### Fixed
+- `Reconfigure...` re-resolves a recreated Bluetooth endpoint using the real `svcl` identity columns **`Device Name` + `Name`**, not the combined display label. This fixes the edge case where a headset returns after power-on with a different `Item ID`, while avoiding collisions between multiple render endpoints belonging to the same device. Regression tests cover exact identity matching.
+
+### Changed
+- README, GitHub Pages, maintainer notes, security/source notes and the historical WindowsEndpoint design document were refreshed to match the post-v1.2.3 behavior and hardware findings.
+
+"""
+t = replace_once(t, marker, unreleased + marker, "changelog")
+write(p, t)
+
+
+# --- README ---
+p = "README.md"
+t = read(p)
+for old, new, label in [
+    ("# PRO X 2 LIGHTSPEED AutoSwitch\n", "# Audio AutoSwitch\n", "README title"),
+    ("[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)\n", "[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)\n[![Latest release](https://img.shields.io/github/v/release/Ayerdi/PROX2-AutoSwitch)](https://github.com/Ayerdi/PROX2-AutoSwitch/releases/latest)\n", "README badge"),
+    ("Wireless headsets keep their USB/LIGHTSPEED endpoint visible to Windows even when the physical headset is turned off. So Windows doesn't know it should switch back to your speakers.\n", "Some wireless headsets — especially USB-dongle/LIGHTSPEED models — keep their audio endpoint visible to Windows even when the physical headset is turned off. Others, such as the tested Jabra Evolve 65, expose a useful `Active ↔ Unplugged` transition. AutoSwitch handles both patterns through its detection modes.\n", "README why"),
+    ("- **Reconfigure...** — re-run the detection wizard without reinstalling: pick a new headset and fallback from the current Windows output devices, turn the headset OFF and back ON, and it re-determines the detection mode (`WindowsEndpoint` or `LogitechGHub` with a G HUB PRO X 2 match). It saves `config.json` (including `DetectionMode`, the G HUB association and the enhancements target) and the worker picks it up on the next poll. If no compatible method is found for the new headset, the config is left untouched.\n", "- **Reconfigure...** — re-run the detection wizard without reinstalling: pick a new headset and fallback, then validate `ON → OFF → ON`. Bluetooth/Core Audio transitions can take several seconds, so the wizard polls with bounded waits (15 s / 15 s / 20 s). If a Bluetooth endpoint is recreated with a new `Item ID`, current `main` re-resolves the same render endpoint by its real `Device Name` + `Name` identity and persists the newest ID. It then re-determines `WindowsEndpoint` or `LogitechGHub`. If no compatible method is found, the config is left untouched.\n", "README reconfigure"),
+    ("Windows audio `Item ID`s are **not reused** across installs. The installer is designed to capture them from your current Windows. Don't copy `config.json` from another machine.\n", "Windows audio `Item ID`s are **machine-local and can change** after driver changes, endpoint recreation or a new installation. A clean install captures the current IDs; `Reconfigure...` can also refresh the headset ID when a Bluetooth endpoint is recreated. Don't copy `config.json` from another machine.\n", "README IDs"),
+    ("2. Wait ~1–2 seconds.\n3. Windows should select the headset.\n4. Power off / disconnect it.\n5. After two consecutive checks (~3 seconds), Windows should select the alternative output.\n", "2. Wait a few seconds (some Bluetooth devices can take longer after reconnecting).\n3. Windows should select the headset.\n4. Power off / disconnect it.\n5. After the endpoint reports OFF and two consecutive runtime checks confirm it (normally a few seconds), Windows should select the alternative output.\n", "README timing"),
+    ("- `docs/` — design notes (the `WindowsEndpointProvider.md` is superseded; see CHANGELOG v1.2.0).\n", "- `docs/` — design/history notes. `WindowsEndpointProvider.md` is superseded and explicitly records which early assumptions were invalidated by later Bluetooth testing.\n", "README docs"),
+]:
+    t = replace_once(t, old, new, label)
+write(p, t)
+
+
+# --- Maintainer documentation ---
+p = "AGENT.md"
+t = read(p)
+changes = [
+    ("# AGENT.md — maintaining PRO X 2 AutoSwitch (universal)\n", "# AGENT.md — maintaining Audio AutoSwitch\n", "AGENT title"),
+    ("""On 2026-08-10, the universal path was validated with a **Jabra Evolve 65**: the endpoint `Item ID`
+stays the same and only its `State` changes (`Active` ↔ `Unplugged`) with physical power, so no
+vendor software is needed.
+""", """On 2026-08-10, the universal path was validated with a **Jabra Evolve 65**: Windows exposed
+`Active ↔ Unplugged`, so no vendor software is needed. The first controlled cycles happened to keep
+the same `Item ID`, but **do not treat that as a guarantee**. On 2026-08-12, Reconfigure testing showed
+that Bluetooth/Core Audio can take several seconds to recreate/report the endpoint, and the design was
+hardened to tolerate a recreated endpoint whose `Item ID` changes.
+""", "AGENT Jabra"),
+    ("2. For duplicated endpoints, use `Item ID`, not just `Name`.\n", "2. For duplicated endpoints, use `Item ID` for normal runtime targeting. During **Reconfigure only**,\n   if that ID disappears after a Bluetooth reconnect, re-resolve the endpoint by the two real `svcl`\n   identity columns (`Device Name` + `Name`) and then persist the newly observed `Item ID`. Never use\n   the combined display label as if it were a raw column value.\n", "AGENT identity"),
+    ("- Endpoint removed/recreated: log SetDefault failure; ask for reinstall/recalibration.\n", "- Endpoint removed/recreated during Reconfigure: re-resolve by `Device Name` + `Name`, persist the newest ID, and fail without changing config if identity is ambiguous/missing. A runtime endpoint that disappears outside Reconfigure remains a diagnostic/reconfigure case; never guess a target.\n", "AGENT failure"),
+    ("- Recalibration without reinstalling.\n", "", "AGENT future"),
+    ("- Do not assume the Item ID survives a format.\n", "- Do not assume the Item ID survives a format, driver change, endpoint recreation or Bluetooth reconnect.\n", "AGENT assumption"),
+]
+for old, new, label in changes:
+    t = replace_once(t, old, new, label)
+constraint_marker = "## Local G HUB API used\n"
+constraint = """15. **Reconfigure identity and timing**:
+    - validation cycle is `Connected → Disconnected → Connected`;
+    - poll every 500 ms with bounded waits (15 s first ON, 15 s OFF, 20 s final ON);
+    - if `Item ID` disappears, match **both** `Device Name` and `Name` when available;
+    - prefer the final-ON observed ID and save it to `config.json`;
+    - if detection cannot be proven, leave the existing config untouched.
+
+"""
+t = replace_once(t, constraint_marker, constraint + constraint_marker, "AGENT constraint")
+t = replace_once(t, "- Confirm reasonable log.\n\n### Enhancements\n", """- Confirm reasonable log.
+
+### Reconfigure (required after endpoint/detection changes)
+
+- `WindowsEndpoint → WindowsEndpoint`: ON → OFF → ON succeeds.
+- `LogitechGHub → WindowsEndpoint` (validated with Jabra Evolve 65): mode changes and worker reloads config.
+- `WindowsEndpoint → LogitechGHub`: G HUB association and port are created correctly.
+- Exit/start after reconfigure and repeat OFF → ON.
+- Simulate a recreated Bluetooth row with the same `Device Name` + `Name` but a different `Item ID`; the identity matcher must select that exact Render endpoint and persist the new ID.
+- If one physical device exposes multiple Render endpoints, identity matching must not pick the wrong `Name`.
+
+### Enhancements
+""", "AGENT tests")
+write(p, t)
+
+
+# --- Sources ---
+p = "SOURCES.md"
+t = read(p)
+t = replace_once(t, '- `/scomma "<filename>"` exports the item list in CSV to stdout/file (with `/Columns` you can choose columns). We use `/scomma ""` to list all render items and read their `State`/`DeviceState` and `Item ID`.\n', '- `/scomma "<filename>"` exports the item list in CSV to stdout/file (with `/Columns` you can choose columns). We use `/scomma ""` to list all items, filter `Type=Device` + `Direction=Render`, and read `Device State`, `Item ID`, `Device Name` and `Name`. `Device Name` and `Name` are separate columns and must not be conflated with the UI label `Device Name — Name`.\n', "SOURCES svcl")
+evidence_marker = "## PRO X 2 specific evidence\n"
+evidence = """## WindowsEndpoint / Jabra hardware evidence
+
+Project hardware tests on a Jabra Evolve 65:
+
+- 2026-08-10: Windows exposed the render endpoint as `Active` while connected and `Unplugged` while powered off; returning ON restored `Active`. This validates the generic `WindowsEndpoint` path for that device.
+- 2026-08-12: `Reconfigure...` was exercised from a PRO X 2 (`LogitechGHub`) configuration to the Jabra (`WindowsEndpoint`), followed by OFF → ON, process restart, and another OFF → ON. The runtime switched correctly and reloaded the new config.
+- Bluetooth/Core Audio may take several seconds to report the final ON state. A diagnostic run timed out immediately before the next `svcl` read reported `Active`, which motivated bounded polling windows rather than fixed 500/800 ms sleeps.
+- An `Item ID` observed in one cycle is **not a portable/stable identity guarantee**. The reconfigure path treats `Device Name` + `Name` as fallback identity only when the captured ID disappears, then persists the latest observed ID.
+
+These are empirical project observations, not vendor guarantees for all Jabra/Bluetooth headsets.
+
+"""
+t = replace_once(t, evidence_marker, evidence + evidence_marker, "SOURCES evidence")
+write(p, t)
+
+
+# --- Security ---
+p = "SECURITY.md"
+t = read(p)
+t = replace_once(t, '- The project persists **no** Windows `Item ID`s across installs and **no** G HUB `deviceId`. Nothing in the repo contains machine-specific secrets.\n', '- `config.json` stores the current machine\'s Windows audio `Item ID`s because they are required to target endpoints; they are local identifiers, not secrets, and must not be copied between machines. Reconfigure may refresh the headset ID after endpoint recreation. The project does **not** persist the volatile G HUB `deviceId`, and repository/releases contain no user-specific IDs or credentials.\n', "SECURITY IDs")
+write(p, t)
+
+
+# --- Historical design note ---
+p = "docs/WindowsEndpointProvider.md"
+t = read(p)
+t = replace_once(t, '> **Problema de fondo:** cambiar la detección para que el AutoSwitch funcione con cualquier auricular, no solo Logitech PRO X 2, manteniendo intacto lo que ya funciona.\n', '> **Corrección histórica (v1.2.3+):** la primera prueba del Jabra mantuvo el mismo `Item ID`, pero pruebas posteriores demostraron que Bluetooth/Core Audio puede recrear endpoints. No uses la estabilidad del GUID como premisa. Reconfigure debe re-resolver por `Device Name` + `Name` y persistir el ID observado.\n> **Problema de fondo:** cambiar la detección para que el AutoSwitch funcione con cualquier auricular, no solo Logitech PRO X 2, manteniendo intacto lo que ya funciona.\n', "history banner")
+t = replace_once(t, 'El **Item ID del endpoint no cambia** entre estados:\n', 'En aquella prueba concreta, el **Item ID del endpoint no cambió** entre esos tres estados (esto fue una observación, **no una garantía**):\n', "history ID")
+t = replace_once(t, '- **Windows puede recrear endpoints** (Item ID cambia): el instalador ya captura IDs del Windows actual; no perseguir cambios de ID en runtime en esta issue.\n', '- **Windows puede recrear endpoints** (Item ID cambia): la issue original lo dejó fuera de alcance. La implementación posterior de Reconfigure (v1.2.3+) añadió recuperación acotada por `Device Name` + `Name` y persistencia del ID nuevo.\n', "history risk")
+write(p, t)
+
+
+# --- GitHub Pages ES/EN ---
+p = "site/index.html"
+t = read(p)
+site_changes = [
+    ('what4: "Icono de bandeja: ver el auricular y el fallback configurados, activar/pausar AutoSwitch, reconfigurar con el asistente de detección (sin reinstalar) y deshabilitar/habilitar los Audio Enhancements del auricular.",', 'what4: "Icono de bandeja: ver el auricular y el fallback, activar/pausar AutoSwitch, reconfigurar sin reinstalar (con polling Bluetooth y refresco del endpoint si Windows lo recrea) y deshabilitar/habilitar los Audio Enhancements.",'),
+    ('howIntro: "Dos modos de detección, elegidos automáticamente al instalar: WindowsEndpoint (el estado Active ↔ Unplugged del endpoint de Windows) y LogitechGHub (payload de batería de G HUB para el PRO X 2). El polling corre en un proceso worker separado para no bloquear la bandeja.",', 'howIntro: "Dos modos de detección, elegidos automáticamente: WindowsEndpoint (estado Active ↔ Unplugged) y LogitechGHub (payload de batería para PRO X 2). Reconfigure valida ON→OFF→ON con esperas acotadas; si Bluetooth recrea el endpoint, vuelve a resolver su identidad y actualiza el Item ID. El polling normal corre en un worker separado.",'),
+    ('idNote: "Los Item ID de audio de Windows no se reutilizan entre instalaciones: el instalador captura los del Windows actual. No copies config.json de otro equipo.",', 'idNote: "Los Item ID son locales y pueden cambiar tras drivers o recreación del endpoint. Una instalación limpia captura los actuales y Reconfigure puede refrescar el del auricular. No copies config.json de otro equipo.",'),
+    ('v2: "Espera ~1–2 segundos. Windows debería seleccionar los auriculares.",', 'v2: "Espera unos segundos; algunos Bluetooth tardan más al reconectar. Windows debería seleccionar los auriculares.",'),
+    ('v4: "Tras dos comprobaciones consecutivas (~3 segundos), Windows debería seleccionar la salida alternativa.",', 'v4: "Cuando Windows refleje la desconexión y dos comprobaciones consecutivas la confirmen (normalmente pocos segundos), debería seleccionar la salida alternativa.",'),
+    ('what4: "Tray icon: see the configured headset and fallback, enable/pause AutoSwitch, reconfigure with the detection wizard (no reinstall) and disable/enable the headset\'s Audio Enhancements.",', 'what4: "Tray icon: see the headset/fallback, enable/pause AutoSwitch, reconfigure without reinstalling (with Bluetooth polling and endpoint refresh if Windows recreates it), and disable/enable Audio Enhancements.",'),
+    ('howIntro: "Two detection modes, chosen automatically at install: WindowsEndpoint (the endpoint\'s Active ↔ Unplugged state) and LogitechGHub (G HUB battery payload for PRO X 2). Polling runs in a separate worker process so the tray never blocks.",', 'howIntro: "Two detection modes, chosen automatically: WindowsEndpoint (Active ↔ Unplugged) and LogitechGHub (G HUB battery payload for PRO X 2). Reconfigure validates ON→OFF→ON with bounded waits; if Bluetooth recreates the endpoint, it re-resolves its identity and updates the Item ID. Normal polling runs in a separate worker.",'),
+    ('idNote: "Windows audio Item IDs are not reused across installs: the installer captures them from your current Windows. Don\'t copy config.json from another machine.",', 'idNote: "Windows audio Item IDs are local and can change after driver/endpoint recreation. A clean install captures current IDs and Reconfigure can refresh the headset ID. Don\'t copy config.json from another machine.",'),
+    ('v2: "Wait ~1–2 seconds. Windows should select the headset.",', 'v2: "Wait a few seconds; some Bluetooth devices take longer after reconnecting. Windows should select the headset.",'),
+    ('v4: "After two consecutive checks (~3 seconds), Windows should select the alternative output.",', 'v4: "Once Windows reflects disconnect and two consecutive checks confirm it (normally a few seconds), Windows should select the alternative output.",'),
+]
+for old, new in site_changes:
+    t = replace_once(t, old, new, "site copy")
+t = replace_once(t, '<span><a href="https://github.com/Ayerdi/PROX2-AutoSwitch">github.com/Ayerdi/PROX2-AutoSwitch</a></span>\n', '<span><a href="https://github.com/Ayerdi/PROX2-AutoSwitch/releases/latest">Latest release</a> · <a href="https://github.com/Ayerdi/PROX2-AutoSwitch">GitHub</a> · <a href="https://github.com/Ayerdi/PROX2-AutoSwitch/wiki">Wiki</a></span>\n', "site footer")
+write(p, t)
