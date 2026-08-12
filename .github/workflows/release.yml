@@ -21,6 +21,7 @@ jobs:
           PACKAGE_DIR="PROX2-AutoSwitch-$VERSION"
           rm -rf "$PACKAGE_DIR"
           mkdir -p "$PACKAGE_DIR/lib"
+          mkdir -p "$PACKAGE_DIR/assets"
           cp Instalar-PROX2-AutoSwitch.ps1 \
              Runtime-PROX2-AutoSwitch.ps1 \
              Desinstalar-PROX2-AutoSwitch.ps1 \
@@ -30,6 +31,7 @@ jobs:
              README.md AGENT.md SOURCES.md SECURITY.md LICENSE CHANGELOG.md \
              "$PACKAGE_DIR/"
           cp lib/AutoSwitchCore.psm1 "$PACKAGE_DIR/lib/"
+          cp assets/icon.ico "$PACKAGE_DIR/assets/"
           zip -r "PROX2-AutoSwitch-$VERSION.zip" "$PACKAGE_DIR"
           sha256sum "PROX2-AutoSwitch-$VERSION.zip" > "PROX2-AutoSwitch-$VERSION.zip.sha256"
 
