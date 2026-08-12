@@ -1,0 +1,26 @@
+name: tmp-clean-tray-refresh
+
+on:
+  push:
+    paths:
+      - '.github/workflows/tmp-clean-tray-refresh.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Remove one-shot refresh files
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -f .github/tray-pages-refresh.tmp .github/workflows/tmp-clean-tray-refresh.yml
+          git commit -m "chore: remove docs refresh trigger"
+          git push origin HEAD:main
