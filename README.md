@@ -5,275 +5,233 @@
 [![Latest release](https://img.shields.io/github/v/release/Ayerdi/PROX2-AutoSwitch)](https://github.com/Ayerdi/PROX2-AutoSwitch/releases/latest)
 [![Pages](https://github.com/Ayerdi/PROX2-AutoSwitch/actions/workflows/pages.yml/badge.svg)](https://github.com/Ayerdi/PROX2-AutoSwitch/actions/workflows/pages.yml)
 
-Automatically switch your Windows default audio output when you put on or take off your wireless headset.
+Automatically switch the Windows default audio output when a compatible wireless headset turns on or off.
 
-- **Headset connected / powered on** → Windows uses the headset output.
-- **Headset disconnected / powered off** → Windows falls back to your alternative output (e.g. PC speakers).
-- Works with **any wireless headset whose connection state is exposed by Windows** (e.g. Jabra Evolve 65, which reports `Active` ↔ `Unplugged`), with a **device-specific fallback** for Logitech PRO X 2 (via Logitech G HUB) whose endpoint stays `Active` while off.
-- Tray icon: enable/disable AutoSwitch and **disable/enable Windows audio enhancements** for the configured headset.
-- Runs in the background with **no PowerShell window at login**.
+**Stable release: v1.2.5 · Windows 10/11 x64**
+
+- Headset on / connected → use the headset.
+- Headset off / disconnected → return to the configured fallback output.
+- Generic path for headsets whose Windows endpoint exposes connection state.
+- Logitech PRO X 2 fallback through Logitech G HUB when Windows keeps the endpoint `Active` while the physical headset is off.
+- Tray controls for AutoSwitch, reconfiguration and Windows Audio Enhancements.
+- Invisible startup: no PowerShell window at login.
 
 ![AutoSwitch demo: headset on selects the headset output, headset off returns to the speakers](site/autoswitch-demo.gif)
 
-See it live on the [project page](https://ayerdi.github.io/PROX2-AutoSwitch/).
+## Start here
 
+- **Website:** https://ayerdi.github.io/PROX2-AutoSwitch/
+- **Wiki:** https://github.com/Ayerdi/PROX2-AutoSwitch/wiki
+- **Spanish Wiki:** https://github.com/Ayerdi/PROX2-AutoSwitch/wiki/Inicio
+- **Technical docs:** [`docs/INDEX.md`](docs/INDEX.md)
+- **Support:** [`SUPPORT.md`](SUPPORT.md)
+- **Security:** [`SECURITY.md`](SECURITY.md)
+- **Releases:** https://github.com/Ayerdi/PROX2-AutoSwitch/releases
+
+The repository, code, Pages site and technical documentation are English-first. The Wiki is maintained in both English and Spanish.
 
 ## Quick start
 
-### Recommended: download the ZIP
+### Recommended: release ZIP
 
-Releases publish both a versioned archive and a stable **`Audio-AutoSwitch.zip`** name for the simplest install path.
+1. Open the [latest release](https://github.com/Ayerdi/PROX2-AutoSwitch/releases/latest).
+2. Download **`Audio-AutoSwitch.zip`**.
+3. Extract it to a normal folder.
+4. Double-click **`Install.cmd`**.
+5. Select the headset and fallback output.
+6. Follow the `ON → OFF → ON` validation wizard.
 
-1. Open the [latest release](https://github.com/Ayerdi/PROX2-AutoSwitch/releases/latest) and download `Audio-AutoSwitch.zip`.
-2. Extract the ZIP to a normal folder.
-3. Double-click **`Install.cmd`**.
-4. Pick your headset and fallback output, then follow the ON → OFF → ON wizard.
-5. When installation finishes, turn the headset off/on once to confirm the real switch.
+The same package includes:
 
-`Install.cmd` is only a small launcher for the PowerShell installer; all installation logic remains in the reviewed `.ps1` files. The release also includes **`Verify.cmd`** and **`Uninstall.cmd`** for double-click diagnostics/removal.
+- **`Verify.cmd`** — run diagnostics.
+- **`Uninstall.cmd`** — remove AutoSwitch.
+
+The `.cmd` files are intentionally tiny launchers. The reviewed PowerShell implementation remains visible in the package.
 
 ### One-command install
 
-If you prefer PowerShell, this bootstrap downloads the latest versioned release ZIP plus its SHA-256 checksum, verifies it, and then starts the same installer:
+The bootstrap downloads the latest versioned release ZIP and checksum, verifies SHA-256, then starts the installer:
 
 ```powershell
 powershell.exe -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Ayerdi/PROX2-AutoSwitch/main/install.ps1 | iex"
 ```
 
-## Why this exists
-
-Some wireless headsets — especially USB-dongle/LIGHTSPEED models — keep their audio endpoint visible to Windows even when the physical headset is turned off. Others, such as the tested Jabra Evolve 65, expose a useful `Active ↔ Unplugged` transition. AutoSwitch handles both patterns through its detection modes.
-
-The manual dance got old fast:
-
-1. Take off the headset.
-2. Open the sound settings.
-3. Change the default output.
-4. Put the headset back on.
-5. Repeat.
-
-This project removes that friction: switch the output just by turning the headset on or off.
-
 ## How it works
 
-Two detection modes, chosen automatically at install:
+The installer chooses one of two detection modes.
 
-**WindowsEndpoint (universal).** While powered on, most wireless headsets (e.g. Jabra Evolve 65) expose an audio endpoint whose `State` is `Active`; powered off, it becomes `Unplugged` (or disappears). The runtime reads the endpoint `State` via `svcl.exe`:
+### WindowsEndpoint
 
+This is the general mode. It works when Windows exposes a meaningful state transition for the headset endpoint.
+
+```text
+Active                      → Connected    → headset
+Unplugged / NotPresent      → Disconnected → fallback
+Unknown / invalid reading   → no switch
 ```
-Endpoint State Active    → Connected → headset
-Endpoint State Unplugged → Disconnected → fallback
-```
 
-**LogitechGHub (fallback for PRO X 2).** Tested on 2026-08-07: while the PRO X 2 is powered on, Logitech G HUB's battery query returns a `payload`; when powered off, it doesn't. AutoSwitch uses that signal:
+This path was validated with a Jabra Evolve 65. No vendor application is required when Windows exposes the physical connection state correctly.
 
-```
+Bluetooth/Core Audio can recreate an endpoint after reconnecting. The installer and **Reconfigure...** flow therefore tolerate real reconnect latency and can re-resolve the endpoint by its stable `Device Name` + `Name` identity before persisting the newest `Item ID`.
+
+### LogitechGHub
+
+The Logitech PRO X 2 is an important exception: its Windows endpoint can remain `Active` while the physical headset is off. For that device AutoSwitch uses G HUB's local WebSocket as the physical-state signal:
+
+```text
 PRO X 2
-   │
-   ▼
-Logitech G HUB
-ws://localhost:9010
-   │
-   ├── GET /devices/list
-   │      └── locate the PRO X 2 extendedDisplayName
-   │
-   └── GET /battery/<deviceId>/state
-             │
-             ├── payload present -> ON
-             └── payload absent  -> OFF
-                         │
-                         ▼
-             SoundVolumeCommandLine
-                         │
-             /SetDefault <Item ID> all
-                         │
-                         ▼
-                      Windows
+  ↓
+Logitech G HUB · ws://localhost:9010
+  ↓
+GET /devices/list
+GET /battery/<deviceId>/state
+  ↓
+payload present → ON
+payload absent  → OFF
+  ↓
+SoundVolumeCommandLine /SetDefault <Item ID> all
 ```
 
-In both modes the rule is the same: an **unknown** state never switches the output (a single `svcl.exe` failure must not send you to the speakers), and disconnection requires **two consecutive** OFF readings before switching to the fallback.
+The G HUB interface is unofficial and may change in a future G HUB release. See [`SOURCES.md`](SOURCES.md) and [`AGENT.md`](AGENT.md) for the verified design notes.
+
+### Safety rules
+
+Two rules are deliberate:
+
+1. An **unknown** state never changes the Windows output.
+2. Disconnection needs **two consecutive OFF observations** before switching to the fallback.
+
+A transient `svcl.exe` or G HUB failure therefore cannot send audio to the wrong device on a single bad read.
 
 ## Requirements
 
 - Windows 10/11 x64.
-- For the universal (`WindowsEndpoint`) mode: no vendor software required.
-- For Logitech PRO X 2 (`LogitechGHub` mode): Logitech G HUB installed, open, and recognizing the PRO X 2.
-- Internet connection during install (downloads `svcl.exe` from NirSoft).
 - PowerShell 5.1 or newer.
+- Internet access during installation so `svcl.exe` can be downloaded and hash-verified.
+- No vendor software for compatible `WindowsEndpoint` headsets.
+- Logitech G HUB installed and running for `LogitechGHub` mode.
 
-No admin rights should be required for normal operation. Only toggling **Audio Enhancements** asks for a one-time UAC elevation.
+Normal runtime operation does not require administrator rights. Toggling global Windows Audio Enhancements uses a one-time UAC elevation for the helper process only.
 
-## Installation details
+## Installer behavior
 
-The recommended ZIP path is **extract → double-click `Install.cmd`**. If Windows has marked the downloaded scripts as blocked and the launcher cannot run them, open PowerShell in the extracted folder and run:
+The installer:
 
-```powershell
-Get-ChildItem . -Filter *.ps1 | Unblock-File
-powershell.exe -ExecutionPolicy Bypass -File ".\Instalar-PROX2-AutoSwitch.ps1"
-```
+- downloads SoundVolumeCommandLine from NirSoft only when needed and verifies its SHA-256 before execution;
+- lists current Windows render devices and lets you choose the headset and fallback;
+- validates the real `ON → OFF → ON` cycle with bounded polling windows of 15 s / 15 s / 20 s;
+- handles a Bluetooth endpoint that returns with a new `Item ID`;
+- falls back to Logitech G HUB only when Windows cannot expose a useful physical state and the selected headset is confirmed as a PRO X 2;
+- captures machine-local Item IDs;
+- performs real test switches in both directions;
+- optionally disables Audio Enhancements for the headset;
+- installs the runtime under `%LOCALAPPDATA%`;
+- creates invisible per-user startup;
+- starts AutoSwitch.
 
-The installer will:
+If no supported detection method can be proven, installation stops instead of creating a configuration that cannot work.
 
-- download SoundVolumeCommandLine from NirSoft only if it is not already installed, and verify its SHA-256 before running it;
-- list the Windows audio output devices so you pick the **headset** and the **fallback**;
-- ask you to turn the headset OFF and back ON — it polls Windows for up to 15 s / 15 s / 20 s instead of trusting one fast Bluetooth reading; if Windows reflects `Active → Unplugged → Active`, it picks `WindowsEndpoint` mode automatically; if the endpoint is recreated with a new Item ID during that cycle, the installer re-resolves it by `Device Name` + `Name` and keeps the newest ID; if not, it asks you to confirm the headset is a Logitech PRO X 2, lists only the PRO X 2 candidates from G HUB for you to pick the matching one, and uses `LogitechGHub` mode; if nothing works, it aborts instead of installing something that can't work;
-- capture the real **Item ID**s of the current Windows;
-- actually test both switches;
-- offer to disable the headset's **Audio Enhancements** (one UAC prompt);
-- save the configuration;
-- install the runtime;
-- create an invisible autostart entry via `wscript.exe`;
-- start AutoSwitch.
+## Tray and reconfiguration
 
-### Tray icon
-
-Once running, an icon appears in the system tray:
+The tray menu shows the configured headset, fallback and next switch action.
 
 ![Real AutoSwitch tray menu with a Logitech PRO X 2 configured](site/assets/tray-menu.png)
 
-*Real tray-menu example with a Logitech PRO X 2 configured; device names vary by system.*
+It also provides:
 
-- **Headset / Fallback / Next switch** — info lines showing the configured devices and which output AutoSwitch would switch to right now (refreshed every 5 s).
-- **AutoSwitch: Enabled / Disabled** — pause or resume switching without quitting.
-- **Disable / Enable Audio Enhancements for <headset>** — toggles the global Windows audio enhancements of the configured headset endpoint (a UAC prompt appears; the menu updates only if the change is verified).
-- **Reconfigure...** — re-run the detection wizard without reinstalling: pick a new headset and fallback, then validate `ON → OFF → ON`. Bluetooth/Core Audio transitions can take several seconds, so the wizard polls with bounded waits (15 s / 15 s / 20 s). If a Bluetooth endpoint is recreated with a new `Item ID`, current `main` re-resolves the same render endpoint by its real `Device Name` + `Name` identity and persists the newest ID. It then re-determines `WindowsEndpoint` or `LogitechGHub`. If no compatible method is found, the config is left untouched.
+- **AutoSwitch: Enabled / Disabled** — pause or resume switching.
+- **Disable / Enable Audio Enhancements** — change the configured headset's global Windows enhancement state, with UAC only for the helper.
+- **Reconfigure...** — choose new endpoints and repeat the complete detection wizard without reinstalling.
 - **Exit** — stop AutoSwitch.
 
-### Important
+A failed reconfiguration leaves the previous working configuration untouched.
 
-Windows audio `Item ID`s are **machine-local and can change** after driver changes, endpoint recreation or a new installation. A clean install captures the current IDs; `Reconfigure...` can also refresh the headset ID when a Bluetooth endpoint is recreated. Don't copy `config.json` from another machine.
+## Machine-local identifiers
 
-The `dev000000XX` ID from G HUB isn't persisted either. The runtime keeps the `extendedDisplayName` and discovers the current `deviceId` at startup.
+Windows audio `Item ID`s are machine-local and can change after driver changes or endpoint recreation. Do not copy `config.json` from another PC.
 
-## Where it installs
+The G HUB `deviceId` is also not persisted because it may change. AutoSwitch keeps the stable display identity and resolves the current G HUB ID when needed.
+
+## Verify and uninstall
+
+From an extracted release:
+
+```text
+Verify.cmd
+Uninstall.cmd
+```
+
+PowerShell equivalents:
+
+```powershell
+.\Verify-AutoSwitch.ps1
+.\Uninstall-AutoSwitch.ps1
+```
+
+The package also retains the older Spanish-named `.ps1` entrypoints for backward compatibility with existing shortcuts and automation. New documentation uses the English aliases.
+
+Installed runtime data lives under:
 
 ```text
 %LOCALAPPDATA%\PROX2AutoSwitch\
 ```
 
-Main contents:
-
-```text
-PROX2AutoSwitch.ps1        # runtime (tray)
-config.json
-svcl.exe
-Toggle-AudioEnhancements.ps1   # elevated helper (UAC) for enhancements
-icon.ico
-Iniciar-Oculto.vbs
-autoswitch.log
-Desinstalar-PROX2-AutoSwitch.ps1
-Verificar-PROX2-AutoSwitch.ps1
-lib\AutoSwitchCore.psm1    # shared logic
-control\                   # tray <-> worker control flags
-```
-
-Autostart is created in the user's Startup folder as:
-
-```text
-PRO X 2 AutoSwitch.lnk
-```
-
-That shortcut runs `wscript.exe`, which starts PowerShell hidden — no console window at login.
-
-## Verify it works
-
-From an extracted release package, **double-click `Verify.cmd`**. It launches the same PowerShell verifier documented below.
-
-```powershell
-powershell.exe -ExecutionPolicy Bypass -File ".\Verificar-PROX2-AutoSwitch.ps1"
-```
-
-Or use the installed copy:
-
-```powershell
-powershell.exe -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\PROX2AutoSwitch\Verificar-PROX2-AutoSwitch.ps1"
-```
-
-Manual test:
-
-1. Power on / connect the headset.
-2. Wait a few seconds (some Bluetooth devices can take longer after reconnecting).
-3. Windows should select the headset.
-4. Power off / disconnect it.
-5. After the endpoint reports OFF and two consecutive runtime checks confirm it (normally a few seconds), Windows should select the alternative output.
-
-Two consecutive OFF readings are required before treating the headset as disconnected, to avoid flapping on a one-off reading.
-
-## Log
+The main log is:
 
 ```text
 %LOCALAPPDATA%\PROX2AutoSwitch\autoswitch.log
 ```
 
-Expected example:
+## Important `svcl.exe` regression guard
 
-```text
-PRO X 2 AutoSwitch started (mode LogitechGHub).
-Connected to G HUB.
-PRO X 2 detected by G HUB: PRO X 2 Lightspeed Gaming Headset (dev...)
-Output changed -> PRO X 2 LIGHTSPEED — Cascos Gaming
-Output changed -> High Definition Audio Device — Altavoces AMAZON
-```
-
-## Uninstall
-
-From an extracted release package, **double-click `Uninstall.cmd`**. The equivalent PowerShell command is:
+`svcl.exe /GetColumnValue` already writes the requested value to stdout. Do **not** combine it with `/Stdout`:
 
 ```powershell
-powershell.exe -ExecutionPolicy Bypass -File ".\Desinstalar-PROX2-AutoSwitch.ps1"
+svcl.exe /Stdout /GetColumnValue ...   # wrong
 ```
 
-or from the installation:
-
-```powershell
-powershell.exe -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\PROX2AutoSwitch\Desinstalar-PROX2-AutoSwitch.ps1"
-```
-
-## Known bug — do NOT reintroduce
-
-`svcl.exe /GetColumnValue` already writes the value to stdout. Do **not** use:
-
-```powershell
-svcl.exe /Stdout /GetColumnValue ...
-```
-
-In an earlier implementation `/Stdout` prepended item info (`1 item found:`, name, etc.) and corrupted the Item ID, so `/SetDefault` got an invalid identifier and answered `No items found`.
-
-The correct form used in this version is:
+The supported form is:
 
 ```powershell
 svcl.exe /GetColumnValue "DefaultRenderDevice" "Item ID"
 ```
 
-then extract only:
+An earlier implementation mixed metadata into the output and corrupted the Item ID passed to `/SetDefault`. Tests keep this regression covered.
 
-```text
-{0.0.0.00000000}.{GUID}
-```
+## Security
 
-## Security notes
-
-- The G HUB WebSocket `localhost:9010` is **not an officially supported Logitech API**. It's a reverse-engineered local interface used by third-party projects. Logitech can change it in future G HUB releases. If it stops working after a G HUB update, see `AGENT.md`.
-- The installer downloads `svcl-x64.zip` from NirSoft and verifies its SHA-256. If NirSoft ships a new version the hash may change and the installer **fails safely**. Don't remove that check.
+- The installer verifies the SHA-256 of the NirSoft download before running it.
+- Release ZIPs publish SHA-256 checksums and are built reproducibly.
+- The G HUB WebSocket is local but unofficial; treat compatibility changes after G HUB updates as expected maintenance risk.
+- Normal runtime is non-elevated; only the Audio Enhancements helper requests UAC.
+- Please report security issues through the process in [`SECURITY.md`](SECURITY.md), not a public issue.
 
 ## Repository layout
 
-- `install.ps1` — one-command bootstrap: fetches the latest versioned release ZIP and its `.sha256`, verifies the hash, then runs the installer.
-- `Install.cmd` / `Verify.cmd` / `Uninstall.cmd` — tiny double-click launchers; the real logic remains in PowerShell.
-- `Instalar-PROX2-AutoSwitch.ps1` — clean install (universal + G HUB paths, auto detection mode). Skips the `svcl.exe` download if it is already installed.
-- `Runtime-PROX2-AutoSwitch.ps1` — the runtime copied to `%LOCALAPPDATA%`: tray icon + invisible `Form` message pump, with the polling in a separate worker process (`AUTOSWITCH_WORKER=1`).
-- `Toggle-AudioEnhancements.ps1` — elevated helper (UAC) that disables/enables the headset's Audio Enhancements.
-- `Desinstalar-PROX2-AutoSwitch.ps1` — removes process, autostart and files (with truthful per-step reporting).
-- `Verificar-PROX2-AutoSwitch.ps1` — quick diagnostics.
-- `lib/AutoSwitchCore.psm1` — shared pure logic (Item ID extraction, CSV parse, endpoint state mapping, OFF debounce, config validation/migration, C# COM interop) used by installer, runtime and tests.
-- `assets/icon.ico` — tray icon.
-- `docs/` — design/history notes. `WindowsEndpointProvider.md` is superseded and explicitly records which early assumptions were invalidated by later Bluetooth testing.
-- `tests/` — Pester coverage for the pure logic (with a real `svcl /scomma` fixture).
-- `site/` — the [GitHub Pages site](https://ayerdi.github.io/PROX2-AutoSwitch/), ES/EN.
-- `AGENT.md` — context so an AI agent can maintain/rebuild the project.
-- `SOURCES.md` — verified technical references.
-- `SECURITY.md` — security scope and how to report a vulnerability.
-- `CHANGELOG.md` — version history (Keep a Changelog).
-- `.github/workflows/validate.yml` — CI: PowerShell syntax, PSScriptAnalyzer, Pester.
-- `.github/workflows/pages.yml` — CI that deploys `site/` to GitHub Pages.
-- `.github/workflows/release.yml` — builds the release ZIP + `.sha256` on `v*` tags.
+```text
+Install.cmd / Verify.cmd / Uninstall.cmd   double-click entrypoints
+Install-AutoSwitch.ps1                     canonical installer alias
+Verify-AutoSwitch.ps1                      canonical verifier alias
+Uninstall-AutoSwitch.ps1                   canonical uninstaller alias
+Instalar-*.ps1 / Verificar-*.ps1 /         legacy compatible entrypoints
+Desinstalar-*.ps1
+Runtime-PROX2-AutoSwitch.ps1               tray UI + worker runtime
+Toggle-AudioEnhancements.ps1               elevated enhancement helper
+lib/AutoSwitchCore.psm1                    shared pure logic + COM interop
+install.ps1                                checksum-verifying bootstrap
+tests/                                     Pester regression coverage
+docs/                                      technical and historical notes
+wiki/                                      versioned English + Spanish Wiki source
+site/                                      GitHub Pages source
+scripts/                                   release and repository tooling
+```
+
+## Development
+
+Before opening a pull request, run the relevant Pester suite and keep the repository checks green. See [`CONTRIBUTING.md`](CONTRIBUTING.md) and [`docs/INDEX.md`](docs/INDEX.md).
+
+The project intentionally keeps hardware-specific findings and source references in [`AGENT.md`](AGENT.md) and [`SOURCES.md`](SOURCES.md) so future maintenance does not have to rediscover already-tested behavior.
+
+## License
+
+MIT. See [`LICENSE`](LICENSE).
