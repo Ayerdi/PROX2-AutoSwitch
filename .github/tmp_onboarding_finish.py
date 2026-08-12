@@ -74,7 +74,7 @@ powershell.exe -ExecutionPolicy Bypass -File ".\\Instalar-PROX2-AutoSwitch.ps1"
 
 The installer will:
 '''
-text, n = pattern.subn(replacement, text, count=1)
+text, n = pattern.subn(lambda _m: replacement, text, count=1)
 if n != 1:
     raise SystemExit(f'README installation regex matched {n} blocks')
 
