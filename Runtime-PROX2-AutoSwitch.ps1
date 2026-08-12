@@ -385,6 +385,7 @@ function Get-HeadsetEndpointState {
 $script:TrayIcon = $null
 $script:MenuItemAutoSwitch = $null
 $script:MenuItemEnhancements = $null
+$script:MenuTimer = $null
 
 function Get-EnhancementsAction {
     # Lee el estado actual de SysFx del headset y devuelve 'Disable' o 'Enable'.
@@ -475,6 +476,7 @@ function Invoke-AutoSwitchToggle {
 
 function Stop-Runtime {
     Stop-Worker
+    try { if ($script:MenuTimer) { $script:MenuTimer.Stop() } } catch {}
     try { $script:TrayIcon.Visible = $false } catch {}
     try { if ($script:MainForm) { $script:MainForm.Close() } } catch {}
     [System.Windows.Forms.Application]::Exit()
@@ -696,6 +698,16 @@ function Initialize-TrayAndTimer {
     [void]$menu.Items.Add($exitItem)
 
     $script:TrayIcon.ContextMenuStrip = $menu
+
+    # Refresca el texto del menu de enhancements periodicamente (el estado
+    # SysFx puede cambiar desde el instalador o un helper externo). Se actualiza
+    # en el hilo de UI; Get-EndpointFxState es una lectura COM ligera.
+    $script:MenuTimer = New-Object System.Windows.Forms.Timer
+    $script:MenuTimer.Interval = 5000
+    $script:MenuTimer.Add_Tick({
+        Update-EnhancementsMenu
+    })
+    $script:MenuTimer.Start()
 
     Update-EnhancementsMenu
     Write-AutoSwitchLog "Tray configurada; message pump activo."
