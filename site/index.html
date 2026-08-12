@@ -334,7 +334,7 @@
     <h2><span class="dot">●</span> <span data-i18n="installTitle"></span></h2>
 
     <div class="card">
-      <span class="pill">install.ps1</span>
+      <span class="pill">ZIP · RECOMMENDED</span>
       <h3 data-i18n="quickTitle" style="margin-top:10px"></h3>
       <p data-i18n="quick1"></p>
       <pre><code data-i18n="quickCmd"></code></pre>
@@ -343,7 +343,7 @@
     </div>
 
     <div class="card">
-      <span class="pill">ZIP</span>
+      <span class="pill">PowerShell</span>
       <h3 data-i18n="manualTitle" style="margin-top:10px"></h3>
       <p data-i18n="manual1"></p>
       <p data-i18n="manual2"></p>
@@ -388,6 +388,7 @@
   <section id="verify">
     <h2><span class="dot">●</span> <span data-i18n="verifyTitle"></span></h2>
     <div class="card">
+      <p data-i18n="verifyIntro"></p>
       <pre><code data-i18n="verifyCmd"></code></pre>
       <button class="copy" data-copy="verifyCmd"><span data-i18n="copyBtn"></span></button>
       <ol class="steps" style="margin-top:16px">
@@ -399,6 +400,17 @@
       </ol>
     </div>
   </section>
+
+  <!-- uninstall -->
+<section id="uninstall">
+  <h2><span class="dot">●</span> <span data-i18n="uninstallTitle"></span></h2>
+  <div class="card">
+    <p data-i18n="uninstall1"></p>
+    <pre><code data-i18n="uninstallCmd"></code></pre>
+    <button class="copy" data-copy="uninstallCmd"><span data-i18n="copyBtn"></span></button>
+    <p class="muted" data-i18n="uninstall2"></p>
+  </div>
+</section>
 
   <!-- security -->
   <section id="security">
@@ -446,14 +458,14 @@
       howIntro: "Dos modos de detección, elegidos automáticamente: WindowsEndpoint (estado Active ↔ Unplugged) y LogitechGHub (payload de batería para PRO X 2). Reconfigure valida ON→OFF→ON con esperas acotadas; si Bluetooth recrea el endpoint, vuelve a resolver su identidad y actualiza el Item ID. El polling normal corre en un worker separado.",
       howDiagram: "Auriculares inalámbricos\n   │\n   ▼\nWindowsEndpoint (Active ↔ Unplugged)\n        │  (o G HUB ws://localhost:9010 para PRO X 2)\n        ▼\nConnected / Disconnected / Unknown\n        │        │\n   (debounce)  └──► Unknown: no cambiar\n        ▼\nSoundVolumeCommandLine\n        │\n/SetDefault <Item ID> all\n        │\n        ▼\n     Windows",
       installTitle: "Instalación",
-      quickTitle: "Instalación en un clic",
-      quick1: "Abre PowerShell (Windows) y pega esta línea. Descarga la última versión, verifica su SHA-256 contra el checksum publicado y ejecuta el instalador completo.",
-      quickCmd: 'powershell.exe -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Ayerdi/PROX2-AutoSwitch/main/install.ps1 | iex"',
-      quickNote: "El asistente detecta el modo automáticamente. Para Logitech PRO X 2 requiere G HUB abierto; para el resto, basta con que Windows vea el endpoint del auricular. Si svcl.exe ya está instalado, no se vuelve a descargar.",
-      manualTitle: "Instalación manual (ZIP)",
-      manual1: "Descarga el ZIP de la versión más reciente desde GitHub Releases.",
-      manual2: "Extrae todo el ZIP a una carpeta normal (no ejecutes desde dentro del ZIP) y ejecuta:",
-      manualCmd: 'powershell.exe -ExecutionPolicy Bypass -File ".\\Instalar-PROX2-AutoSwitch.ps1"',
+      quickTitle: "Recomendado: ZIP + Install.cmd",
+      quick1: "Descarga Audio-AutoSwitch.zip de la última GitHub Release, extrae el ZIP completo a una carpeta normal y haz doble clic en:",
+      quickCmd: 'Install.cmd',
+      quickNote: "Desde v1.2.4 este es el flujo recomendado. Install.cmd solo lanza el instalador PowerShell incluido; el mismo paquete también trae Verify.cmd y Uninstall.cmd. El asistente detecta automáticamente WindowsEndpoint o el fallback de G HUB para PRO X 2.",
+      manualTitle: "Alternativa: instalación con un comando",
+      manual1: "Si prefieres PowerShell, el bootstrap descarga la última release versionada y su checksum SHA-256, verifica el ZIP y ejecuta el mismo instalador.",
+      manual2: "Abre PowerShell y pega:",
+      manualCmd: 'powershell.exe -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Ayerdi/PROX2-AutoSwitch/main/install.ps1 | iex"',
       whatInstallerDoesTitle: "Qué hace el instalador",
       id1: "Descarga SoundVolumeCommandLine desde NirSoft solo si no está instalado y verifica su SHA-256 antes de ejecutarlo.",
       id2: "Te deja elegir auricular y fallback de la lista de dispositivos de Windows y comprueba si Windows refleja el estado físico (ON→OFF→ON); si no y el auricular es un PRO X 2, usa G HUB.",
@@ -468,12 +480,17 @@
       req4: "Para el modo PRO X 2: Logitech G HUB instalado, abierto y reconociendo los PRO X 2",
       req5: "No requiere permisos de administrador para el funcionamiento normal (solo el toggle de enhancements pide UAC)",
       verifyTitle: "Comprobar que funciona",
-      verifyCmd: 'powershell.exe -ExecutionPolicy Bypass -File "Verificar-PROX2-AutoSwitch.ps1"',
+      verifyIntro: "En la carpeta extraída de la release, haz doble clic en Verify.cmd para ejecutar los diagnósticos incluidos. Después puedes hacer esta prueba manual:",
+      verifyCmd: 'Verify.cmd',
       v1: "Conecta / enciende el auricular.",
       v2: "Espera unos segundos; algunos Bluetooth tardan más al reconectar. Windows debería seleccionar los auriculares.",
       v3: "Desconéctalo / apágalo.",
       v4: "Cuando Windows refleje la desconexión y dos comprobaciones consecutivas la confirmen (normalmente pocos segundos), debería seleccionar la salida alternativa.",
       v5: "El log está en %LOCALAPPDATA%\\PROX2AutoSwitch\\autoswitch.log.",
+      uninstallTitle: "Desinstalar",
+      uninstall1: "En la carpeta extraída de la release, haz doble clic en Uninstall.cmd.",
+      uninstallCmd: 'Uninstall.cmd',
+      uninstall2: "El archivo .cmd solo lanza el desinstalador PowerShell incluido; no contiene lógica de desinstalación adicional.",
       secTitle: "Notas de seguridad",
       sec1: "El WebSocket de G HUB (localhost:9010) no es una API oficial de Logitech: es una interfaz local usada por proyectos de terceros. Logitech puede cambiarla en futuras versiones. Si deja de funcionar tras una actualización, revisa AGENT.md.",
       sec2: "El instalador descarga svcl-x64.zip de NirSoft y verifica su SHA-256. Si NirSoft publica una versión nueva, el hash cambia y el instalador falla de forma segura: no desactives esa comprobación.",
@@ -501,14 +518,14 @@
       howIntro: "Two detection modes, chosen automatically: WindowsEndpoint (Active ↔ Unplugged) and LogitechGHub (G HUB battery payload for PRO X 2). Reconfigure validates ON→OFF→ON with bounded waits; if Bluetooth recreates the endpoint, it re-resolves its identity and updates the Item ID. Normal polling runs in a separate worker.",
       howDiagram: "Wireless headset\n   │\n   ▼\nWindowsEndpoint (Active ↔ Unplugged)\n        │  (or G HUB ws://localhost:9010 for PRO X 2)\n        ▼\nConnected / Disconnected / Unknown\n        │        │\n   (debounce)  └──► Unknown: do not switch\n        ▼\nSoundVolumeCommandLine\n        │\n/SetDefault <Item ID> all\n        │\n        ▼\n     Windows",
       installTitle: "Installation",
-      quickTitle: "One-click install",
-      quick1: "Open PowerShell (Windows) and paste this line. It downloads the latest version, verifies its SHA-256 against the published checksum and runs the full installer.",
-      quickCmd: 'powershell.exe -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Ayerdi/PROX2-AutoSwitch/main/install.ps1 | iex"',
-      quickNote: "The wizard detects the mode automatically. For Logitech PRO X 2 it requires G HUB open; for anything else, Windows just needs to see the headset endpoint. If svcl.exe is already installed it is not downloaded again.",
-      manualTitle: "Manual install (ZIP)",
-      manual1: "Download the ZIP of the latest release from GitHub Releases.",
-      manual2: "Extract the whole ZIP to a normal folder (don't run from inside the ZIP) and run:",
-      manualCmd: 'powershell.exe -ExecutionPolicy Bypass -File ".\\Instalar-PROX2-AutoSwitch.ps1"',
+      quickTitle: "Recommended: ZIP + Install.cmd",
+      quick1: "Download Audio-AutoSwitch.zip from the latest GitHub Release, extract the complete ZIP to a normal folder, and double-click:",
+      quickCmd: 'Install.cmd',
+      quickNote: "Since v1.2.4 this is the recommended path. Install.cmd only launches the included PowerShell installer; the same package also includes Verify.cmd and Uninstall.cmd. The wizard automatically selects WindowsEndpoint or the G HUB fallback for PRO X 2.",
+      manualTitle: "Alternative: one-command install",
+      manual1: "If you prefer PowerShell, the bootstrap downloads the latest versioned release and its SHA-256 checksum, verifies the ZIP, and runs the same installer.",
+      manual2: "Open PowerShell and paste:",
+      manualCmd: 'powershell.exe -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Ayerdi/PROX2-AutoSwitch/main/install.ps1 | iex"',
       whatInstallerDoesTitle: "What the installer does",
       id1: "Downloads SoundVolumeCommandLine from NirSoft only if it is not installed, and verifies its SHA-256 before running it.",
       id2: "Lets you pick headset + fallback from the Windows device list and checks whether Windows reflects the physical state (ON→OFF→ON); if not, and the headset is a PRO X 2, it uses G HUB.",
@@ -523,12 +540,17 @@
       req4: "For PRO X 2 mode: Logitech G HUB installed, open and recognizing the PRO X 2",
       req5: "No admin rights required for normal operation (only the enhancements toggle asks for UAC)",
       verifyTitle: "Verify it works",
-      verifyCmd: 'powershell.exe -ExecutionPolicy Bypass -File "Verificar-PROX2-AutoSwitch.ps1"',
+      verifyIntro: "In the extracted release folder, double-click Verify.cmd to run the included diagnostics. Then you can perform this manual test:",
+      verifyCmd: 'Verify.cmd',
       v1: "Connect / power on the headset.",
       v2: "Wait a few seconds; some Bluetooth devices take longer after reconnecting. Windows should select the headset.",
       v3: "Disconnect / power it off.",
       v4: "Once Windows reflects disconnect and two consecutive checks confirm it (normally a few seconds), Windows should select the alternative output.",
       v5: "The log lives in %LOCALAPPDATA%\\PROX2AutoSwitch\\autoswitch.log.",
+      uninstallTitle: "Uninstall",
+      uninstall1: "In the extracted release folder, double-click Uninstall.cmd.",
+      uninstallCmd: 'Uninstall.cmd',
+      uninstall2: "The .cmd file only launches the included PowerShell uninstaller; it contains no additional uninstall logic.",
       secTitle: "Security notes",
       sec1: "The G HUB WebSocket (localhost:9010) is not an official Logitech API: it's a local interface used by third-party projects. Logitech can change it in future versions. If it stops working after a G HUB update, check AGENT.md.",
       sec2: "The installer downloads svcl-x64.zip from NirSoft and verifies its SHA-256. If NirSoft ships a new version the hash may change and the installer fails safely: don't remove that check.",

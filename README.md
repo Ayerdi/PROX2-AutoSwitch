@@ -177,6 +177,8 @@ That shortcut runs `wscript.exe`, which starts PowerShell hidden — no console 
 
 ## Verify it works
 
+From an extracted release package, **double-click `Verify.cmd`**. It launches the same PowerShell verifier documented below.
+
 ```powershell
 powershell.exe -ExecutionPolicy Bypass -File ".\Verificar-PROX2-AutoSwitch.ps1"
 ```
@@ -215,7 +217,7 @@ Output changed -> High Definition Audio Device — Altavoces AMAZON
 
 ## Uninstall
 
-From the package:
+From an extracted release package, **double-click `Uninstall.cmd`**. The equivalent PowerShell command is:
 
 ```powershell
 powershell.exe -ExecutionPolicy Bypass -File ".\Desinstalar-PROX2-AutoSwitch.ps1"
