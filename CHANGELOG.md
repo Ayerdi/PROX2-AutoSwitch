@@ -4,6 +4,12 @@ Todas las versiones notables de este proyecto se documentan aquí.
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Este proyecto se adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.3] - 2026-08-12
+
+### Fixed
+- **Wizard de Reconfigure espera el estado con polling** (hasta 6 s, cada 500 ms) en vez de una lectura única a los 500/800 ms. Un headset Bluetooth (p. ej. Jabra) puede tardar varios segundos en reflejar el cambio físico de encendido/apagado en Windows; leer demasiado pronto hacía que el ciclo `ON → OFF → ON` fallara falsamente. El ciclo observado ahora se registra en el log (`Reconfigure wizard: ON=... OFF=... ON=...`).
+- `Invoke-Reconfigure` ahora envuelve la apertura del diálogo en un try/catch: si el fallo ocurre al construir/abrir la ventana (antes de entrar en "Detect mode..."), queda registrado en el log en vez de silencioso.
+
 ## [1.2.2] - 2026-08-12
 
 ### Fixed
