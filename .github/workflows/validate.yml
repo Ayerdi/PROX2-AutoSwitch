@@ -52,6 +52,9 @@ jobs:
         run: |
           $required = @(
             'install.ps1',
+            'Install.cmd',
+            'Verify.cmd',
+            'Uninstall.cmd',
             'Instalar-PROX2-AutoSwitch.ps1',
             'Runtime-PROX2-AutoSwitch.ps1',
             'Desinstalar-PROX2-AutoSwitch.ps1',
