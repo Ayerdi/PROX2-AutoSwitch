@@ -20,11 +20,11 @@ See it live on the [project page](https://ayerdi.github.io/PROX2-AutoSwitch/).
 
 ## Quick start
 
-### Recommended: download the ZIP (v1.2.4+)
+### Recommended: download the ZIP
 
-Releases built with this onboarding flow publish both the versioned archive and a stable **`Audio-AutoSwitch.zip`** name. Until v1.2.4 is published, v1.2.3 remains the latest stable release and does not contain the `.cmd` launchers yet.
+Releases publish both a versioned archive and a stable **`Audio-AutoSwitch.zip`** name for the simplest install path.
 
-1. Open the [latest release](https://github.com/Ayerdi/PROX2-AutoSwitch/releases/latest) and download `Audio-AutoSwitch.zip` (v1.2.4+).
+1. Open the [latest release](https://github.com/Ayerdi/PROX2-AutoSwitch/releases/latest) and download `Audio-AutoSwitch.zip`.
 2. Extract the ZIP to a normal folder.
 3. Double-click **`Install.cmd`**.
 4. Pick your headset and fallback output, then follow the ON → OFF → ON wizard.
