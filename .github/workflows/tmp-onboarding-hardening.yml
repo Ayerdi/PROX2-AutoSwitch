@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - '.github/workflows/tmp-onboarding-hardening.yml'
+      - '.github/tmp_onboarding_finish.py'
 
 permissions:
   contents: write
