@@ -40,16 +40,16 @@ jobs:
           html = site.read_text(encoding='utf-8')
           if 'src="assets/tray-menu.png"' not in html:
               anchor = '  <!-- why -->\n'
-              section = '''  <!-- tray -->
-  <section id="tray">
-    <h2><span class="dot">●</span> <span data-i18n="trayTitle"></span></h2>
-    <div class="card">
-      <img class="demo" src="assets/tray-menu.png" alt="Real AutoSwitch tray menu with a Logitech PRO X 2 configured" loading="lazy">
-      <p class="demo-caption" data-i18n="trayCaption"></p>
-    </div>
-  </section>
-
-'''
+              section = (
+                  '  <!-- tray -->\n'
+                  '  <section id="tray">\n'
+                  '    <h2><span class="dot">●</span> <span data-i18n="trayTitle"></span></h2>\n'
+                  '    <div class="card">\n'
+                  '      <img class="demo" src="assets/tray-menu.png" alt="Real AutoSwitch tray menu with a Logitech PRO X 2 configured" loading="lazy">\n'
+                  '      <p class="demo-caption" data-i18n="trayCaption"></p>\n'
+                  '    </div>\n'
+                  '  </section>\n\n'
+              )
               if anchor not in html:
                   raise SystemExit('Pages insertion marker not found')
               html = html.replace(anchor, section + anchor, 1)
