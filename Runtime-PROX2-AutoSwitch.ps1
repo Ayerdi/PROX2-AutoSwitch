@@ -512,6 +512,63 @@ function Save-Config {
     $Config | ConvertTo-Json -Depth 10 | Set-Content -Path $ConfigPath -Encoding UTF8
 }
 
+function Get-HeadsetStateForId {
+    <#
+    .SYNOPSIS
+        Igual que Get-HeadsetEndpointState pero para un Item ID arbitrario
+        (el del headset que se esta seleccionando en el wizard).
+    #>
+    param([Parameter(Mandatory = $true)][string]$ItemId)
+
+    $csv = Get-SvclCsvExport
+    if (-not (Test-SvclExportValid -CsvText $csv)) { return 'Unknown' }
+
+    $row = @(ConvertFrom-SvclCsv -Text $csv) |
+        Where-Object {
+            $id = Get-CsvColumn -Row $_ -Names @('Item ID')
+            $null -ne $id -and $id.Trim().ToLowerInvariant() -eq $ItemId.Trim().ToLowerInvariant()
+        } |
+        Select-Object -First 1
+
+    if (-not $row) { return 'Disconnected' }
+
+    $state = Get-CsvColumn -Row $row -Names @('Device State', 'State')
+    if ($null -eq $state) { return 'Unknown' }
+    return Resolve-EndpointState -State $state
+}
+
+function Test-GHubProX2 {
+    <#
+    .SYNOPSIS
+        Conecta con G HUB y devuelve el candidato PRO X 2 que coincide con el
+        headset seleccionado en el wizard (o el unico, o $null si no hay).
+    #>
+    try {
+        Connect-GHub
+        $devices = Invoke-GHubGet -Path "/devices/list"
+        $deviceInfos = @($devices.payload.deviceInfos)
+
+        $candidates = @($deviceInfos | Where-Object {
+            $_.extendedDisplayName -match 'PRO\s*X\s*2'
+        })
+
+        if ($candidates.Count -eq 0) { return $null }
+        if ($candidates.Count -eq 1) { return $candidates[0] }
+
+        # Varios PRO X 2: preferir el que coincide con el nombre visible del
+        # headset elegido; si no hay coincidencia, el primero.
+        $picked = $candidates | Where-Object {
+            $_.extendedDisplayName -match [regex]::Escape([string]$comboHeadset.Text)
+        } | Select-Object -First 1
+        if ($picked) { return $picked }
+        return $candidates[0]
+    }
+    catch {
+        Write-AutoSwitchLog ("Reconfigure: G HUB check failed: {0}" -f $_.Exception.Message)
+        return $null
+    }
+}
+
 function Show-ReconfigureDialog {
     $devices = Get-RenderDevicesFromCsv
     if ($devices.Count -lt 2) {
@@ -530,32 +587,31 @@ function Show-ReconfigureDialog {
     $form.FormBorderStyle = 'FixedDialog'
     $form.MaximizeBox = $false
     $form.MinimizeBox = $false
-    $form.ClientSize = New-Object System.Drawing.Size(420, 200)
+    $form.ClientSize = New-Object System.Drawing.Size(460, 240)
 
     $lblHeadset = New-Object System.Windows.Forms.Label
     $lblHeadset.Text = "Headset:"
-    $lblHeadset.Location = New-Object System.Drawing.Point(20, 20)
+    $lblHeadset.Location = New-Object System.Drawing.Point(20, 24)
     $lblHeadset.AutoSize = $true
 
     $comboHeadset = New-Object System.Windows.Forms.ComboBox
     $comboHeadset.DropDownStyle = 'DropDownList'
-    $comboHeadset.Location = New-Object System.Drawing.Point(140, 16)
-    $comboHeadset.Width = 250
+    $comboHeadset.Location = New-Object System.Drawing.Point(150, 20)
+    $comboHeadset.Width = 280
     foreach ($d in $devices) {
         $label = Get-SvclDeviceLabel -Row $d
-        $id = Get-CsvColumn -Row $d -Names @('Item ID')
         [void]$comboHeadset.Items.Add($label)
     }
 
     $lblFallback = New-Object System.Windows.Forms.Label
     $lblFallback.Text = "Fallback:"
-    $lblFallback.Location = New-Object System.Drawing.Point(20, 60)
+    $lblFallback.Location = New-Object System.Drawing.Point(20, 64)
     $lblFallback.AutoSize = $true
 
     $comboFallback = New-Object System.Windows.Forms.ComboBox
     $comboFallback.DropDownStyle = 'DropDownList'
-    $comboFallback.Location = New-Object System.Drawing.Point(140, 56)
-    $comboFallback.Width = 250
+    $comboFallback.Location = New-Object System.Drawing.Point(150, 60)
+    $comboFallback.Width = 280
     foreach ($d in $devices) {
         $label = Get-SvclDeviceLabel -Row $d
         [void]$comboFallback.Items.Add($label)
@@ -568,64 +624,175 @@ function Show-ReconfigureDialog {
         if ($id -ieq [string]$Config.SpeakerId) { $comboFallback.SelectedIndex = $i }
     }
 
-    $btnSave = New-Object System.Windows.Forms.Button
-    $btnSave.Text = "Save"
-    $btnSave.Location = New-Object System.Drawing.Point(140, 120)
-    $btnSave.Width = 90
+    $lblStatus = New-Object System.Windows.Forms.Label
+    $lblStatus.Text = "Pick the headset and the fallback, then click 'Detect mode...'."
+    $lblStatus.Location = New-Object System.Drawing.Point(20, 104)
+    $lblStatus.Size = New-Object System.Drawing.Size(420, 40)
+    $lblStatus.ForeColor = [System.Drawing.Color]::Gray
+
+    $btnDetect = New-Object System.Windows.Forms.Button
+    $btnDetect.Text = "Detect mode..."
+    $btnDetect.Location = New-Object System.Drawing.Point(150, 150)
+    $btnDetect.Width = 120
 
     $btnCancel = New-Object System.Windows.Forms.Button
     $btnCancel.Text = "Cancel"
-    $btnCancel.Location = New-Object System.Drawing.Point(240, 120)
+    $btnCancel.Location = New-Object System.Drawing.Point(280, 150)
     $btnCancel.Width = 90
 
-    # El resultado se comunica via $form.Tag (PSScriptAnalyzer no considera
-    # "usada" una variable local asignada solo dentro de handlers/closures).
-    $form.Tag = 'cancel'
-    $btnSave.Add_Click({
-        $form.Tag = 'save'
-        $form.Close()
-    })
-    $btnCancel.Add_Click({
-        $form.Tag = 'cancel'
-        $form.Close()
+    $btnCancel.Add_Click({ $form.Close() })
+
+    $btnDetect.Add_Click({
+        $btnDetect.Enabled = $false
+        try {
+            if ($comboHeadset.SelectedIndex -lt 0 -or $comboFallback.SelectedIndex -lt 0) {
+                [System.Windows.Forms.MessageBox]::Show(
+                    "Select both the headset and the fallback first.",
+                    "Audio AutoSwitch",
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Warning
+                ) | Out-Null
+                return
+            }
+
+            $newHeadsetId = Get-CsvColumn -Row $devices[$comboHeadset.SelectedIndex] -Names @('Item ID')
+            $newFallbackId = Get-CsvColumn -Row $devices[$comboFallback.SelectedIndex] -Names @('Item ID')
+            if (-not (Test-ValidAudioConfig -HeadsetId $newHeadsetId -SpeakerId $newFallbackId)) {
+                [System.Windows.Forms.MessageBox]::Show(
+                    "The headset and the fallback must be different devices.",
+                    "Audio AutoSwitch",
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Warning
+                ) | Out-Null
+                return
+            }
+
+            $newHeadsetName = Get-SvclDeviceLabel -Row $devices[$comboHeadset.SelectedIndex]
+            $newSpeakerName = Get-SvclDeviceLabel -Row $devices[$comboFallback.SelectedIndex]
+
+            # --- Ciclo ON -> OFF -> ON del headset seleccionado ---
+            $lblStatus.Text = "Step 1/3: turn the headset ON, then click OK in the prompt."
+            $lblStatus.Refresh()
+
+            [System.Windows.Forms.MessageBox]::Show(
+                "Turn the headset ON now, then click OK.",
+                "Audio AutoSwitch",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            ) | Out-Null
+            Start-Sleep -Milliseconds 500
+            $s1 = Get-HeadsetStateForId -ItemId $newHeadsetId
+
+            [System.Windows.Forms.MessageBox]::Show(
+                "Turn the headset OFF now, then click OK.",
+                "Audio AutoSwitch",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            ) | Out-Null
+            Start-Sleep -Milliseconds 800
+            $s2 = Get-HeadsetStateForId -ItemId $newHeadsetId
+
+            [System.Windows.Forms.MessageBox]::Show(
+                "Turn the headset back ON, then click OK.",
+                "Audio AutoSwitch",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            ) | Out-Null
+            Start-Sleep -Milliseconds 800
+            $s3 = Get-HeadsetStateForId -ItemId $newHeadsetId
+
+            $lblStatus.Text = "Step 2/3: ON=$s1  OFF=$s2  ON=$s3"
+            $lblStatus.Refresh()
+
+            $newMode = $null
+            $newGhubName = $null
+
+            if ($s1 -eq 'Connected' -and $s2 -eq 'Disconnected' -and $s3 -eq 'Connected') {
+                $newMode = "WindowsEndpoint"
+            }
+            else {
+                $answer = [System.Windows.Forms.MessageBox]::Show(
+                    "Windows does not reflect the physical ON/OFF cycle of this headset.`n`nIs it a Logitech PRO X 2 detected by G HUB?",
+                    "Audio AutoSwitch",
+                    [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                    [System.Windows.Forms.MessageBoxIcon]::Question
+                )
+                if ($answer -eq 'Yes') {
+                    $lblStatus.Text = "Step 3/3: checking G HUB for PRO X 2..."
+                    $lblStatus.Refresh()
+                    $ghubDevice = Test-GHubProX2
+                    if ($ghubDevice) {
+                        $newMode = "LogitechGHub"
+                        $newGhubName = [string]$ghubDevice.extendedDisplayName
+                    }
+                }
+            }
+
+            if (-not $newMode) {
+                [System.Windows.Forms.MessageBox]::Show(
+                    "No compatible detection method found for this headset.`n`nThe configuration was NOT changed. Run the installer for a full setup.",
+                    "Audio AutoSwitch",
+                    [System.Windows.Forms.MessageBoxButtons]::OK,
+                    [System.Windows.Forms.MessageBoxIcon]::Warning
+                ) | Out-Null
+                return
+            }
+
+            # --- Guardar config completa (modo incluido) ---
+            $Config.HeadsetId   = [string]$newHeadsetId
+            $Config.SpeakerId   = [string]$newFallbackId
+            $Config.HeadsetName = $newHeadsetName
+            $Config.SpeakerName = $newSpeakerName
+            $Config.DetectionMode = $newMode
+            if ($newGhubName) {
+                $Config.GHubDisplayName = $newGhubName
+            }
+            else {
+                $Config.PSObject.Properties.Remove('GHubDisplayName')
+            }
+            # El endpoint de enhancements debe seguir al nuevo headset.
+            $Config.EnhancementsDeviceId = [string]$newHeadsetId
+
+            Save-Config
+            # Pide al worker que recargue la config en el siguiente ciclo.
+            try { New-Item -ItemType File -Path $script:ReloadFlag -Force | Out-Null } catch {}
+
+            Write-AutoSwitchLog ("Reconfigured: headset={0} fallback={1} mode={2}" -f $Config.HeadsetName, $Config.SpeakerName, $newMode)
+            $form.Close()
+
+            [System.Windows.Forms.MessageBox]::Show(
+                "Reconfigured.`nHeadset: $newHeadsetName`nFallback: $newSpeakerName`nDetection mode: $newMode",
+                "Audio AutoSwitch",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Information
+            ) | Out-Null
+
+            Update-TrayInfo
+            Update-EnhancementsMenu
+        }
+        catch {
+            Write-AutoSwitchLog ("Reconfigure failed: {0}" -f $_.Exception.Message)
+            [System.Windows.Forms.MessageBox]::Show(
+                "Reconfigure failed: $($_.Exception.Message)",
+                "Audio AutoSwitch",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Error
+            ) | Out-Null
+        }
+        finally {
+            $btnDetect.Enabled = $true
+        }
     })
 
     $form.Controls.Add($lblHeadset)
     $form.Controls.Add($comboHeadset)
     $form.Controls.Add($lblFallback)
     $form.Controls.Add($comboFallback)
-    $form.Controls.Add($btnSave)
+    $form.Controls.Add($lblStatus)
+    $form.Controls.Add($btnDetect)
     $form.Controls.Add($btnCancel)
 
     $form.ShowDialog() | Out-Null
-
-    if ($form.Tag -ne 'save') { return }
-    if ($comboHeadset.SelectedIndex -lt 0 -or $comboFallback.SelectedIndex -lt 0) { return }
-
-    $newHeadsetId = Get-CsvColumn -Row $devices[$comboHeadset.SelectedIndex] -Names @('Item ID')
-    $newFallbackId = Get-CsvColumn -Row $devices[$comboFallback.SelectedIndex] -Names @('Item ID')
-    if (-not (Test-ValidAudioConfig -HeadsetId $newHeadsetId -SpeakerId $newFallbackId)) {
-        [System.Windows.Forms.MessageBox]::Show(
-            "The headset and the fallback must be different devices.",
-            "Audio AutoSwitch",
-            [System.Windows.Forms.MessageBoxButtons]::OK,
-            [System.Windows.Forms.MessageBoxIcon]::Warning
-        ) | Out-Null
-        return
-    }
-
-    $Config.HeadsetId   = [string]$newHeadsetId
-    $Config.SpeakerId   = [string]$newFallbackId
-    $Config.HeadsetName = (Get-SvclDeviceLabel -Row $devices[$comboHeadset.SelectedIndex])
-    $Config.SpeakerName = (Get-SvclDeviceLabel -Row $devices[$comboFallback.SelectedIndex])
-
-    Save-Config
-    # Pide al worker que recargue la config en el siguiente ciclo.
-    try { New-Item -ItemType File -Path $script:ReloadFlag -Force | Out-Null } catch {}
-
-    Write-AutoSwitchLog ("Reconfigured: headset={0} fallback={1}" -f $Config.HeadsetName, $Config.SpeakerName)
-    Update-TrayInfo
-    Update-EnhancementsMenu
 }
 
 function Invoke-Reconfigure {
