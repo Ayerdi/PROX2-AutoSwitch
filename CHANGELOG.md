@@ -7,8 +7,10 @@ Este proyecto se adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.
 ## [1.2.3] - 2026-08-12
 
 ### Fixed
-- **Wizard de Reconfigure espera el estado con polling** (hasta 6 s, cada 500 ms) en vez de una lectura única a los 500/800 ms. Un headset Bluetooth (p. ej. Jabra) puede tardar varios segundos en reflejar el cambio físico de encendido/apagado en Windows; leer demasiado pronto hacía que el ciclo `ON → OFF → ON` fallara falsamente. El ciclo observado ahora se registra en el log (`Reconfigure wizard: ON=... OFF=... ON=...`).
-- `Invoke-Reconfigure` ahora envuelve la apertura del diálogo en un try/catch: si el fallo ocurre al construir/abrir la ventana (antes de entrar en "Detect mode..."), queda registrado en el log en vez de silencioso.
+- **`Reconfigure...` tolera la latencia real de headsets Bluetooth**: el wizard hace polling cada 500 ms y usa ventanas de hasta 15 s para el primer ON y el OFF, y hasta 20 s para el ON final. Esto evita falsos negativos cuando Windows tarda varios segundos en reflejar `Active`/`Unplugged`.
+- **Los headsets Bluetooth pueden reaparecer con un `Item ID` distinto** tras apagarse y reconectarse. Si el ID original ya no aparece, Reconfigure vuelve a localizar el endpoint por su nombre estable, usa el estado observado y persiste el `Item ID` más reciente en `config.json`. Validado en hardware real con Jabra Evolve 65 (`ON → OFF → ON`, reinicio y nuevo `OFF → ON`).
+- Se añadió diagnóstico detallado cuando un estado no llega a tiempo: el log muestra el estado final y los endpoints/IDs que `svcl` está viendo, para distinguir timing de un endpoint recreado.
+- `Invoke-Reconfigure` envuelve también la apertura/construcción del diálogo en `try/catch`, de modo que los fallos previos a `Detect mode...` quedan registrados en `autoswitch.log`.
 
 ## [1.2.2] - 2026-08-12
 
