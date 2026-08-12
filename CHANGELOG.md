@@ -6,6 +6,8 @@ Este proyecto se adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+## [1.2.4] - 2026-08-13
+
 ### Added
 - Double-click `Install.cmd`, `Verify.cmd`, and `Uninstall.cmd` launchers for users who download the release ZIP.
 - Release packaging now also publishes a stable `Audio-AutoSwitch.zip` + SHA-256 alias in addition to the versioned archive.
