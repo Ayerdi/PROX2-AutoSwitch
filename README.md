@@ -20,9 +20,11 @@ See it live on the [project page](https://ayerdi.github.io/PROX2-AutoSwitch/).
 
 ## Quick start
 
-### Recommended: download the ZIP
+### Recommended: download the ZIP (v1.2.4+)
 
-1. Open the [latest release](https://github.com/Ayerdi/PROX2-AutoSwitch/releases/latest) and download `Audio-AutoSwitch.zip`.
+Releases built with this onboarding flow publish both the versioned archive and a stable **`Audio-AutoSwitch.zip`** name. Until v1.2.4 is published, v1.2.3 remains the latest stable release and does not contain the `.cmd` launchers yet.
+
+1. Open the [latest release](https://github.com/Ayerdi/PROX2-AutoSwitch/releases/latest) and download `Audio-AutoSwitch.zip` (v1.2.4+).
 2. Extract the ZIP to a normal folder.
 3. Double-click **`Install.cmd`**.
 4. Pick your headset and fallback output, then follow the ON → OFF → ON wizard.
@@ -155,14 +157,14 @@ Main contents:
 PROX2AutoSwitch.ps1        # runtime (tray)
 config.json
 svcl.exe
-Toggle-AudioEnhancements.ps1   # helper elevado (UAC) de enhancements
+Toggle-AudioEnhancements.ps1   # elevated helper (UAC) for enhancements
 icon.ico
 Iniciar-Oculto.vbs
 autoswitch.log
 Desinstalar-PROX2-AutoSwitch.ps1
 Verificar-PROX2-AutoSwitch.ps1
-lib\AutoSwitchCore.psm1    # lógica compartida
-control\                   # flags de comunicación tray <-> worker
+lib\AutoSwitchCore.psm1    # shared logic
+control\                   # tray <-> worker control flags
 ```
 
 Autostart is created in the user's Startup folder as:

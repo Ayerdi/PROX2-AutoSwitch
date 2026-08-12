@@ -15,8 +15,6 @@ Este proyecto se adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - The verifier no longer reports G HUB as a failure for generic `WindowsEndpoint` installations.
 - The one-command bootstrap now uses English/generic Audio AutoSwitch wording.
 - Removed leftover one-shot documentation workflows/scripts from `.github/`.
-
-### Fixed
 - `Reconfigure...` re-resolves a recreated Bluetooth endpoint using the real `svcl` identity columns **`Device Name` + `Name`**, not the combined display label. This fixes the edge case where a headset returns after power-on with a different `Item ID`, while avoiding collisions between multiple render endpoints belonging to the same device. Regression tests cover exact identity matching.
 
 ### Changed
