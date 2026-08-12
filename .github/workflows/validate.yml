@@ -2,7 +2,8 @@ name: validate
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   pull_request:
 
 permissions:
@@ -13,8 +14,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Repository quality
+        run: python3 scripts/check-repository.py
+      - name: English canonical language guard
+        run: python3 scripts/check-language.py
+      - name: Validate Bash scripts
+        run: bash -n scripts/*.sh
+      - name: Deterministic release build
+        run: |
+          bash scripts/build-release.sh 1.2.5
+          first="$(cut -d' ' -f1 dist/PROX2-AutoSwitch-v1.2.5.zip.sha256)"
+          cp dist/PROX2-AutoSwitch-v1.2.5.zip /tmp/autoswitch-first.zip
+          rm -f dist/*.zip dist/*.sha256
+          bash scripts/build-release.sh 1.2.5
+          second="$(cut -d' ' -f1 dist/PROX2-AutoSwitch-v1.2.5.zip.sha256)"
+          test "$first" = "$second"
+          cmp /tmp/autoswitch-first.zip dist/PROX2-AutoSwitch-v1.2.5.zip
+          cmp dist/PROX2-AutoSwitch-v1.2.5.zip dist/Audio-AutoSwitch.zip
+
   powershell:
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -25,25 +52,23 @@ jobs:
           $scripts=Get-ChildItem -Recurse -File | Where-Object { $_.Extension -in '.ps1','.psm1' }
           foreach($script in $scripts){$tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile($script.FullName,[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){$errors|ForEach-Object{Write-Error "$($script.FullName): $($_.Message)"};exit 1}}
       - name: Install validation modules
-        shell: pwsh
+        shell: powershell
         run: |
-          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Force -Scope CurrentUser -SkipPublisherCheck
           Install-Module Pester -RequiredVersion 5.9.0 -Force -Scope CurrentUser -SkipPublisherCheck
       - name: PSScriptAnalyzer
-        shell: pwsh
+        shell: powershell
         run: |
+          Import-Module PSScriptAnalyzer -RequiredVersion 1.24.0
           $r=Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error,Warning -ExcludeRule PSAvoidUsingWriteHost,PSAvoidUsingPlainTextForPassword,PSAvoidUsingCmdletAliases,PSAvoidUsingEmptyCatchBlock,PSUseApprovedVerbs,PSUseShouldProcessForStateChangingFunctions
           if($r){$r|Format-Table -AutoSize|Out-String|Write-Host;exit 1}
-      - name: Required release files
-        shell: pwsh
-        run: |
-          $required=@('Install.cmd','Verify.cmd','Uninstall.cmd','install.ps1','Install-AutoSwitch.ps1','Verify-AutoSwitch.ps1','Uninstall-AutoSwitch.ps1','Instalar-PROX2-AutoSwitch.ps1','Verificar-PROX2-AutoSwitch.ps1','Desinstalar-PROX2-AutoSwitch.ps1','Runtime-PROX2-AutoSwitch.ps1','Toggle-AudioEnhancements.ps1','lib/AutoSwitchCore.psm1')
-          $missing=$required|Where-Object{-not(Test-Path $_)};if($missing){throw "Missing release files: $($missing -join ', ')"}
       - name: Pester
-        shell: pwsh
+        shell: powershell
         run: Import-Module Pester -RequiredVersion 5.9.0; Invoke-Pester -Path .\tests -CI
+
   secrets:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
