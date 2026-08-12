@@ -1,0 +1,76 @@
+name: tmp-tray-final-reconcile
+
+on:
+  push:
+    paths:
+      - '.github/workflows/tmp-tray-final-reconcile.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure tray screenshot and repository docs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f site/assets/tray-menu.png ]; then
+            test -f .github/tray-menu.b64
+            mkdir -p site/assets
+            base64 -d .github/tray-menu.b64 > site/assets/tray-menu.png
+          fi
+          test "$(head -c 8 site/assets/tray-menu.png | xxd -p)" = "89504e470d0a1a0a"
+          python3 .github/tmp_tray_final_reconcile.py repo
+          git diff --check
+
+      - name: Ensure wiki references the screenshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/wiki
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" /tmp/wiki
+          python3 .github/tmp_tray_final_reconcile.py wiki /tmp/wiki
+          cd /tmp/wiki
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Home.md Verificar-ES.md Verify-EN.md
+          git diff --cached --check
+          if ! git diff --cached --quiet; then
+            git commit -m "docs: add tray menu screenshot"
+            git push origin HEAD
+          fi
+
+      - name: Commit permanent files and remove all one-shot tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md CHANGELOG.md site/index.html site/assets/tray-menu.png
+          for f in \
+            .github/tray-menu.b64 \
+            .github/tmp_add_tray_image.py \
+            .github/workflows/tmp-add-tray-image.yml \
+            .github/tray-pages-refresh.tmp \
+            .github/workflows/tmp-clean-tray-refresh.yml \
+            .github/tmp_tray_reconcile.py \
+            .github/workflows/tmp-tray-reconcile.yml \
+            .github/tray-final-refresh.tmp \
+            .github/workflows/tmp-clean-tray-final.yml \
+            .github/tmp_tray_final_reconcile.py \
+            .github/workflows/tmp-tray-final-reconcile.yml; do
+            if [ -e "$f" ]; then git rm -f "$f"; fi
+          done
+          git diff --cached --check
+          if ! git diff --cached --quiet; then
+            git commit -m "docs: add tray menu screenshot"
+            git push origin HEAD:main
+          fi
