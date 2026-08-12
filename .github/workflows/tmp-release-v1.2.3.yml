@@ -24,20 +24,21 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-
           path = Path('CHANGELOG.md')
           text = path.read_text(encoding='utf-8')
           start = text.index('## [1.2.3] - 2026-08-12')
           end = text.index('## [1.2.2] - 2026-08-12')
-          section = '''## [1.2.3] - 2026-08-12
-
-### Fixed
-- **`Reconfigure...` tolera la latencia real de headsets Bluetooth**: el wizard hace polling cada 500 ms y usa ventanas de hasta 15 s para el primer ON y el OFF, y hasta 20 s para el ON final. Esto evita falsos negativos cuando Windows tarda varios segundos en reflejar `Active`/`Unplugged`.
-- **Los headsets Bluetooth pueden reaparecer con un `Item ID` distinto** tras apagarse y reconectarse. Si el ID original ya no aparece, Reconfigure vuelve a localizar el endpoint por su nombre estable, usa el estado observado y persiste el `Item ID` más reciente en `config.json`. Validado en hardware real con Jabra Evolve 65 (`ON → OFF → ON`, reinicio y nuevo `OFF → ON`).
-- Se añadió diagnóstico detallado cuando un estado no llega a tiempo: el log muestra el estado final y los endpoints/IDs que `svcl` está viendo, para distinguir timing de un endpoint recreado.
-- `Invoke-Reconfigure` envuelve también la apertura/construcción del diálogo en `try/catch`, de modo que los fallos previos a `Detect mode...` quedan registrados en `autoswitch.log`.
-
-'''
+          lines = [
+              '## [1.2.3] - 2026-08-12',
+              '',
+              '### Fixed',
+              '- **`Reconfigure...` tolera la latencia real de headsets Bluetooth**: el wizard hace polling cada 500 ms y usa ventanas de hasta 15 s para el primer ON y el OFF, y hasta 20 s para el ON final. Esto evita falsos negativos cuando Windows tarda varios segundos en reflejar `Active`/`Unplugged`.',
+              '- **Los headsets Bluetooth pueden reaparecer con un `Item ID` distinto** tras apagarse y reconectarse. Si el ID original ya no aparece, Reconfigure vuelve a localizar el endpoint por su nombre estable, usa el estado observado y persiste el `Item ID` más reciente en `config.json`. Validado en hardware real con Jabra Evolve 65 (`ON → OFF → ON`, reinicio y nuevo `OFF → ON`).',
+              '- Se añadió diagnóstico detallado cuando un estado no llega a tiempo: el log muestra el estado final y los endpoints/IDs que `svcl` está viendo, para distinguir timing de un endpoint recreado.',
+              '- `Invoke-Reconfigure` envuelve también la apertura/construcción del diálogo en `try/catch`, de modo que los fallos previos a `Detect mode...` quedan registrados en `autoswitch.log`.',
+              '',
+          ]
+          section = '\n'.join(lines) + '\n'
           path.write_text(text[:start] + section + text[end:], encoding='utf-8')
           PY
 
