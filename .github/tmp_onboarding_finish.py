@@ -9,9 +9,6 @@ def read(path):
 def write(path, text):
     Path(path).write_text(text, encoding='utf-8')
 
-# The first patch intentionally stops at the old README block because its
-# quoting differed from the source. At this point all executable changes must
-# already be present; fail instead of silently producing a partial branch.
 required = {
     'Install.cmd': None,
     'Verify.cmd': None,
@@ -32,9 +29,33 @@ for path, marker in required.items():
 p = Path('README.md')
 text = read(p)
 
-# Quick start was inserted before the original script stopped. Verify it.
-if '## Quick start' not in text or 'Audio-AutoSwitch.zip' not in text:
-    raise SystemExit('README quick start was not inserted by the first patch')
+if '## Quick start' not in text:
+    anchor = 'See it live on the [project page](https://ayerdi.github.io/PROX2-AutoSwitch/).\n'
+    if anchor not in text:
+        raise SystemExit('README project-page anchor not found')
+    quick = '''
+
+## Quick start
+
+### Recommended: download the ZIP
+
+1. Open the [latest release](https://github.com/Ayerdi/PROX2-AutoSwitch/releases/latest) and download `Audio-AutoSwitch.zip`.
+2. Extract the ZIP to a normal folder.
+3. Double-click **`Install.cmd`**.
+4. Pick your headset and fallback output, then follow the ON → OFF → ON wizard.
+5. When installation finishes, turn the headset off/on once to confirm the real switch.
+
+`Install.cmd` is only a small launcher for the PowerShell installer; all installation logic remains in the reviewed `.ps1` files. The release also includes **`Verify.cmd`** and **`Uninstall.cmd`** for double-click diagnostics/removal.
+
+### One-command install
+
+If you prefer PowerShell, this bootstrap downloads the latest versioned release ZIP plus its SHA-256 checksum, verifies it, and then starts the same installer:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Ayerdi/PROX2-AutoSwitch/main/install.ps1 | iex"
+```
+'''
+    text = text.replace(anchor, anchor + quick, 1)
 
 pattern = re.compile(
     r'## Installation\n\n'
@@ -88,8 +109,6 @@ if 'Double-click `Install.cmd`' not in text:
     text = text.replace(needle, notes, 1)
 write(p, text)
 
-# Remove all stale one-shot tooling except the two scripts/workflow needed by
-# the current job; the workflow's final step removes those too.
 keep = {
     'tmp_onboarding_hardening.py',
     'tmp_onboarding_finish.py',
