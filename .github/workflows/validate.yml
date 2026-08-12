@@ -5,77 +5,48 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  validate-scripts:
+  powershell:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Validate PowerShell syntax
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          $scripts = Get-ChildItem -Path . -Filter '*.ps1' -File
-          if (-not $scripts) { Write-Error 'No .ps1 scripts found' }
-          foreach ($script in $scripts) {
-            $tokens = $null
-            $errors = $null
-            [System.Management.Automation.Language.Parser]::ParseFile(
-              $script.FullName, [ref]$tokens, [ref]$errors) | Out-Null
-            if ($errors.Count -gt 0) {
-              $errors | ForEach-Object { Write-Error "$($script.Name): $($_.Message) (line $($_.Extent.StartLineNumber))" }
-              exit 1
-            }
-            Write-Host "OK: $($script.Name)"
-          }
-
-      - name: Lint with PSScriptAnalyzer
+          $scripts=Get-ChildItem -Recurse -File | Where-Object { $_.Extension -in '.ps1','.psm1' }
+          foreach($script in $scripts){$tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile($script.FullName,[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){$errors|ForEach-Object{Write-Error "$($script.FullName): $($_.Message)"};exit 1}}
+      - name: Install validation modules
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
-            Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
-          }
-          $results = Invoke-ScriptAnalyzer -Path . -Recurse `
-            -Severity Error, Warning `
-            -ExcludeRule PSAvoidUsingWriteHost, PSAvoidUsingPlainTextForPassword, PSAvoidUsingCmdletAliases, PSAvoidUsingEmptyCatchBlock, PSUseApprovedVerbs, PSUseShouldProcessForStateChangingFunctions
-          if ($results) {
-            $results | ForEach-Object {
-              Write-Host "::error file=$($_.ScriptPath),line=$($_.Line)::$($_.RuleName): $($_.Message)"
-            }
-            exit 1
-          }
-          Write-Host "PSScriptAnalyzer: no Error/Warning findings."
-
-      - name: Verify scripts reference files present
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck
+          Install-Module Pester -RequiredVersion 5.9.0 -Force -Scope CurrentUser -SkipPublisherCheck
+      - name: PSScriptAnalyzer
         shell: pwsh
         run: |
-          $required = @(
-            'install.ps1',
-            'Install.cmd',
-            'Verify.cmd',
-            'Uninstall.cmd',
-            'Instalar-PROX2-AutoSwitch.ps1',
-            'Runtime-PROX2-AutoSwitch.ps1',
-            'Desinstalar-PROX2-AutoSwitch.ps1',
-            'Verificar-PROX2-AutoSwitch.ps1',
-            'Toggle-AudioEnhancements.ps1',
-            'lib/AutoSwitchCore.psm1'
-          )
-          $missing = $required | Where-Object { -not (Test-Path $_) }
-          if ($missing) { Write-Error "Missing: $($missing -join ', ')" }
-          Write-Host "All required files present."
-
-      - name: Run Pester tests
+          $r=Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error,Warning -ExcludeRule PSAvoidUsingWriteHost,PSAvoidUsingPlainTextForPassword,PSAvoidUsingCmdletAliases,PSAvoidUsingEmptyCatchBlock,PSUseApprovedVerbs,PSUseShouldProcessForStateChangingFunctions
+          if($r){$r|Format-Table -AutoSize|Out-String|Write-Host;exit 1}
+      - name: Required release files
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          if (-not (Get-Module -ListAvailable -Name Pester)) {
-            Install-Module -Name Pester -Force -Scope CurrentUser -SkipPublisherCheck
-          }
-          $config = New-PesterConfiguration
-          $config.Run.Path = 'tests'
-          $config.Output.Verbosity = 'Detailed'
-          $result = Invoke-Pester -Configuration $config
-          if ($result.FailedCount -gt 0) { exit 1 }
-          Write-Host "Pester: $($result.PassedCount) passed, $($result.FailedCount) failed."
+          $required=@('Install.cmd','Verify.cmd','Uninstall.cmd','install.ps1','Install-AutoSwitch.ps1','Verify-AutoSwitch.ps1','Uninstall-AutoSwitch.ps1','Instalar-PROX2-AutoSwitch.ps1','Verificar-PROX2-AutoSwitch.ps1','Desinstalar-PROX2-AutoSwitch.ps1','Runtime-PROX2-AutoSwitch.ps1','Toggle-AudioEnhancements.ps1','lib/AutoSwitchCore.psm1')
+          $missing=$required|Where-Object{-not(Test-Path $_)};if($missing){throw "Missing release files: $($missing -join ', ')"}
+      - name: Pester
+        shell: pwsh
+        run: Import-Module Pester -RequiredVersion 5.9.0; Invoke-Pester -Path .\tests -CI
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: bash scripts/run-gitleaks.sh

@@ -18,7 +18,7 @@ Describe 'Get-RenderItemIdFromText' {
     }
 
     It 'rejects an Item ID that is not a render device (different device class)' {
-        # La clase de dispositivo debe ser {0.0.0.00000000}. Otras clases no son render.
+        # Render device class must be {0.0.0.00000000}; other classes are not render endpoints.
         Get-RenderItemIdFromText -Text '{1.0.0.00000000}.{1A2B3C4D-5E6F-7890-ABCD-EF1234567890}' | Should -BeNullOrEmpty
     }
 
@@ -94,7 +94,7 @@ Describe 'ConvertFrom-SvclCsv' {
     It 'parses a real svcl export (Name and Device Name are separate)' {
         $rows = ConvertFrom-SvclCsv -Text $script:FixtureCsv
         $rows.Count | Should -Be 5
-        $rows[0].Name | Should -Be 'Auriculares'
+        $rows[0].Name | Should -Be 'Headphones'
         $rows[0].'Device Name' | Should -Be '2- Jabra Evolve 65'
         $rows[0].Type | Should -Be 'Device'
         $rows[0].Direction | Should -Be 'Render'
@@ -159,13 +159,13 @@ Describe 'Test-SvclExportValid' {
 
 Describe 'Get-SvclDeviceLabel' {
     It 'combines Device Name and Name when both exist' {
-        $row = [pscustomobject]@{ Name = 'Auriculares'; 'Device Name' = '2- Jabra Evolve 65' }
-        Get-SvclDeviceLabel -Row $row | Should -Be '2- Jabra Evolve 65 — Auriculares'
+        $row = [pscustomobject]@{ Name = 'Headphones'; 'Device Name' = '2- Jabra Evolve 65' }
+        Get-SvclDeviceLabel -Row $row | Should -Be '2- Jabra Evolve 65 — Headphones'
     }
 
     It 'falls back to Name when Device Name is missing' {
-        $row = [pscustomobject]@{ Name = 'Altavoces' }
-        Get-SvclDeviceLabel -Row $row | Should -Be 'Altavoces'
+        $row = [pscustomobject]@{ Name = 'Speakers' }
+        Get-SvclDeviceLabel -Row $row | Should -Be 'Speakers'
     }
 
     It 'falls back to Device Name when Name is missing or identical' {
@@ -177,7 +177,7 @@ Describe 'Get-SvclDeviceLabel' {
 Describe 'Find-SvclRenderDeviceByIdentity' {
     It 'matches the Jabra render endpoint by Device Name + Name' {
         $rows = @(ConvertFrom-SvclCsv -Text $script:FixtureCsv)
-        $row = Find-SvclRenderDeviceByIdentity -Rows $rows -DeviceName '2- Jabra Evolve 65' -Name 'Auriculares'
+        $row = Find-SvclRenderDeviceByIdentity -Rows $rows -DeviceName '2- Jabra Evolve 65' -Name 'Headphones'
         $row | Should -Not -BeNullOrEmpty
         $row.'Item ID' | Should -Be '{0.0.0.00000000}.{ed043b5e-65dc-4ba6-a847-310517ac1849}'
     }

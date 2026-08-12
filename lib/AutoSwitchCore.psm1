@@ -1,16 +1,16 @@
 ﻿#requires -Version 5.1
-# AutoSwitchCore.psm1 - logica pura y testeable del PRO X 2 AutoSwitch.
-# Sin dependencias de G HUB ni de svcl.exe, para poder probarse con Pester.
+# AutoSwitchCore.psm1 - pure, testable logic for Audio AutoSwitch.
+# No G HUB or svcl.exe dependency is required for Pester tests.
 
 Set-StrictMode -Version Latest
 
 function Get-RenderItemIdFromText {
     <#
     .SYNOPSIS
-        Extrae el Item ID de render valido desde la salida de svcl.exe.
+        Extract a valid render Item ID from svcl.exe output.
     .DESCRIPTION
-        Usa /GetColumnValue (NUNCA /Stdout /GetColumnValue, que contamina la salida).
-        Devuelve $null si no hay ningun Item ID de render valido.
+        Use /GetColumnValue (NEVER /Stdout /GetColumnValue, which contaminates the output).
+        Return $null when no valid render Item ID is present.
     #>
     [CmdletBinding()]
     param(
@@ -33,11 +33,11 @@ function Get-RenderItemIdFromText {
 function Resolve-HeadsetState {
     <#
     .SYNOPSIS
-        Debounce del estado fisico del PRO X 2.
+        Debounce physical headset state.
     .DESCRIPTION
-        Devuelve [pscustomobject] con IsOn (bool), Decision (bool: aplicar o no)
-        y Misses (contador). Solo se decide OFF tras OffMissThreshold respuestas
-        vacias consecutivas. Una respuesta con payload resetea el contador.
+        Return a [pscustomobject] with IsOn, Decision (whether to act)
+        and Misses. Decide OFF only after OffMissThreshold consecutive
+        empty responses. A response with a payload resets the counter.
     #>
     [CmdletBinding()]
     param(
@@ -73,11 +73,11 @@ function Resolve-HeadsetState {
 function ConvertFrom-SvclCsv {
     <#
     .SYNOPSIS
-        Parsea la salida /scomma de svcl.exe a objetos.
+        Parse svcl.exe /scomma output into objects.
     .DESCRIPTION
-        La primera linea de la exportacion es la cabecera de columnas.
-        Soporta campos entre comillas dobles y comas internas.
-        Devuelve [pscustomobject[]] con una propiedad por columna.
+        The first export line contains the column headers.
+        Supports double-quoted fields and embedded commas.
+        Returns [pscustomobject[]] with one property per column.
     #>
     [CmdletBinding()]
     param(
@@ -96,8 +96,8 @@ function ConvertFrom-SvclCsv {
         return @()
     }
 
-    # ConvertFrom-Csv nativo de PowerShell: maneja comillas, headers con
-    # espacios y campos con comas de forma fiable.
+    # Native PowerShell ConvertFrom-Csv handles quotes, headers with
+    # spaces and fields containing commas reliably.
     try {
         $csv = $lines -join [Environment]::NewLine
         $objects = @($csv | ConvertFrom-Csv)
@@ -114,7 +114,7 @@ function ConvertFrom-SvclCsv {
 function ConvertFrom-CsvLine {
     <#
     .SYNOPSIS
-        Divide una linea CSV simple en campos, respetando comillas dobles.
+        Split a simple CSV line into fields while respecting double quotes.
     #>
     [CmdletBinding()]
     param(
@@ -163,10 +163,10 @@ function ConvertFrom-CsvLine {
 function Get-CsvColumn {
     <#
     .SYNOPSIS
-        Devuelve el valor de la primera columna cuyo nombre coincida (sin
-        distinguir mayusculas) con uno de $Names. Soportan alias porque
-        svcl usa 'State' en unas versiones y 'DeviceState' en otras.
-        Devuelve $null si no existe ninguna.
+        Return the value from the first column whose name matches one of
+        $Names case-insensitively. Aliases are supported because
+        svcl uses 'State' in some versions and 'DeviceState' in others.
+        Return $null when none exists.
     #>
     [CmdletBinding()]
     param(
@@ -190,14 +190,14 @@ function Get-CsvColumn {
 function Resolve-EndpointState {
     <#
     .SYNOPSIS
-        Normaliza el estado de un endpoint de Windows a Connected/Disconnected/Unknown.
+        Normalize a Windows endpoint state to Connected/Disconnected/Unknown.
     .DESCRIPTION
         Active        -> Connected
         Unplugged     -> Disconnected
         NotPresent    -> Disconnected
-        roowausente   -> Disconnected
-        Disabled      -> Unknown (no cambiar)
-        Error / otro  -> Unknown (no cambiar)
+        missing row   -> Disconnected
+        Disabled      -> Unknown (do not switch)
+        Error / other -> Unknown (do not switch)
     #>
     [CmdletBinding()]
     param(
@@ -216,11 +216,11 @@ function Resolve-EndpointState {
 function Resolve-DetectedState {
     <#
     .SYNOPSIS
-        Debounce del estado detectado (endpoint Windows o payload G HUB).
+        Debounce detected state (Windows endpoint or G HUB payload).
     .DESCRIPTION
-        Igual que Resolve-HeadsetState pero sin asumir nada de G HUB:
-        PayloadPresent true -> Connected; false -> Disconnected tras
-        OffMissThreshold misses. Devuelve el mismo objeto con IsOn/Decision/Misses.
+        Same as Resolve-HeadsetState without assuming G HUB:
+        PayloadPresent true -> Connected; false -> Disconnected after
+        OffMissThreshold misses. Returns the same IsOn/Decision/Misses object.
     #>
     [CmdletBinding()]
     param(
@@ -235,7 +235,7 @@ function Resolve-DetectedState {
 function Test-ValidAudioConfig {
     <#
     .SYNOPSIS
-        True si HeadsetId y SpeakerId son distintos.
+        True when HeadsetId and SpeakerId are different.
     #>
     [CmdletBinding()]
     param(
@@ -249,10 +249,10 @@ function Test-ValidAudioConfig {
 function New-GHubTimeoutToken {
     <#
     .SYNOPSIS
-        CancellationTokenSource que se cancela solo pasados $Milliseconds.
+        CancellationTokenSource that cancels after $Milliseconds.
     .DESCRIPTION
-        Todos los CallAsync del WebSocket usan este token; sin el CancelAfter
-        un CloseAsync/ReceiveAsync podria colgar el runtime indefinidamente.
+        All WebSocket async calls use this token; without CancelAfter
+        CloseAsync/ReceiveAsync could hang the runtime indefinitely.
     #>
     [CmdletBinding()]
     param(
@@ -267,12 +267,12 @@ function New-GHubTimeoutToken {
 function Test-SvclExportValid {
     <#
     .SYNOPSIS
-        True si el texto es una exportacion /scomma de svcl valida.
+        True when the text is a valid svcl /scomma export.
     .DESCRIPTION
-        Un export valido debe tener al menos una fila de datos cuya cabecera
-        exponga las columnas que el runtime necesita: 'Item ID' y
-        'Device State'. Un texto vacio, basura o con cabecera incompleta no es
-        un export valido -> el llamador debe tratarlo como 'Unknown' (no como
+        A valid export must contain at least one data row and headers exposing
+        the columns required by the runtime: 'Item ID' and
+        'Device State'. Empty, garbage or incomplete-header text is not
+        a valid export -> the caller must treat it as 'Unknown' (not
         'Disconnected').
     #>
     [CmdletBinding()]
@@ -291,7 +291,7 @@ function Test-SvclExportValid {
         return $false
     }
 
-    # La primera fila debe exponer la cabecera minima que usa el runtime.
+    # The first row must expose the minimum headers required by the runtime.
     $first = $rows[0]
     $hasItemId    = $null -ne $first.PSObject.Properties['Item ID']
     $hasDeviceState = $null -ne $first.PSObject.Properties['Device State']
@@ -302,12 +302,12 @@ function Test-SvclExportValid {
 function Get-SvclRenderDevice {
     <#
     .SYNOPSIS
-        Filtra la exportacion /scomma de svcl.exe a solo endpoints de salida
-        (render) reales: Type='Device' y Direction='Render' (o 'Render' como
-        subcadena, segun la version de svcl).
+        Filter svcl.exe /scomma export to real render output endpoints
+        with Type='Device' and Direction='Render'.
+        
     .DESCRIPTION
-        Devuelve [pscustomobject[]] con las filas filtradas. Cada fila conserva
-        las columnas reales de svcl: Name, Type, Direction, Device State, Item ID.
+        Returns [pscustomobject[]] with filtered rows. Each row keeps
+        the real svcl columns: Name, Type, Direction, Device State, Item ID.
     #>
     [CmdletBinding()]
     param(
@@ -321,7 +321,7 @@ function Get-SvclRenderDevice {
         return @()
     }
 
-    # Filtro con bucle explicito (sin Where-Object con $_): mas predecible.
+    # Explicit loop filter (without Where-Object/$_) for predictable behavior.
     $render = [System.Collections.Generic.List[object]]::new()
 
     foreach ($row in $rows) {
@@ -339,11 +339,11 @@ function Get-SvclRenderDevice {
 function Get-SvclDeviceLabel {
     <#
     .SYNOPSIS
-        Construye la etiqueta visible de una fila de svcl.
+        Build the display label for an svcl row.
     .DESCRIPTION
-        svcl separa Name (p. ej. 'Auriculares') de Device Name
-        (p. ej. '2- Jabra Evolve 65'). Si existe Device Name se muestra
-        'Device Name — Name'; si no, solo Name.
+        svcl separates Name (for example 'Headphones') from Device Name
+        (for example '2- Jabra Evolve 65'). When Device Name exists, display
+        'Device Name — Name'; otherwise display Name only.
     #>
     [CmdletBinding()]
     param(
@@ -367,12 +367,12 @@ function Get-SvclDeviceLabel {
 function Find-SvclRenderDeviceByIdentity {
     <#
     .SYNOPSIS
-        Encuentra un endpoint Render por identidad estable de svcl.
+        Find a Render endpoint by stable svcl identity.
     .DESCRIPTION
-        Bluetooth puede recrear un endpoint y cambiar su Item ID. Para
-        re-resolverlo sin confundir dos salidas del mismo dispositivo se
-        comparan, cuando existen, AMBAS columnas: Device Name y Name.
-        Devuelve $null si no hay identidad suficiente o no existe coincidencia.
+        Bluetooth may recreate an endpoint and change its Item ID. To
+        re-resolve it without confusing two outputs from the same device,
+        compare BOTH columns when available: Device Name and Name.
+        Return $null when identity is insufficient or no match exists.
     #>
     [CmdletBinding()]
     param(
@@ -410,14 +410,14 @@ function Find-SvclRenderDeviceByIdentity {
 function Get-EndpointFxState {
     <#
     .SYNOPSIS
-        Lee el estado actual de PKEY_AudioEndpoint_Disable_SysFx de un endpoint
-        sin necesitar administrador.
+        Read the current PKEY_AudioEndpoint_Disable_SysFx state for an endpoint
+        without requiring administrator privileges.
     .DESCRIPTION
-        Lee PKEY_AudioEndpoint_Disable_SysFx del FxStore del endpoint via
-        IPolicyConfig::GetPropertyValue (el mismo store donde el helper elevado
-        escribe). Devuelve $true si los enhancements estan deshabilitados
-        (SysFx=1), $false si estan habilitados (SysFx=0) y $null si no se pudo
-        leer (endpoint inexistente o error). Nunca lanza.
+        Read PKEY_AudioEndpoint_Disable_SysFx from the endpoint FxStore through
+        IPolicyConfig::GetPropertyValue (the same store where the elevated helper
+        writes). Return $true when enhancements are disabled
+        (SysFx=1), $false when enabled (SysFx=0), and $null when the state cannot
+        be read (missing endpoint or error). Never throws.
     #>
     [CmdletBinding()]
     param(
@@ -425,9 +425,9 @@ function Get-EndpointFxState {
     )
 
     try {
-        # Sentinel = un tipo que SI se declara en el Add-Type. 'AutoSwitch.CoreAudio'
-        # no existe y haria que el Add-Type se reintentara en cada llamada, fallando
-        # en la segunda (los tipos ya existen) y devolviendo $null.
+        # Sentinel = a type that is actually declared by Add-Type. 'AutoSwitch.CoreAudio'
+        # does not exist and would make Add-Type retry on every call, failing
+        # on the second call because the types already exist.
         $typeName = 'AutoSwitch.EndpointFx'
 
         if (-not ($typeName -as [type])) {
@@ -515,7 +515,7 @@ namespace AutoSwitch
         private const uint PID_SYSFX = 5;
 
         // Devuelve: 1 = SysFx deshabilitado, 0 = SysFx habilitado,
-        //          -1 = no se pudo leer (endpoint inexistente / COM fallo).
+        //          -1 = read failed (missing endpoint / COM failure).
         // IMPORTANTE: se lee con IPolicyConfig.GetPropertyValue(deviceId,
         // bFxStore=true), el MISMO store donde el helper elevado escribe. El
         // IPropertyStore del endpoint (OpenPropertyStore) NO contiene
@@ -534,7 +534,7 @@ namespace AutoSwitch
             int hr = policy.GetPropertyValue(deviceId, true, ref pkey, out pv);
             if (hr != 0)
             {
-                return -1; // no se pudo leer -> estado desconocido
+                return -1; // read failed -> unknown state
             }
 
             return pv.ulVal != 0 ? 1 : 0;
