@@ -1,4 +1,4 @@
-﻿#requires -Version 5.1
+#requires -Version 5.1
 $ErrorActionPreference = "Stop"
 
 # PowerShell 5.1 on old .NET can negotiate TLS 1.0/1.1 and fail against
@@ -45,7 +45,7 @@ if (-not [Environment]::Is64BitOperatingSystem) {
 
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host " PRO X 2 LIGHTSPEED - Audio AutoSwitch" -ForegroundColor Cyan
+Write-Host " Audio AutoSwitch" -ForegroundColor Cyan
 Write-Host " Clean installation" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host ""
@@ -382,10 +382,12 @@ try {
     } until ($valid)
     $chosenSpeaker = $renderRows[$parsed - 1]
 
-    $headsetId   = Get-CsvColumn -Row $chosenHeadset -Names @('Item ID')
-    $speakerId   = Get-CsvColumn -Row $chosenSpeaker -Names @('Item ID')
-    $headsetName = Get-SvclDeviceLabel -Row $chosenHeadset
-    $speakerName = Get-SvclDeviceLabel -Row $chosenSpeaker
+    $headsetId           = Get-CsvColumn -Row $chosenHeadset -Names @('Item ID')
+    $speakerId           = Get-CsvColumn -Row $chosenSpeaker -Names @('Item ID')
+    $headsetName         = Get-SvclDeviceLabel -Row $chosenHeadset
+    $speakerName         = Get-SvclDeviceLabel -Row $chosenSpeaker
+    $headsetDeviceName   = Get-CsvColumn -Row $chosenHeadset -Names @('Device Name')
+    $headsetEndpointName = Get-CsvColumn -Row $chosenHeadset -Names @('Name')
 
     if (-not (Test-ValidAudioConfig -HeadsetId $headsetId -SpeakerId $speakerId)) {
         throw "You chose the same device for headset and fallback. Run the installer again."
@@ -401,35 +403,104 @@ try {
     Write-Host "Checking that Windows reflects the physical state of the headset..." -ForegroundColor Cyan
     Write-Host "      The headset must be ON now. Checking..." -ForegroundColor DarkGray
 
-    function Get-HeadsetCsvState {
-        param([string]$ItemId)
+    function Get-HeadsetInstallState {
+        param(
+            [Parameter(Mandatory = $true)][string]$ItemId,
+            [string]$DeviceName,
+            [string]$EndpointName
+        )
+
         $txt = (& $SvclPath /scomma "" 2>&1 | Out-String).Trim()
-        # Invalid/empty export -> Unknown (never assume off). Only when the
-        # export is valid and the row is missing is the endpoint absent -> Disconnected.
-        if (-not (Test-SvclExportValid -CsvText $txt)) { return 'Unknown' }
-        $r = @(ConvertFrom-SvclCsv -Text $txt) | Where-Object {
+        if (-not (Test-SvclExportValid -CsvText $txt)) {
+            return [pscustomobject]@{ State = 'Unknown'; FoundId = $null }
+        }
+
+        $rows = @(ConvertFrom-SvclCsv -Text $txt)
+        $row = $rows | Where-Object {
             $id = Get-CsvColumn -Row $_ -Names @('Item ID')
-            $null -ne $id -and $id.Trim().ToLowerInvariant() -eq $ItemId.ToLowerInvariant()
+            $null -ne $id -and $id.Trim() -ieq $ItemId.Trim()
         } | Select-Object -First 1
-        if (-not $r) { return 'Disconnected' }
-        $st = Get-CsvColumn -Row $r -Names @('Device State')
-        if ($null -eq $st) { return 'Unknown' }
-        return Resolve-EndpointState -State $st
+
+        # Bluetooth can recreate an endpoint with a new Item ID after reconnect.
+        # Resolve the same Render endpoint by its real svcl identity rather than
+        # treating the user-facing "Device Name — Name" label as one column.
+        if (-not $row -and
+            (-not [string]::IsNullOrWhiteSpace($DeviceName) -or
+             -not [string]::IsNullOrWhiteSpace($EndpointName))) {
+            $row = Find-SvclRenderDeviceByIdentity -Rows $rows -DeviceName $DeviceName -Name $EndpointName
+        }
+
+        if (-not $row) {
+            return [pscustomobject]@{ State = 'Disconnected'; FoundId = $null }
+        }
+
+        $state = Get-CsvColumn -Row $row -Names @('Device State', 'State')
+        $foundId = Get-CsvColumn -Row $row -Names @('Item ID')
+        if ([string]::IsNullOrWhiteSpace($state)) {
+            return [pscustomobject]@{ State = 'Unknown'; FoundId = $foundId }
+        }
+
+        return [pscustomobject]@{
+            State   = (Resolve-EndpointState -State $state)
+            FoundId = $foundId
+        }
     }
 
-    Start-Sleep -Milliseconds 500
-    $sOn1 = Get-HeadsetCsvState -ItemId $headsetId
+    function Wait-ForHeadsetInstallState {
+        param(
+            [Parameter(Mandatory = $true)][string]$ItemId,
+            [Parameter(Mandatory = $true)][string]$Expected,
+            [string]$DeviceName,
+            [string]$EndpointName,
+            [int]$TimeoutSeconds,
+            [int]$PollIntervalMs = 500
+        )
+
+        $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+        $currentId = $ItemId
+        $lastState = 'Unknown'
+        $lastFoundId = $null
+
+        do {
+            $res = Get-HeadsetInstallState -ItemId $currentId -DeviceName $DeviceName -EndpointName $EndpointName
+            $lastState = $res.State
+            if (-not [string]::IsNullOrWhiteSpace([string]$res.FoundId)) {
+                $lastFoundId = [string]$res.FoundId
+                $currentId = $lastFoundId
+            }
+
+            if ($lastState -eq $Expected) {
+                return [pscustomobject]@{ State = $lastState; FoundId = $lastFoundId }
+            }
+
+            Start-Sleep -Milliseconds $PollIntervalMs
+        } while ((Get-Date) -lt $deadline)
+
+        return [pscustomobject]@{ State = $lastState; FoundId = $lastFoundId }
+    }
+
+    Write-Host "      Waiting for Windows to report the headset as connected (up to 15 s)..." -ForegroundColor DarkGray
+    $rOn1 = Wait-ForHeadsetInstallState -ItemId $headsetId -Expected 'Connected' -DeviceName $headsetDeviceName -EndpointName $headsetEndpointName -TimeoutSeconds 15
+    $sOn1 = $rOn1.State
+    if ($rOn1.FoundId) { $headsetId = [string]$rOn1.FoundId }
 
     Write-Host ""
     Write-Host "Turn the headset OFF and press ENTER..." -ForegroundColor Cyan
     [void](Read-Host)
-    Start-Sleep -Milliseconds 800
-    $sOff = Get-HeadsetCsvState -ItemId $headsetId
+    Write-Host "      Waiting for Windows to report the headset as disconnected (up to 15 s)..." -ForegroundColor DarkGray
+    $rOff = Wait-ForHeadsetInstallState -ItemId $headsetId -Expected 'Disconnected' -DeviceName $headsetDeviceName -EndpointName $headsetEndpointName -TimeoutSeconds 15
+    $sOff = $rOff.State
+    if ($rOff.FoundId) { $headsetId = [string]$rOff.FoundId }
 
     Write-Host "Turn the headset back ON and press ENTER..." -ForegroundColor Cyan
     [void](Read-Host)
-    Start-Sleep -Milliseconds 800
-    $sOn2 = Get-HeadsetCsvState -ItemId $headsetId
+    Write-Host "      Waiting for Windows to report the headset as connected (up to 20 s)..." -ForegroundColor DarkGray
+    $rOn2 = Wait-ForHeadsetInstallState -ItemId $headsetId -Expected 'Connected' -DeviceName $headsetDeviceName -EndpointName $headsetEndpointName -TimeoutSeconds 20
+    $sOn2 = $rOn2.State
+    if ($rOn2.FoundId -and ([string]$rOn2.FoundId -ine $headsetId)) {
+        Write-Host "      Bluetooth endpoint was recreated; refreshed its Windows Item ID." -ForegroundColor DarkGray
+        $headsetId = [string]$rOn2.FoundId
+    }
 
     Write-Host ""
     Write-Host ("      State ON (initial):  {0}" -f $sOn1) -ForegroundColor DarkGray

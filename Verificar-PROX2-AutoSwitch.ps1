@@ -1,4 +1,4 @@
-﻿#requires -Version 5.1
+#requires -Version 5.1
 $ErrorActionPreference = "Continue"
 
 $InstallDir   = Join-Path $env:LOCALAPPDATA "PROX2AutoSwitch"
@@ -9,7 +9,7 @@ $LogPath      = Join-Path $InstallDir "autoswitch.log"
 $ShortcutPath = Join-Path ([Environment]::GetFolderPath("Startup")) "PRO X 2 AutoSwitch.lnk"
 
 Write-Host ""
-Write-Host "=== PRO X 2 AutoSwitch verification ===" -ForegroundColor Cyan
+Write-Host "=== Audio AutoSwitch verification ===" -ForegroundColor Cyan
 Write-Host ""
 
 function Show-Test {
@@ -51,8 +51,43 @@ if ($process) {
 }
 Show-Test "AutoSwitch process" ($null -ne $process) $processDetail
 
-$ghubPort = $false
-$ghubPortToTest = 9010
+$cfg = $null
+$mode = $null
+if (Test-Path $ConfigPath) {
+    try {
+        $cfg = Get-Content -Raw $ConfigPath | ConvertFrom-Json
+        $mode = Get-ConfigDetectionMode -Config $cfg
+    }
+    catch {}
+}
+
+if ($mode -eq 'LogitechGHub') {
+    $ghubPort = $false
+    $ghubPortToTest = 9010
+    if ($cfg -and $cfg.PSObject.Properties['GHubPort'] -and $cfg.GHubPort) {
+        $ghubPortToTest = [int]$cfg.GHubPort
+    }
+    try {
+        $client = New-Object System.Net.Sockets.TcpClient
+        $iar = $client.BeginConnect("127.0.0.1", $ghubPortToTest, $null, $null)
+        $ghubPort = $iar.AsyncWaitHandle.WaitOne(1000, $false)
+        if ($ghubPort) { $client.EndConnect($iar) }
+        $client.Close()
+    }
+    catch {
+        $ghubPort = $false
+    }
+
+    $ghubDetail = if ($ghubPort) { "Port reachable" } else { "Open Logitech G HUB" }
+    Show-Test "G HUB localhost:$ghubPortToTest" $ghubPort $ghubDetail
+}
+elseif ($mode -eq 'WindowsEndpoint') {
+    Write-Host "[SKIP] G HUB (not used in WindowsEndpoint mode)" -ForegroundColor DarkGray
+}
+else {
+    Show-Test "Detection mode" $false "Could not read a valid DetectionMode from config.json"
+}
+
 if (Test-Path $ConfigPath) {
     try {
         $cfgPort = (Get-Content -Raw $ConfigPath | ConvertFrom-Json).GHubPort
@@ -81,7 +116,7 @@ Show-Test "G HUB localhost:$ghubPortToTest" $ghubPort $ghubDetail
 
 if (Test-Path $ConfigPath) {
     try {
-        $cfg = Get-Content -Raw $ConfigPath | ConvertFrom-Json
+        if (-not $cfg) { $cfg = Get-Content -Raw $ConfigPath | ConvertFrom-Json }
         Write-Host ""
         Write-Host "Configuration:" -ForegroundColor Yellow
 
