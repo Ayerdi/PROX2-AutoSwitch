@@ -1,0 +1,41 @@
+name: tmp-fix-installer-bom
+
+on:
+  push:
+    paths:
+      - '.github/workflows/tmp-fix-installer-bom.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/onboarding-hardening
+          fetch-depth: 0
+
+      - name: Restore UTF-8 BOM
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path('Instalar-PROX2-AutoSwitch.ps1')
+          data = p.read_bytes()
+          bom = b'\xef\xbb\xbf'
+          if not data.startswith(bom):
+              p.write_bytes(bom + data)
+          PY
+          test "$(xxd -p -l 3 Instalar-PROX2-AutoSwitch.ps1)" = "efbbbf"
+
+      - name: Commit installer only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Instalar-PROX2-AutoSwitch.ps1
+          git commit -m "fix: preserve installer UTF-8 BOM"
+          git push origin HEAD:agent/onboarding-hardening
