@@ -86,9 +86,9 @@ def check_wiki_links() -> None:
     pattern = re.compile(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]")
     for path in wiki.glob("*.md"):
         text = path.read_text(encoding="utf-8-sig")
-        for first, second in pattern.findall(text):
-            # GitHub Wiki syntax is [[Page]] or [[Label|Page]].
-            target = (second or first).strip()
+        for page, _label in pattern.findall(text):
+            # GitHub Wiki uses [[Page]] or [[Page|Visible label]].
+            target = page.strip()
             if target.startswith("http://") or target.startswith("https://"):
                 continue
             if target not in page_names:
