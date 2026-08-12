@@ -302,6 +302,15 @@
     </div>
   </section>
 
+  <!-- tray -->
+  <section id="tray">
+    <h2><span class="dot">●</span> <span data-i18n="trayTitle"></span></h2>
+    <div class="card">
+      <img class="demo" src="assets/tray-menu.png" alt="Real AutoSwitch tray menu with a Logitech PRO X 2 configured" loading="lazy">
+      <p class="demo-caption" data-i18n="trayCaption"></p>
+    </div>
+  </section>
+
   <!-- why -->
   <section id="why">
     <h2><span class="dot">●</span> <span data-i18n="whyTitle"></span></h2>
@@ -431,6 +440,8 @@
       demo1: "<strong>Auriculares encendidos</strong> → la salida predeterminada pasa a los auriculares.",
       demo2: "<strong>Auriculares apagados</strong> → la salida vuelve automáticamente a los altavoces.",
       demo3: "Sin tocar nada: solo encender o apagar los auriculares.",
+      trayTitle: "Menú de la bandeja",
+      trayCaption: "Captura real con un Logitech PRO X 2 configurado. Los nombres del auricular y del fallback dependen de cada equipo.",
       howTitle: "Cómo funciona",
       howIntro: "Dos modos de detección, elegidos automáticamente: WindowsEndpoint (estado Active ↔ Unplugged) y LogitechGHub (payload de batería para PRO X 2). Reconfigure valida ON→OFF→ON con esperas acotadas; si Bluetooth recrea el endpoint, vuelve a resolver su identidad y actualiza el Item ID. El polling normal corre en un worker separado.",
       howDiagram: "Auriculares inalámbricos\n   │\n   ▼\nWindowsEndpoint (Active ↔ Unplugged)\n        │  (o G HUB ws://localhost:9010 para PRO X 2)\n        ▼\nConnected / Disconnected / Unknown\n        │        │\n   (debounce)  └──► Unknown: no cambiar\n        ▼\nSoundVolumeCommandLine\n        │\n/SetDefault <Item ID> all\n        │\n        ▼\n     Windows",
@@ -484,6 +495,8 @@
       demo1: "<strong>Headset on</strong> → the default output switches to the headset.",
       demo2: "<strong>Headset off</strong> → the output automatically switches back to the speakers.",
       demo3: "No clicking needed: just power the headset on or off.",
+      trayTitle: "Tray menu",
+      trayCaption: "Real screenshot with a Logitech PRO X 2 configured. Headset and fallback names vary from system to system.",
       howTitle: "How it works",
       howIntro: "Two detection modes, chosen automatically: WindowsEndpoint (Active ↔ Unplugged) and LogitechGHub (G HUB battery payload for PRO X 2). Reconfigure validates ON→OFF→ON with bounded waits; if Bluetooth recreates the endpoint, it re-resolves its identity and updates the Item ID. Normal polling runs in a separate worker.",
       howDiagram: "Wireless headset\n   │\n   ▼\nWindowsEndpoint (Active ↔ Unplugged)\n        │  (or G HUB ws://localhost:9010 for PRO X 2)\n        ▼\nConnected / Disconnected / Unknown\n        │        │\n   (debounce)  └──► Unknown: do not switch\n        ▼\nSoundVolumeCommandLine\n        │\n/SetDefault <Item ID> all\n        │\n        ▼\n     Windows",
