@@ -386,6 +386,10 @@ $script:TrayIcon = $null
 $script:MenuItemAutoSwitch = $null
 $script:MenuItemEnhancements = $null
 $script:MenuTimer = $null
+$script:MenuItemInfoHeadset = $null
+$script:MenuItemInfoFallback = $null
+$script:MenuItemInfoNext = $null
+$script:ReloadFlag = $null
 
 function Get-EnhancementsAction {
     # Lee el estado actual de SysFx del headset y devuelve 'Disable' o 'Enable'.
@@ -458,6 +462,176 @@ function Invoke-EnhancementsToggle {
     }
 }
 
+# --- Info del tray: headset, fallback y a donde se cambiaria ahora ---
+
+function Get-RenderDevicesFromCsv {
+    $csv = Get-SvclCsvExport
+    if (-not (Test-SvclExportValid -CsvText $csv)) { return @() }
+    return @(Get-SvclRenderDevice -CsvText $csv)
+}
+
+function Update-TrayInfo {
+    # Actualiza las lineas de informacion del menu de bandeja.
+    $hs = if ($Config.HeadsetName) { [string]$Config.HeadsetName } else { [string]$Config.HeadsetId }
+    $fb = if ($Config.SpeakerName) { [string]$Config.SpeakerName } else { [string]$Config.SpeakerId }
+    if ($script:MenuItemInfoHeadset) {
+        $script:MenuItemInfoHeadset.Text = "Headset: $hs"
+        $script:MenuItemInfoHeadset.Enabled = $false
+    }
+    if ($script:MenuItemInfoFallback) {
+        $script:MenuItemInfoFallback.Text = "Fallback: $fb"
+        $script:MenuItemInfoFallback.Enabled = $false
+    }
+
+    # A donde se cambiaria ahora segun el default actual.
+    $next = "Current: ?"
+    try {
+        $current = Get-DefaultRenderItemId
+        if ($current -ieq [string]$Config.HeadsetId) {
+            $next = "Next switch: $fb"
+        }
+        elseif ($current -ieq [string]$Config.SpeakerId) {
+            $next = "Next switch: $hs"
+        }
+        else {
+            $next = "Current: $current"
+        }
+    }
+    catch {
+        $next = "Next switch: unknown"
+    }
+    if ($script:MenuItemInfoNext) {
+        $script:MenuItemInfoNext.Text = $next
+        $script:MenuItemInfoNext.Enabled = $false
+    }
+}
+
+# --- Reconfigurar headset/fallback sin reinstalar ---
+
+function Save-Config {
+    $Config | ConvertTo-Json -Depth 10 | Set-Content -Path $ConfigPath -Encoding UTF8
+}
+
+function Show-ReconfigureDialog {
+    $devices = Get-RenderDevicesFromCsv
+    if ($devices.Count -lt 2) {
+        [System.Windows.Forms.MessageBox]::Show(
+            "Could not read the Windows output devices. Is svcl.exe present and the audio system OK?",
+            "Audio AutoSwitch",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        ) | Out-Null
+        return
+    }
+
+    $form = New-Object System.Windows.Forms.Form
+    $form.Text = "Audio AutoSwitch - Reconfigure"
+    $form.StartPosition = 'CenterScreen'
+    $form.FormBorderStyle = 'FixedDialog'
+    $form.MaximizeBox = $false
+    $form.MinimizeBox = $false
+    $form.ClientSize = New-Object System.Drawing.Size(420, 200)
+
+    $lblHeadset = New-Object System.Windows.Forms.Label
+    $lblHeadset.Text = "Headset:"
+    $lblHeadset.Location = New-Object System.Drawing.Point(20, 20)
+    $lblHeadset.AutoSize = $true
+
+    $comboHeadset = New-Object System.Windows.Forms.ComboBox
+    $comboHeadset.DropDownStyle = 'DropDownList'
+    $comboHeadset.Location = New-Object System.Drawing.Point(140, 16)
+    $comboHeadset.Width = 250
+    foreach ($d in $devices) {
+        $label = Get-SvclDeviceLabel -Row $d
+        $id = Get-CsvColumn -Row $d -Names @('Item ID')
+        [void]$comboHeadset.Items.Add($label)
+    }
+
+    $lblFallback = New-Object System.Windows.Forms.Label
+    $lblFallback.Text = "Fallback:"
+    $lblFallback.Location = New-Object System.Drawing.Point(20, 60)
+    $lblFallback.AutoSize = $true
+
+    $comboFallback = New-Object System.Windows.Forms.ComboBox
+    $comboFallback.DropDownStyle = 'DropDownList'
+    $comboFallback.Location = New-Object System.Drawing.Point(140, 56)
+    $comboFallback.Width = 250
+    foreach ($d in $devices) {
+        $label = Get-SvclDeviceLabel -Row $d
+        [void]$comboFallback.Items.Add($label)
+    }
+
+    # Preseleccionar los valores actuales.
+    for ($i = 0; $i -lt $devices.Count; $i++) {
+        $id = Get-CsvColumn -Row $devices[$i] -Names @('Item ID')
+        if ($id -ieq [string]$Config.HeadsetId) { $comboHeadset.SelectedIndex = $i }
+        if ($id -ieq [string]$Config.SpeakerId) { $comboFallback.SelectedIndex = $i }
+    }
+
+    $btnSave = New-Object System.Windows.Forms.Button
+    $btnSave.Text = "Save"
+    $btnSave.Location = New-Object System.Drawing.Point(140, 120)
+    $btnSave.Width = 90
+
+    $btnCancel = New-Object System.Windows.Forms.Button
+    $btnCancel.Text = "Cancel"
+    $btnCancel.Location = New-Object System.Drawing.Point(240, 120)
+    $btnCancel.Width = 90
+
+    $result = $null
+    $btnSave.Add_Click({
+        $result = 'save'
+        $form.Close()
+    })
+    $btnCancel.Add_Click({
+        $result = 'cancel'
+        $form.Close()
+    })
+
+    $form.Controls.Add($lblHeadset)
+    $form.Controls.Add($comboHeadset)
+    $form.Controls.Add($lblFallback)
+    $form.Controls.Add($comboFallback)
+    $form.Controls.Add($btnSave)
+    $form.Controls.Add($btnCancel)
+
+    $form.ShowDialog() | Out-Null
+
+    if ($result -ne 'save') { return }
+    if ($comboHeadset.SelectedIndex -lt 0 -or $comboFallback.SelectedIndex -lt 0) { return }
+
+    $newHeadsetId = Get-CsvColumn -Row $devices[$comboHeadset.SelectedIndex] -Names @('Item ID')
+    $newFallbackId = Get-CsvColumn -Row $devices[$comboFallback.SelectedIndex] -Names @('Item ID')
+    if (-not (Test-ValidAudioConfig -HeadsetId $newHeadsetId -SpeakerId $newFallbackId)) {
+        [System.Windows.Forms.MessageBox]::Show(
+            "The headset and the fallback must be different devices.",
+            "Audio AutoSwitch",
+            [System.Windows.Forms.MessageBoxButtons]::OK,
+            [System.Windows.Forms.MessageBoxIcon]::Warning
+        ) | Out-Null
+        return
+    }
+
+    $Config.HeadsetId   = [string]$newHeadsetId
+    $Config.SpeakerId   = [string]$newFallbackId
+    $Config.HeadsetName = (Get-SvclDeviceLabel -Row $devices[$comboHeadset.SelectedIndex])
+    $Config.SpeakerName = (Get-SvclDeviceLabel -Row $devices[$comboFallback.SelectedIndex])
+
+    Save-Config
+    # Pide al worker que recargue la config en el siguiente ciclo.
+    try { New-Item -ItemType File -Path $script:ReloadFlag -Force | Out-Null } catch {}
+
+    Write-AutoSwitchLog ("Reconfigured: headset={0} fallback={1}" -f $Config.HeadsetName, $Config.SpeakerName)
+    Update-TrayInfo
+    Update-EnhancementsMenu
+}
+
+function Invoke-Reconfigure {
+    Add-Type -AssemblyName System.Windows.Forms
+    Add-Type -AssemblyName System.Drawing
+    Show-ReconfigureDialog
+}
+
 function Invoke-AutoSwitchToggle {
     $newState = -not (Test-Path $script:EnabledFlag)
     Set-AutoSwitchEnabledState -Enabled $newState
@@ -495,6 +669,7 @@ function Stop-Runtime {
 $script:ControlDir = Join-Path $InstallDir "control"
 $script:EnabledFlag = Join-Path $script:ControlDir "enabled.flag"
 $script:StopFlag    = Join-Path $script:ControlDir "stop.flag"
+$script:ReloadFlag  = Join-Path $script:ControlDir "reload.flag"
 $script:WorkerProcess = $null
 
 function Start-Worker {
@@ -548,6 +723,7 @@ function Start-WorkerLoop {
     $controlDir = $env:AUTOSWITCH_CONTROL
     $enabledFlag = Join-Path $controlDir "enabled.flag"
     $stopFlag    = Join-Path $controlDir "stop.flag"
+    $reloadFlag  = Join-Path $controlDir "reload.flag"
 
     $lastState = $null
     $misses = 0
@@ -557,6 +733,28 @@ function Start-WorkerLoop {
     Write-AutoSwitchLog "Worker started (mode $script:DetectionMode)."
 
     while (-not (Test-Path $stopFlag)) {
+        # El tray pidio recargar la config (reconfiguracion sin reinstalar).
+        if (Test-Path $reloadFlag) {
+            try {
+                Remove-Item $reloadFlag -Force -ErrorAction SilentlyContinue
+                $newConfig = Get-Content -Raw -Path $ConfigPath | ConvertFrom-Json
+                if ($newConfig) {
+                    # Actualiza la variable global del script (no crear local).
+                    Set-Variable -Name Config -Value $newConfig -Scope 1
+                    # Si la config trae otro modo, el worker lo respeta.
+                    $newMode = Get-ConfigDetectionMode -Config $newConfig
+                    if ($newMode) { $script:DetectionMode = $newMode }
+                    $lastState = $null
+                    $misses = 0
+                    $script:WorkerBatteryPath = $null
+                    Write-AutoSwitchLog "Config reloaded (reconfigure)."
+                }
+            }
+            catch {
+                Write-AutoSwitchLog ("Could not reload config: {0}" -f $_.Exception.Message)
+            }
+        }
+
         $enabled = Test-Path $enabledFlag
         if (-not $enabled) {
             Start-Sleep -Milliseconds ([int]$Config.PollMilliseconds)
@@ -681,6 +879,24 @@ function Initialize-TrayAndTimer {
 
     $menu = New-Object System.Windows.Forms.ContextMenuStrip
 
+    # Lineas de informacion (Headset / Fallback / Next switch).
+    $script:MenuItemInfoHeadset = New-Object System.Windows.Forms.ToolStripMenuItem
+    $script:MenuItemInfoHeadset.Text = "Headset: ..."
+    $script:MenuItemInfoHeadset.Enabled = $false
+    [void]$menu.Items.Add($script:MenuItemInfoHeadset)
+
+    $script:MenuItemInfoFallback = New-Object System.Windows.Forms.ToolStripMenuItem
+    $script:MenuItemInfoFallback.Text = "Fallback: ..."
+    $script:MenuItemInfoFallback.Enabled = $false
+    [void]$menu.Items.Add($script:MenuItemInfoFallback)
+
+    $script:MenuItemInfoNext = New-Object System.Windows.Forms.ToolStripMenuItem
+    $script:MenuItemInfoNext.Text = "Next switch: ..."
+    $script:MenuItemInfoNext.Enabled = $false
+    [void]$menu.Items.Add($script:MenuItemInfoNext)
+
+    [void]$menu.Items.Add(New-Object System.Windows.Forms.ToolStripSeparator)
+
     $script:MenuItemAutoSwitch = New-Object System.Windows.Forms.ToolStripMenuItem
     $script:MenuItemAutoSwitch.Text = "AutoSwitch: Enabled"
     $script:MenuItemAutoSwitch.Checked = $true
@@ -691,6 +907,12 @@ function Initialize-TrayAndTimer {
     $script:MenuItemEnhancements.Text = "Audio Enhancements..."
     $script:MenuItemEnhancements.Add_Click({ Invoke-EnhancementsToggle })
     [void]$menu.Items.Add($script:MenuItemEnhancements)
+
+    # Submenu de reconfiguracion (elegir headset/fallback sin reinstalar).
+    $reconfigureItem = New-Object System.Windows.Forms.ToolStripMenuItem
+    $reconfigureItem.Text = "Reconfigure..."
+    $reconfigureItem.Add_Click({ Invoke-Reconfigure })
+    [void]$menu.Items.Add($reconfigureItem)
 
     $exitItem = New-Object System.Windows.Forms.ToolStripMenuItem
     $exitItem.Text = "Exit"
@@ -706,10 +928,12 @@ function Initialize-TrayAndTimer {
     $script:MenuTimer.Interval = 5000
     $script:MenuTimer.Add_Tick({
         Update-EnhancementsMenu
+        Update-TrayInfo
     })
     $script:MenuTimer.Start()
 
     Update-EnhancementsMenu
+    Update-TrayInfo
     Write-AutoSwitchLog "Tray configured; message pump active."
 }
 
