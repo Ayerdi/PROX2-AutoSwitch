@@ -1,0 +1,46 @@
+name: tmp-inspect-wiki
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/tmp-inspect-wiki.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Inspect wiki
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -u
+          rm -rf /tmp/wiki
+          if git clone "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" /tmp/wiki; then
+            echo '=== WIKI FILES ==='
+            find /tmp/wiki -maxdepth 1 -type f -printf '%f\n' | sort
+            echo '=== WIKI CONTENT ==='
+            for f in /tmp/wiki/*.md; do
+              [ -e "$f" ] || continue
+              echo "===== $(basename "$f") ====="
+              cat "$f"
+              echo
+            done
+          else
+            echo 'WIKI_UNAVAILABLE'
+          fi
+      - name: Remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/tmp-inspect-wiki.yml
+          git commit -m "chore: remove wiki inspection workflow"
+          git push origin HEAD:main
