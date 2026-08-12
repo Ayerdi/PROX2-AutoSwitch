@@ -7,7 +7,7 @@
     PKEY_AudioEndpoint_Disable_SysFx (1da5d803-d492-4edd-8c23-e0c0ffee7f0e, 5)
     SOLO para el DeviceId indicado, verifica el resultado y sale con codigo:
       0 = cambio aplicado y verificado
-      1 = no se pudo aplicar o verificar (UAC cancelado, endpoint inexistente, ...)
+      1 = could not apply or verify (UAC cancelled, missing endpoint, ...)
 #>
 [CmdletBinding()]
 param(
@@ -111,7 +111,7 @@ namespace AutoSwitch
             int hrGet = policy.GetPropertyValue(deviceId, true, ref pkey, out pvCheck);
             if (hrGet != 0)
             {
-                return -hrGet; // fallo en lectura -> exit 1
+                return -hrGet; // read failure -> exit 1
             }
 
             bool effective = pvCheck.ulVal != 0;

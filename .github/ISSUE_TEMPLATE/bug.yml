@@ -1,0 +1,38 @@
+name: Reproducible bug
+description: Report an AutoSwitch defect with redacted diagnostics.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include credentials, unrelated device IDs, private paths or complete unredacted logs.
+  - type: input
+    id: version
+    attributes:
+      label: AutoSwitch version
+    validations:
+      required: true
+  - type: input
+    id: headset
+    attributes:
+      label: Headset model and connection type
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Detection mode
+      options: [WindowsEndpoint, LogitechGHub, Unknown / installation failed]
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Redacted endpoint/log evidence
+      description: Include only the smallest evidence needed to understand ON/OFF state behavior.

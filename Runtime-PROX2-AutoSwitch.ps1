@@ -1,8 +1,8 @@
 ﻿#requires -Version 5.1
 $ErrorActionPreference = "Stop"
 
-# Ruta canonica del script: $PSCommandPath (no $MyInvocation.MyCommand.Path,
-# que dentro de una funcion describe la invocacion y puede quedar vacio).
+# Canonical script path: $PSCommandPath (not $MyInvocation.MyCommand.Path,
+# which inside a function describes the invocation and may be empty).
 $script:RuntimePath = $PSCommandPath
 
 $InstallDir = Split-Path -Parent $script:RuntimePath
@@ -31,7 +31,7 @@ foreach ($k in 'ConnectTimeoutMs', 'ReceiveTimeoutMs', 'RequestTimeoutMs') {
 
 $script:DetectionMode = Get-ConfigDetectionMode -Config $Config
 if (-not $script:DetectionMode) {
-    Write-Host "config.json tiene un DetectionMode no valido. Reinstala o corrige el archivo."
+    Write-Host "config.json has an invalid DetectionMode. Reinstall or correct the file."
     exit 13
 }
 
@@ -66,9 +66,9 @@ if (-not $Config.PSObject.Properties['DetectionMode']) {
     catch { }
 }
 
-# Impide dos instancias del runtime para el mismo usuario.
+# Prevent two runtime instances for the same user.
 # El worker (AUTOSWITCH_WORKER=1) es un proceso hijo legitimo del runtime y
-# no debe competir por el mutex.
+# must not compete for the mutex.
 $createdNew = $false
 $mutex = $null
 if ($env:AUTOSWITCH_WORKER -ne '1') {
@@ -82,8 +82,8 @@ if ($env:AUTOSWITCH_WORKER -ne '1') {
 $script:Ws  = $null
 
 function Close-GHubConnection {
-    # El cierre no debe poder colgar la recuperacion: si CloseAsync no
-    # termina en 1 s (o falla), Abort() + Dispose() garantizan salida.
+    # Closing must not hang recovery: if CloseAsync does not
+    # finish within 1 s (or fails), Abort() + Dispose() guarantee exit.
     if ($null -ne $script:Ws -and
         $script:Ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
         $closeCts = New-Object System.Threading.CancellationTokenSource
@@ -148,7 +148,7 @@ function Connect-GHub {
     }
 
     if ($script:Ws.State -ne [System.Net.WebSockets.WebSocketState]::Open) {
-        throw "No se pudo conectar con Logitech G HUB."
+        throw "Could not connect to Logitech G HUB."
     }
 }
 
@@ -191,7 +191,7 @@ function Receive-GHubText {
             if ($remainingMs -le 0) {
                 throw "Timeout de peticion G HUB ($($script:RequestTimeoutMs) ms)."
             }
-            # El fragmento espera como mucho ReceiveTimeoutMs, nunca mas alla
+            # Each fragment waits at most ReceiveTimeoutMs, never beyond
             # del deadline global de la peticion.
             $fragmentMs = [Math]::Min($script:ReceiveTimeoutMs, $remainingMs)
 
@@ -239,7 +239,7 @@ function Invoke-GHubGet {
     }
 
     # Limite global por peticion: aunque G HUB intercale eventos,
-    # la respuesta buscada debe llegar antes del deadline.
+    # the requested response must arrive before the deadline.
     $deadline = (Get-Date).AddMilliseconds($script:RequestTimeoutMs)
 
     while ($true) {
@@ -287,13 +287,13 @@ function Get-ProX2BatteryPath {
 
 function Get-DefaultRenderItemId {
     # IMPORTANTE: /GetColumnValue ya escribe el valor en stdout.
-    # No agregar /Stdout aqui: /Stdout añade informacion del item y rompe el parseo.
+    # Do not add /Stdout here: it adds item information and breaks parsing.
     $raw = & $SvclPath /GetColumnValue "DefaultRenderDevice" "Item ID" 2>&1
     $text = ($raw | Out-String).Trim()
 
     $id = Get-RenderItemIdFromText -Text $text
     if (-not $id) {
-        throw "No se pudo leer el Item ID del dispositivo predeterminado. Salida: $text"
+        throw "Could not read the default device Item ID. Output: $text"
     }
 
     return $id
@@ -350,7 +350,7 @@ function Get-HeadsetEndpointState {
     .DESCRIPTION
         - Export valido + fila con Item ID coincidente -> estado normalizado.
         - Export valido + fila ausente (endpoint no presente) -> Disconnected.
-        - Export invalido/vacio (svcl fallo, basura) -> Unknown (no tocar nada).
+        - Invalid/empty export (svcl failure/garbage) -> Unknown (do nothing).
     #>
     $csv = Get-SvclCsvExport
 
@@ -468,7 +468,7 @@ function Invoke-EnhancementsToggle {
     }
 }
 
-# --- Info del tray: headset, fallback y a donde se cambiaria ahora ---
+# --- Tray info: headset, fallback and the output that would be selected now ---
 
 function Get-RenderDevicesFromCsv {
     $csv = Get-SvclCsvExport
@@ -477,7 +477,7 @@ function Get-RenderDevicesFromCsv {
 }
 
 function Update-TrayInfo {
-    # Actualiza las lineas de informacion del menu de bandeja.
+    # Refresh the tray menu information lines.
     $hs = if ($Config.HeadsetName) { [string]$Config.HeadsetName } else { [string]$Config.HeadsetId }
     $fb = if ($Config.SpeakerName) { [string]$Config.SpeakerName } else { [string]$Config.SpeakerId }
     if ($script:MenuItemInfoHeadset) {
@@ -489,7 +489,7 @@ function Update-TrayInfo {
         $script:MenuItemInfoFallback.Enabled = $false
     }
 
-    # A donde se cambiaria ahora segun el default actual.
+    # Determine where the next switch would go from the current default.
     $next = "Current: ?"
     try {
         $current = Get-DefaultRenderItemId
@@ -538,7 +538,7 @@ function Get-HeadsetStateForId {
 
     $csv = Get-SvclCsvExport
     if (-not (Test-SvclExportValid -CsvText $csv)) {
-        if ($Diagnose) { Write-AutoSwitchLog ("Get-HeadsetStateForId: svcl export invalido/vacio para {0}" -f $ItemId) }
+        if ($Diagnose) { Write-AutoSwitchLog ("Get-HeadsetStateForId: invalid/empty svcl export for {0}" -f $ItemId) }
         return 'Unknown'
     }
 
@@ -552,8 +552,8 @@ function Get-HeadsetStateForId {
 
     # Fallback de identidad: un endpoint Bluetooth puede reaparecer con otro
     # Item ID. No usar la etiqueta visible "Device Name — Name" como si fuera
-    # una columna: resolver por las dos columnas reales evita además confundir
-    # dos endpoints Render del mismo dispositivo.
+    # one column: resolving through the two real columns also avoids confusing
+    # two Render endpoints from the same device.
     if (-not $row -and
         (-not [string]::IsNullOrWhiteSpace($DeviceName) -or
          -not [string]::IsNullOrWhiteSpace($EndpointName))) {
@@ -582,7 +582,7 @@ function Get-HeadsetStateForId {
                 $dir   = Get-CsvColumn -Row $r -Names @('Direction')
                 $lines += "[$type/$dir] '$name' id='$id' state='$st'"
             }
-            Write-AutoSwitchLog ("Get-HeadsetStateForId: NO se encontro {0} en la exportacion. Fila(s) disponibles:`n{1}" -f $ItemId, ($lines -join "`n"))
+            Write-AutoSwitchLog ("Get-HeadsetStateForId: was NOT found {0} in the export. Available row(s):`n{1}" -f $ItemId, ($lines -join "`n"))
         }
         return 'Disconnected'
     }
@@ -604,7 +604,7 @@ function Wait-ForHeadsetState {
         o expire el timeout. Un headset Bluetooth (p. ej. Jabra) puede tardar
         varios segundos en reflejar el cambio fisico en Windows; una lectura
         unica a los 500/800 ms lee demasiado pronto. Tambien puede desaparecer
-        y volver con otro Item ID -> se busca por nombre como respaldo y se
+        and return with another Item ID -> fall back to name-based resolution and
         devuelve el Item ID observado.
     #>
     param(
@@ -873,7 +873,7 @@ function Show-ReconfigureDialog {
                 return
             }
 
-            # --- Guardar config completa (modo incluido) ---
+            # --- Save the full configuration (including mode) ---
             $Config.HeadsetId   = [string]$newHeadsetId
             $Config.SpeakerId   = [string]$newFallbackId
             $Config.HeadsetName = $newHeadsetName
@@ -943,8 +943,8 @@ function Invoke-Reconfigure {
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
 
-    # Try/catch exterior: si el fallo ocurre al construir/abrir el dialogo
-    # (antes de entrar en "Detect mode..."), que quede registrado en el log.
+    # Outer try/catch: if a failure occurs while creating/opening the dialog
+    # (before entering "Detect mode..."), make sure it is recorded in the log.
     try {
         Show-ReconfigureDialog
     }
@@ -975,7 +975,7 @@ function Invoke-AutoSwitchToggle {
             $script:MenuItemAutoSwitch.Checked = $false
         }
     }
-    Write-AutoSwitchLog ("AutoSwitch {0} por el usuario." -f $(if ($newState) { 'activado' } else { 'desactivado' }))
+    Write-AutoSwitchLog ("AutoSwitch {0} by the user." -f $(if ($newState) { 'enabled' } else { 'disabled' }))
 }
 
 function Stop-Runtime {
@@ -1046,7 +1046,7 @@ function Stop-Worker {
 }
 
 # --- Bucle del worker (solo cuando AUTOSWITCH_WORKER=1) ---
-# Se ejecuta al final del script; las funciones G HUB/audio/endpoint ya estan
+# Runs at the end of the script; G HUB/audio/endpoint functions are already
 # definidas arriba porque es el mismo script.
 
 function Start-WorkerLoop {
@@ -1136,7 +1136,7 @@ function Start-WorkerLoop {
                 if (-not $availabilityLogged) {
                     Write-AutoSwitchLog ((
                         "G HUB/AutoSwitch no disponible: {0}. " +
-                        "Se reintentara; mientras el estado sea desconocido no se cambia la salida."
+                        "It will retry; while the state is unknown the output is not changed."
                     ) -f $_.Exception.Message)
                     $availabilityLogged = $true
                 }
@@ -1162,7 +1162,7 @@ function Start-WorkerLoop {
                     $lastState = $state.IsOn
                 }
                 catch {
-                    Write-AutoSwitchLog ("No se pudo cambiar la salida de audio: {0}. Se reintentara." -f $_.Exception.Message)
+                    Write-AutoSwitchLog ("Could not change the audio output: {0}. It will retry." -f $_.Exception.Message)
                 }
             }
         }
@@ -1180,7 +1180,7 @@ function Initialize-TrayAndTimer {
 
     $script:TrayIcon = New-Object System.Windows.Forms.NotifyIcon
 
-    # Icono propio de la app (icono de auricular azul). Si el .ico no existe
+    # App-specific icon. If the .ico file does not exist
     # en disco, caemos a SystemIcons.Application para que siempre haya uno.
     try {
         $iconFile = Join-Path $InstallDir "icon.ico"
@@ -1200,7 +1200,7 @@ function Initialize-TrayAndTimer {
 
     # Form invisible que sostiene el message pump de WinForms. Application.Run()
     # sin Form no siempre mantiene el NotifyIcon visible activo en todos los
-    # builds de .NET; con un Form oculto el pump es robusto y la bandeja no se cae.
+    # .NET builds; an invisible Form provides a robust message pump for the tray.
     $script:MainForm = New-Object System.Windows.Forms.Form
     $script:MainForm.WindowState = 'Minimized'
     $script:MainForm.ShowInTaskbar = $false
@@ -1271,7 +1271,7 @@ function Initialize-TrayAndTimer {
 Write-AutoSwitchLog "PRO X 2 AutoSwitch started (mode $script:DetectionMode)."
 
 if ($env:AUTOSWITCH_WORKER -eq '1') {
-    # Modo worker: solo el bucle de polling. No toca la bandeja.
+    # Worker mode: polling loop only. It does not touch the tray.
     Start-WorkerLoop
     exit 0
 }
@@ -1288,7 +1288,7 @@ try {
         }
     }
 
-    # Message pump principal sostenido por un Form invisible. La bandeja de
+    # Main message pump hosted by an invisible Form. The tray
     # notificaciones procesa eventos aqui; se mantiene activa hasta Exit.
     [System.Windows.Forms.Application]::Run($script:MainForm)
     Write-AutoSwitchLog "Message pump finished (Exit)."

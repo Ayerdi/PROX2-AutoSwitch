@@ -1,18 +1,31 @@
-# Security
+# Security policy
 
 ## Reporting a vulnerability
 
-This project touches two trust-sensitive paths:
+Do **not** open a public issue for an exploitable security problem or a report containing personal/private data. Use GitHub's private vulnerability reporting flow:
 
-- **Logitech G HUB local WebSocket** (`ws://localhost:9010`): an undocumented, reverse-engineered interface. Treat it as unofficial and potentially changing.
-- **NirSoft `svcl.exe` download**: the installer verifies the SHA-256 of `svcl-x64.zip` before running it. That check is intentional — never disable it.
+<https://github.com/Ayerdi/PROX2-AutoSwitch/security/advisories/new>
 
-Please **do not** open a public issue for a security problem that involves credentials, personal data or exploitable behavior. Report privately instead:
+Include the affected release, impact, minimal reproduction and any known mitigation. Redact machine-specific audio identifiers and unrelated logs.
 
-- Open a [private vulnerability report](https://github.com/Ayerdi/PROX2-AutoSwitch/security/advisories/new), or
-- Email the maintainer directly if you have their address.
+## Trust-sensitive components
 
-## Scope
+### Logitech G HUB local WebSocket
 
-- The SHA-256 pin for `svcl-x64.zip` lives in `Instalar-PROX2-AutoSwitch.ps1` (`$ExpectedSha256`). If NirSoft ships a new version, update it from the official hashes page — do not remove the check.
-- `config.json` stores the current machine's Windows audio `Item ID`s because they are required to target endpoints; they are local identifiers, not secrets, and must not be copied between machines. Reconfigure may refresh the headset ID after endpoint recreation. The project does **not** persist the volatile G HUB `deviceId`, and repository/releases contain no user-specific IDs or credentials.
+`ws://localhost:9010` is an undocumented, reverse-engineered local interface. It is **not** an official Logitech API. Treat responses as untrusted input and keep bounded connection/request/close timeouts.
+
+### NirSoft SoundVolumeCommandLine
+
+The installer downloads `svcl-x64.zip` from NirSoft and verifies its pinned SHA-256 before extracting/running it. If NirSoft publishes a new build and the hash changes, installation must fail safely until the value is independently verified from the official hashes page.
+
+**Never disable the checksum check to make installation succeed.**
+
+## Local configuration
+
+`config.json` stores machine-local Windows audio Item IDs because they are required to target endpoints. They are identifiers rather than credentials, but they should not be copied between machines and public issue reports should redact unnecessary identifiers.
+
+The volatile G HUB `deviceId` is intentionally rediscovered rather than persisted.
+
+## Release safety
+
+Release ZIPs are built deterministically, hashed and rebuilt before publication. CI validates PowerShell syntax, PSScriptAnalyzer, Pester and scans Git history for secrets.
