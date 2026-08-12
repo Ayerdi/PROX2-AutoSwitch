@@ -410,7 +410,7 @@ namespace AutoSwitch
     }
 
     [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
-    public class MMDeviceEnumeratorComObject { }
+    public class MMDeviceEnumeratorComObject : IMMDeviceEnumerator { }
 
     [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"),
      InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -447,7 +447,8 @@ namespace AutoSwitch
 '@ -ErrorAction Stop
         }
 
-        $enumerator = New-Object AutoSwitch.MMDeviceEnumeratorComObject
+        $enumerator = [System.Activator]::CreateInstance(
+            [type]::GetTypeFromCLSID([guid]'BCDE0395-E52F-467C-8E3D-C4579291692E'))
         $enumeratorIface = [AutoSwitch.IMMDeviceEnumerator]$enumerator
 
         $devicePtr = [IntPtr]::Zero

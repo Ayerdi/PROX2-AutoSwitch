@@ -59,7 +59,7 @@ namespace AutoSwitch
     }
 
     [ComImport, Guid("870af99c-171d-4f9e-af0d-e63df40c2bc9")]
-    public class CPolicyConfigVistaClient { }
+    public class CPolicyConfigVistaClient : IPolicyConfig { }
 
     [ComImport, Guid("f8679f50-850a-41cf-9c72-430f290290c8"),
      InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -81,7 +81,11 @@ namespace AutoSwitch
 }
 '@ -ErrorAction Stop
 
-    $policyConfig = New-Object AutoSwitch.CPolicyConfigVistaClient
+    # La coclass implementa IPolicyConfig: New-Object + cast falla en PS 5.1
+    # si la clase no declara la interfaz. Activator + GetTypeFromCLSID es la
+    # forma fiable de crear el RCW y obtener la interfaz.
+    $clsid = [guid]'870af99c-171d-4f9e-af0d-e63df40c2bc9'
+    $policyConfig = [Activator]::CreateInstance([type]::GetTypeFromCLSID($clsid))
     $policy = [AutoSwitch.IPolicyConfig]$policyConfig
 
     $pkey = New-Object AutoSwitch.PROPERTYKEY
