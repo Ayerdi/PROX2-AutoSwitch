@@ -128,7 +128,13 @@ function Connect-GHub {
     $script:Ws.Options.SetRequestHeader("Sec-WebSocket-Protocol", "json")
     $script:Ws.Options.AddSubProtocol("json")
 
-    $uri = New-Object System.Uri("ws://localhost:$($Config.GHubPort)")
+    # WindowsEndpoint configs may never have had GHubPort. Reconfigure can
+    # switch such a config to PRO X 2, so use the established default safely.
+    $ghubPort = 9010
+    if ($Config.PSObject.Properties['GHubPort'] -and $Config.GHubPort) {
+        $ghubPort = [int]$Config.GHubPort
+    }
+    $uri = New-Object System.Uri("ws://localhost:$ghubPort")
 
     $timeout = New-GHubTimeoutToken -Milliseconds $script:ConnectTimeoutMs
     try {
@@ -555,13 +561,22 @@ function Test-GHubProX2 {
         if ($candidates.Count -eq 0) { return $null }
         if ($candidates.Count -eq 1) { return $candidates[0] }
 
-        # Varios PRO X 2: preferir el que coincide con el nombre visible del
-        # headset elegido; si no hay coincidencia, el primero.
-        $picked = $candidates | Where-Object {
-            $_.extendedDisplayName -match [regex]::Escape([string]$comboHeadset.Text)
-        } | Select-Object -First 1
-        if ($picked) { return $picked }
-        return $candidates[0]
+        # Multiple PRO X 2 devices: never guess. Ask the user which one to use.
+        foreach ($candidate in $candidates) {
+            $answer = [System.Windows.Forms.MessageBox]::Show(
+                ("Multiple PRO X 2 devices were found in G HUB.`n`nUse this one?`n{0} ({1})" -f $candidate.extendedDisplayName, $candidate.id),
+                "Audio AutoSwitch",
+                [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
+                [System.Windows.Forms.MessageBoxIcon]::Question
+            )
+            if ($answer -eq [System.Windows.Forms.DialogResult]::Yes) {
+                return $candidate
+            }
+            if ($answer -eq [System.Windows.Forms.DialogResult]::Cancel) {
+                return $null
+            }
+        }
+        return $null
     }
     catch {
         Write-AutoSwitchLog ("Reconfigure: G HUB check failed: {0}" -f $_.Exception.Message)
@@ -743,15 +758,24 @@ function Show-ReconfigureDialog {
             $Config.SpeakerId   = [string]$newFallbackId
             $Config.HeadsetName = $newHeadsetName
             $Config.SpeakerName = $newSpeakerName
-            $Config.DetectionMode = $newMode
-            if ($newGhubName) {
-                $Config.GHubDisplayName = $newGhubName
+
+            # Optional properties may not exist in WindowsEndpoint configs.
+            # Add-Member -Force updates existing values and safely creates missing ones.
+            $Config | Add-Member -NotePropertyName DetectionMode -NotePropertyValue $newMode -Force
+            $Config | Add-Member -NotePropertyName EnhancementsDeviceId -NotePropertyValue ([string]$newHeadsetId) -Force
+
+            if ($newMode -eq 'LogitechGHub') {
+                $ghubPortToSave = 9010
+                if ($Config.PSObject.Properties['GHubPort'] -and $Config.GHubPort) {
+                    $ghubPortToSave = [int]$Config.GHubPort
+                }
+                $Config | Add-Member -NotePropertyName GHubDisplayName -NotePropertyValue $newGhubName -Force
+                $Config | Add-Member -NotePropertyName GHubPort -NotePropertyValue $ghubPortToSave -Force
             }
             else {
                 $Config.PSObject.Properties.Remove('GHubDisplayName')
+                $Config.PSObject.Properties.Remove('GHubPort')
             }
-            # El endpoint de enhancements debe seguir al nuevo headset.
-            $Config.EnhancementsDeviceId = [string]$newHeadsetId
 
             Save-Config
             # Pide al worker que recargue la config en el siguiente ciclo.
