@@ -543,6 +543,33 @@ function Get-HeadsetStateForId {
     return Resolve-EndpointState -State $state
 }
 
+function Wait-ForHeadsetState {
+    <#
+    .SYNOPSIS
+        Hace polling del estado del endpoint hasta que coincida con el esperado
+        o expire el timeout. Un headset Bluetooth (p. ej. Jabra) puede tardar
+        varios segundos en reflejar el cambio fisico en Windows; una lectura
+        unica a los 500/800 ms lee demasiado pronto.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$ItemId,
+        [Parameter(Mandatory = $true)][string]$Expected,
+        [int]$TimeoutSeconds = 6,
+        [int]$PollIntervalMs = 500
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $last = $null
+
+    do {
+        $last = Get-HeadsetStateForId -ItemId $ItemId
+        if ($last -eq $Expected) { return $last }
+        Start-Sleep -Milliseconds $PollIntervalMs
+    } while ((Get-Date) -lt $deadline)
+
+    return $last
+}
+
 function Test-GHubProX2 {
     <#
     .SYNOPSIS
@@ -686,38 +713,39 @@ function Show-ReconfigureDialog {
             $newSpeakerName = Get-SvclDeviceLabel -Row $devices[$comboFallback.SelectedIndex]
 
             # --- Ciclo ON -> OFF -> ON del headset seleccionado ---
+            # Se espera el estado esperado con polling (hasta 6 s) en vez de una
+            # lectura unica a los 500/800 ms: un Bluetooth tarda en reflejarse.
             $lblStatus.Text = "Step 1/3: turn the headset ON, then click OK in the prompt."
             $lblStatus.Refresh()
 
             [System.Windows.Forms.MessageBox]::Show(
-                "Turn the headset ON now, then click OK.",
+                "Turn the headset ON now, wait a few seconds, then click OK.",
                 "Audio AutoSwitch",
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Information
             ) | Out-Null
-            Start-Sleep -Milliseconds 500
-            $s1 = Get-HeadsetStateForId -ItemId $newHeadsetId
+            $s1 = Wait-ForHeadsetState -ItemId $newHeadsetId -Expected 'Connected'
 
             [System.Windows.Forms.MessageBox]::Show(
-                "Turn the headset OFF now, then click OK.",
+                "Turn the headset OFF now, wait a few seconds, then click OK.",
                 "Audio AutoSwitch",
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Information
             ) | Out-Null
-            Start-Sleep -Milliseconds 800
-            $s2 = Get-HeadsetStateForId -ItemId $newHeadsetId
+            $s2 = Wait-ForHeadsetState -ItemId $newHeadsetId -Expected 'Disconnected'
 
             [System.Windows.Forms.MessageBox]::Show(
-                "Turn the headset back ON, then click OK.",
+                "Turn the headset back ON now, wait a few seconds, then click OK.",
                 "Audio AutoSwitch",
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Information
             ) | Out-Null
-            Start-Sleep -Milliseconds 800
-            $s3 = Get-HeadsetStateForId -ItemId $newHeadsetId
+            $s3 = Wait-ForHeadsetState -ItemId $newHeadsetId -Expected 'Connected'
 
             $lblStatus.Text = "Step 2/3: ON=$s1  OFF=$s2  ON=$s3"
             $lblStatus.Refresh()
+
+            Write-AutoSwitchLog ("Reconfigure wizard: ON=$s1 OFF=$s2 ON=$s3 (headset={0})" -f $newHeadsetName)
 
             $newMode = $null
             $newGhubName = $null
@@ -822,7 +850,24 @@ function Show-ReconfigureDialog {
 function Invoke-Reconfigure {
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
-    Show-ReconfigureDialog
+
+    # Try/catch exterior: si el fallo ocurre al construir/abrir el dialogo
+    # (antes de entrar en "Detect mode..."), que quede registrado en el log.
+    try {
+        Show-ReconfigureDialog
+    }
+    catch {
+        Write-AutoSwitchLog ("Reconfigure failed: {0}" -f $_.Exception.Message)
+        try {
+            [System.Windows.Forms.MessageBox]::Show(
+                "Reconfigure failed: $($_.Exception.Message)",
+                "Audio AutoSwitch",
+                [System.Windows.Forms.MessageBoxButtons]::OK,
+                [System.Windows.Forms.MessageBoxIcon]::Error
+            ) | Out-Null
+        }
+        catch { }
+    }
 }
 
 function Invoke-AutoSwitchToggle {
