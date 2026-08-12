@@ -2,34 +2,35 @@ name: tmp-integrate-tray-screenshot
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
     paths:
-      - .github/workflows/tmp-integrate-tray-screenshot.yml
+      - '.github/workflows/tmp-integrate-tray-screenshot.yml'
 
 permissions:
   contents: write
 
 jobs:
   integrate:
-    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Integrate screenshot into README and Pages
-        shell: python
+      - name: Update README and Pages
+        shell: bash
         run: |
+          python <<'PY'
           from pathlib import Path
 
           readme = Path('README.md')
           text = readme.read_text(encoding='utf-8')
           marker = 'Once running, an icon appears in the system tray:\n'
-          shot = ('\n![Real AutoSwitch tray menu with a Logitech PRO X 2 configured]'
-                  '(site/assets/tray-menu.png)\n\n'
-                  '*Real tray-menu example with a Logitech PRO X 2 configured; device names vary by system.*\n')
           if 'site/assets/tray-menu.png' not in text:
+              shot = '\n![Real AutoSwitch tray menu with a Logitech PRO X 2 configured](site/assets/tray-menu.png)\n\n*Real tray-menu example with a Logitech PRO X 2 configured; device names vary by system.*\n'
               if marker not in text:
                   raise SystemExit('README tray marker not found')
               text = text.replace(marker, marker + shot, 1)
@@ -54,44 +55,45 @@ jobs:
               html = html.replace(anchor, section + anchor, 1)
 
               es_anchor = '      demo3: "Sin tocar nada: solo encender o apagar los auriculares.",\n'
-              es_add = ('      trayTitle: "Menú de la bandeja",\n'
-                        '      trayCaption: "Captura real con un Logitech PRO X 2 configurado. Los nombres del auricular y del fallback dependen de cada equipo.",\n')
+              es_add = '      trayTitle: "Menú de la bandeja",\n      trayCaption: "Captura real con un Logitech PRO X 2 configurado. Los nombres del auricular y del fallback dependen de cada equipo.",\n'
               if es_anchor not in html:
                   raise SystemExit('Spanish i18n marker not found')
               html = html.replace(es_anchor, es_anchor + es_add, 1)
 
               en_anchor = '      demo3: "No clicking needed: just power the headset on or off.",\n'
-              en_add = ('      trayTitle: "Tray menu",\n'
-                        '      trayCaption: "Real screenshot with a Logitech PRO X 2 configured. Headset and fallback names vary from system to system.",\n')
+              en_add = '      trayTitle: "Tray menu",\n      trayCaption: "Real screenshot with a Logitech PRO X 2 configured. Headset and fallback names vary from system to system.",\n'
               if en_anchor not in html:
                   raise SystemExit('English i18n marker not found')
               html = html.replace(en_anchor, en_anchor + en_add, 1)
               site.write_text(html, encoding='utf-8')
+          PY
 
-      - name: Refresh Wiki pages
+      - name: Update Wiki
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
         run: |
           set -euo pipefail
           rm -rf /tmp/autoswitch-wiki
           git clone "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" /tmp/autoswitch-wiki
           cd /tmp/autoswitch-wiki
-          python - <<'PY'
+          python <<'PY'
           from pathlib import Path
-
           url = 'https://raw.githubusercontent.com/Ayerdi/PROX2-AutoSwitch/main/site/assets/tray-menu.png'
-          blocks = {
-              'Home.md': f'''\n\n## Tray menu / Menú de la bandeja\n\n![Real AutoSwitch tray menu]({url})\n\nReal example with a Logitech PRO X 2 configured. Device names vary by system. / Ejemplo real con un Logitech PRO X 2 configurado. Los nombres de los dispositivos varían según el equipo.\n''',
-              'Verificar.md': f'''\n\n## Captura del menú de bandeja\n\n![Menú real de AutoSwitch]({url})\n\nEjemplo real con un Logitech PRO X 2 configurado. Los nombres del auricular y del fallback dependen de cada equipo.\n''',
-              'Verify.md': f'''\n\n## Tray menu screenshot\n\n![Real AutoSwitch tray menu]({url})\n\nReal example with a Logitech PRO X 2 configured. Headset and fallback names vary from system to system.\n'''
+          pages = {
+              'Home.md': ('Tray menu / Menú de la bandeja', 'Real example with a Logitech PRO X 2 configured. Device names vary by system. / Ejemplo real con un Logitech PRO X 2 configurado. Los nombres de los dispositivos varían según el equipo.'),
+              'Verificar.md': ('Captura del menú de bandeja', 'Ejemplo real con un Logitech PRO X 2 configurado. Los nombres del auricular y del fallback dependen de cada equipo.'),
+              'Verify.md': ('Tray menu screenshot', 'Real example with a Logitech PRO X 2 configured. Headset and fallback names vary from system to system.')
           }
-          for name, block in blocks.items():
+          for name, (title, caption) in pages.items():
               p = Path(name)
-              if p.exists():
-                  t = p.read_text(encoding='utf-8')
-                  if url not in t:
-                      p.write_text(t.rstrip() + block + '\n', encoding='utf-8')
+              if not p.exists():
+                  continue
+              text = p.read_text(encoding='utf-8')
+              if url in text:
+                  continue
+              block = f'\n\n## {title}\n\n![Real AutoSwitch tray menu]({url})\n\n{caption}\n'
+              p.write_text(text.rstrip() + block + '\n', encoding='utf-8')
           PY
           if ! git diff --quiet; then
             git config user.name "github-actions[bot]"
@@ -101,10 +103,11 @@ jobs:
             git push
           fi
 
-      - name: Commit docs and remove one-shot workflow
+      - name: Commit docs and remove temporary workflow
         shell: bash
         run: |
           set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
           rm -f .github/workflows/tmp-integrate-tray-screenshot.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
