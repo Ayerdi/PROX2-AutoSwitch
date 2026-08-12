@@ -61,7 +61,7 @@ if (-not $Config.PSObject.Properties['DetectionMode']) {
         $migrated['Version'] = '1.2.0'
         $migrated | ConvertTo-Json -Depth 10 |
             Set-Content -Path $ConfigPath -Encoding UTF8
-        Write-AutoSwitchLog "Config migrada a v1.2.0 (DetectionMode=$script:DetectionMode)."
+        Write-AutoSwitchLog "Config migrated to v1.2.0 (DetectionMode=$script:DetectionMode)."
     }
     catch { }
 }
@@ -311,7 +311,7 @@ function Set-AudioOutput {
 
     $actual = Get-DefaultRenderItemId
     if ($actual -ieq $DeviceId) {
-        Write-AutoSwitchLog "Salida cambiada -> $Label"
+        Write-AutoSwitchLog "Output changed -> $Label"
         return
     }
 
@@ -322,7 +322,7 @@ function Set-AudioOutput {
 
     $actual = Get-DefaultRenderItemId
     if ($actual -ieq $DeviceId) {
-        Write-AutoSwitchLog "Salida cambiada -> $Label (segundo intento)"
+        Write-AutoSwitchLog "Output changed -> $Label (segundo intento)"
         return
     }
 
@@ -401,10 +401,10 @@ function Update-EnhancementsMenu {
     if (-not $script:MenuItemEnhancements) { return }
 
     $action = Get-EnhancementsAction
-    $headsetName = if ($Config.HeadsetName) { [string]$Config.HeadsetName } else { 'este dispositivo' }
+    $headsetName = if ($Config.HeadsetName) { [string]$Config.HeadsetName } else { 'this device' }
 
     if ($null -eq $action) {
-        $script:MenuItemEnhancements.Text = "Audio Enhancements (no legible)"
+        $script:MenuItemEnhancements.Text = "Audio Enhancements (unreadable)"
         $script:MenuItemEnhancements.Enabled = $false
         return
     }
@@ -420,18 +420,18 @@ function Update-EnhancementsMenu {
 
 function Invoke-EnhancementsToggle {
     if (-not (Test-Path $HelperPath)) {
-        Write-AutoSwitchLog "No se encuentra el helper de enhancements: $HelperPath"
+        Write-AutoSwitchLog "Enhancements helper not found: $HelperPath"
         return
     }
 
     $action = Get-EnhancementsAction
     if ($null -eq $action) {
-        Write-AutoSwitchLog "No se pudo leer el estado de enhancements del headset."
+        Write-AutoSwitchLog "Could not read the headset's enhancements state."
         return
     }
 
     try {
-        Write-AutoSwitchLog ("Solicitando {0} enhancements en {1}..." -f $action, $Config.HeadsetId)
+        Write-AutoSwitchLog ("Requesting {0} enhancements on {1}..." -f $action, $Config.HeadsetId)
 
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
@@ -444,17 +444,17 @@ function Invoke-EnhancementsToggle {
         $proc.WaitForExit()
     }
     catch {
-        # UAC cancelado o error al lanzar.
-        Write-AutoSwitchLog ("Enhancements: cambio cancelado o fallido ({0})." -f $_.Exception.Message)
+        # UAC canceled or failed to launch.
+        Write-AutoSwitchLog ("Enhancements: change canceled or failed ({0})." -f $_.Exception.Message)
         return
     }
 
     if ($proc.ExitCode -eq 0) {
-        Write-AutoSwitchLog "Enhancements: cambio verificado por el helper."
+        Write-AutoSwitchLog "Enhancements: change verified by the helper."
         Update-EnhancementsMenu
     }
     else {
-        Write-AutoSwitchLog "Enhancements: el helper no confirmo el cambio (codigo $($proc.ExitCode))."
+        Write-AutoSwitchLog "Enhancements: the helper did not confirm the change (exit code $($proc.ExitCode))."
     }
 }
 
@@ -554,7 +554,7 @@ function Start-WorkerLoop {
     $availabilityLogged = $false
     $script:WorkerBatteryPath = $null
 
-    Write-AutoSwitchLog "Worker iniciado (modo $script:DetectionMode)."
+    Write-AutoSwitchLog "Worker started (mode $script:DetectionMode)."
 
     while (-not (Test-Path $stopFlag)) {
         $enabled = Test-Path $enabledFlag
@@ -590,10 +590,10 @@ function Start-WorkerLoop {
                     $script:WorkerBatteryPath = Get-ProX2BatteryPath
 
                     if ($availabilityLogged) {
-                        Write-AutoSwitchLog "Conexion con G HUB recuperada."
+                        Write-AutoSwitchLog "G HUB connection recovered."
                     }
                     else {
-                        Write-AutoSwitchLog "Conectado con G HUB."
+                        Write-AutoSwitchLog "Connected to G HUB."
                     }
                     $availabilityLogged = $false
                 }
@@ -643,7 +643,7 @@ function Start-WorkerLoop {
     }
 
     Close-GHubConnection
-    Write-AutoSwitchLog "Worker detenido."
+    Write-AutoSwitchLog "Worker stopped."
 }
 
 function Initialize-TrayAndTimer {
@@ -710,10 +710,10 @@ function Initialize-TrayAndTimer {
     $script:MenuTimer.Start()
 
     Update-EnhancementsMenu
-    Write-AutoSwitchLog "Tray configurada; message pump activo."
+    Write-AutoSwitchLog "Tray configured; message pump active."
 }
 
-Write-AutoSwitchLog "PRO X 2 AutoSwitch iniciado (modo $script:DetectionMode)."
+Write-AutoSwitchLog "PRO X 2 AutoSwitch started (mode $script:DetectionMode)."
 
 if ($env:AUTOSWITCH_WORKER -eq '1') {
     # Modo worker: solo el bucle de polling. No toca la bandeja.
@@ -728,7 +728,7 @@ try {
     if ($Config.DisableEnhancementsOnStart) {
         $action = Get-EnhancementsAction
         if ($action -eq 'Disable') {
-            Write-AutoSwitchLog "DisableEnhancementsOnStart esta activo: deshabilitando enhancements del headset."
+            Write-AutoSwitchLog "DisableEnhancementsOnStart is active: disabling the headset enhancements."
             Invoke-EnhancementsToggle
         }
     }
@@ -736,7 +736,7 @@ try {
     # Message pump principal sostenido por un Form invisible. La bandeja de
     # notificaciones procesa eventos aqui; se mantiene activa hasta Exit.
     [System.Windows.Forms.Application]::Run($script:MainForm)
-    Write-AutoSwitchLog "Message pump finalizado (Exit)."
+    Write-AutoSwitchLog "Message pump finished (Exit)."
 }
 finally {
     Stop-Worker

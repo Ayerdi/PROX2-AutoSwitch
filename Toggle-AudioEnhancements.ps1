@@ -129,14 +129,14 @@ namespace AutoSwitch
     Add-Type -TypeDefinition $source -ErrorAction Stop
 
     $hr = [AutoSwitch.AudioEnhancements]::SetSysFx($DeviceId, ($targetValue -eq 1))
-    $actionText = if ($Action -eq 'Disable') { 'deshabilitados' } else { 'habilitados' }
+    $actionText = if ($Action -eq 'Disable') { 'disabled' } else { 'enabled' }
 
     if ($hr -eq 0) {
-        Write-AutoSwitchLog ("Enhancements {0} en {1} (SysFx={2})." -f $actionText, $DeviceId, $targetValue)
+        Write-AutoSwitchLog ("Enhancements {0} on {1} (SysFx={2})." -f $actionText, $DeviceId, $targetValue)
         exit 0
     }
 
-    Write-AutoSwitchLog ("Enhancements: no se pudo {0} en {1}. Resultado={2} (0x{2:X8})." -f $actionText, $DeviceId, $hr)
+    Write-AutoSwitchLog ("Enhancements: could not {0} on {1}. Result={2} (0x{2:X8})." -f $actionText, $DeviceId, $hr)
     exit 1
 }
 catch {

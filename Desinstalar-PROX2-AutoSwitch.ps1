@@ -7,7 +7,7 @@ $StartupDir   = [Environment]::GetFolderPath("Startup")
 $ShortcutPath = Join-Path $StartupDir "PRO X 2 AutoSwitch.lnk"
 
 Write-Host ""
-Write-Host "=== Desinstalar PRO X 2 AutoSwitch ===" -ForegroundColor Cyan
+Write-Host "=== Uninstall PRO X 2 AutoSwitch ===" -ForegroundColor Cyan
 Write-Host ""
 
 $failed = $false
@@ -20,7 +20,7 @@ function Show-Test {
         Write-Host "[OK]    $Label" -ForegroundColor Green
     }
     else {
-        Write-Host "[FALLO] $Label" -ForegroundColor Red
+        Write-Host "[FAIL]  $Label" -ForegroundColor Red
     }
 
     if ($Detail) {
@@ -28,22 +28,22 @@ function Show-Test {
     }
 }
 
-# 1. Inicio automatico.
+# 1. Autostart.
 $hadShortcut = Test-Path $ShortcutPath
 Remove-Item $ShortcutPath -Force -ErrorAction SilentlyContinue
 if ($hadShortcut -and -not (Test-Path $ShortcutPath)) {
     $removedSomething = $true
-    Show-Test "Inicio automatico" $true "acceso directo eliminado"
+    Show-Test "Autostart" $true "shortcut removed"
 }
 elseif (-not $hadShortcut) {
-    Show-Test "Inicio automatico" $true "no existia (nada que quitar)"
+    Show-Test "Autostart" $true "did not exist (nothing to remove)"
 }
 else {
     $failed = $true
-    Show-Test "Inicio automatico" $false "no se pudo eliminar: $ShortcutPath"
+    Show-Test "Autostart" $false "could not be removed: $ShortcutPath"
 }
 
-# 2. Proceso del runtime.
+# 2. Runtime process.
 $matched = @()
 if (Test-Path $MainScript) {
     $escaped = [regex]::Escape($MainScript)
@@ -73,21 +73,20 @@ $stillRunning = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
 if ($matched.Count -gt 0) {
     if ($stillRunning) {
         $failed = $true
-        Show-Test "Proceso AutoSwitch" $false "sigue en ejecucion (PID $($stillRunning.ProcessId))"
+        Show-Test "AutoSwitch process" $false "still running (PID $($stillRunning.ProcessId))"
     }
     else {
         $removedSomething = $true
-        Show-Test "Proceso AutoSwitch" $true "detenido"
+        Show-Test "AutoSwitch process" $true "stopped"
     }
 }
 else {
-    Show-Test "Proceso AutoSwitch" $true "no estaba en ejecucion (nada que detener)"
+    Show-Test "AutoSwitch process" $true "was not running (nothing to stop)"
 }
 
-# 3. Directorio de instalacion.
-# Si se ejecuta desde dentro de InstallDir, cmd hace la limpieza tras terminar
-# PowerShell; no podemos verificar el resultado ahora mismo, asi que se indica
-# como "programado".
+# 3. Install directory.
+# If it runs from inside InstallDir, cmd does the cleanup after PowerShell
+# exits; we cannot verify the result right now, so it is reported as "scheduled".
 $current = $MyInvocation.MyCommand.Path
 $runningFromInstall = $false
 if ($current -like "$InstallDir\*") {
@@ -96,7 +95,7 @@ if ($current -like "$InstallDir\*") {
 
 if ($runningFromInstall) {
     if (-not (Test-Path $InstallDir)) {
-        Show-Test "Directorio de instalacion" $true "no existia (nada que quitar)"
+        Show-Test "Install directory" $true "did not exist (nothing to remove)"
     }
     else {
         $cmd = "timeout /t 2 /nobreak >nul & rmdir /s /q `"$InstallDir`""
@@ -107,11 +106,11 @@ if ($runningFromInstall) {
                 -WorkingDirectory (Split-Path -Parent $InstallDir) `
                 -ErrorAction Stop
             $removedSomething = $true
-            Show-Test "Directorio de instalacion" $true "eliminacion programada al salir del desinstalador"
+            Show-Test "Install directory" $true "removal scheduled when the uninstaller exits"
         }
         catch {
             $failed = $true
-            Show-Test "Directorio de instalacion" $false "no se pudo programar la eliminacion: $($_.Exception.Message)"
+            Show-Test "Install directory" $false "could not schedule removal: $($_.Exception.Message)"
         }
     }
 }
@@ -120,26 +119,26 @@ else {
         Remove-Item $InstallDir -Recurse -Force -ErrorAction SilentlyContinue
         if (Test-Path $InstallDir) {
             $failed = $true
-            Show-Test "Directorio de instalacion" $false "no se pudo eliminar: $InstallDir"
+            Show-Test "Install directory" $false "could not be removed: $InstallDir"
         }
         else {
             $removedSomething = $true
-            Show-Test "Directorio de instalacion" $true "eliminado"
+            Show-Test "Install directory" $true "removed"
         }
     }
     else {
-        Show-Test "Directorio de instalacion" $true "no existia (nada que quitar)"
+        Show-Test "Install directory" $true "did not exist (nothing to remove)"
     }
 }
 
 Write-Host ""
 if ($failed) {
-    Write-Host "Desinstalacion INCOMPLETA. Revisa los FALLO de arriba." -ForegroundColor Red
+    Write-Host "Uninstall INCOMPLETE. Review the FAILs above." -ForegroundColor Red
     exit 1
 }
 elseif ($removedSomething) {
-    Write-Host "AutoSwitch desinstalado." -ForegroundColor Green
+    Write-Host "AutoSwitch uninstalled." -ForegroundColor Green
 }
 else {
-    Write-Host "Nada que desinstalar: AutoSwitch ya no estaba instalado." -ForegroundColor DarkGray
+    Write-Host "Nothing to uninstall: AutoSwitch was not installed." -ForegroundColor DarkGray
 }
