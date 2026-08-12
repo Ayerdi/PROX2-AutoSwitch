@@ -370,11 +370,11 @@ function Get-EndpointFxState {
         Lee el estado actual de PKEY_AudioEndpoint_Disable_SysFx de un endpoint
         sin necesitar administrador.
     .DESCRIPTION
-        Implementa IMMDeviceEnumerator/IMMDevice/IPropertyStore con las IID/GUID
-        reales de Windows Core Audio. Devuelve $true si los enhancements estan
-        deshabilitados (SysFx=1), $false si estan habilitados (SysFx=0 o valor
-        ausente) y $null si no se pudo leer (endpoint inexistente o error).
-        Nunca lanza.
+        Lee PKEY_AudioEndpoint_Disable_SysFx del FxStore del endpoint via
+        IPolicyConfig::GetPropertyValue (el mismo store donde el helper elevado
+        escribe). Devuelve $true si los enhancements estan deshabilitados
+        (SysFx=1), $false si estan habilitados (SysFx=0) y $null si no se pudo
+        leer (endpoint inexistente o error). Nunca lanza.
     #>
     [CmdletBinding()]
     param(
@@ -412,6 +412,9 @@ namespace AutoSwitch
     [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
     public class MMDeviceEnumeratorComObject { }
 
+    [ComImport, Guid("870af99c-171d-4f9e-af0d-e63df40c2bc9")]
+    public class CPolicyConfigVistaClient { }
+
     [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"),
      InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     public interface IMMDeviceEnumerator
@@ -421,6 +424,24 @@ namespace AutoSwitch
         [PreserveSig] int GetDevice(string pwstrId, out IntPtr device);
         [PreserveSig] int RegisterEndpointNotificationCallback(IntPtr client);
         [PreserveSig] int UnregisterEndpointNotificationCallback(IntPtr client);
+    }
+
+    [ComImport, Guid("f8679f50-850a-41cf-9c72-430f290290c8"),
+     InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IPolicyConfig
+    {
+        [PreserveSig] int GetMixFormat(string pszDeviceName, out IntPtr ppFormat);
+        [PreserveSig] int GetDeviceFormat(string pszDeviceName, bool bDefault, out IntPtr ppFormat);
+        [PreserveSig] int ResetDeviceFormat(string pszDeviceName);
+        [PreserveSig] int SetDeviceFormat(string pszDeviceName, IntPtr pEndpointFormat, IntPtr pMixFormat);
+        [PreserveSig] int GetProcessingPeriod(string pszDeviceName, bool bDefault, out IntPtr pmftDefaultPeriod, out IntPtr pmftMinimumPeriod);
+        [PreserveSig] int SetProcessingPeriod(string pszDeviceName, IntPtr pmftPeriod);
+        [PreserveSig] int GetShareMode(string pszDeviceName, out IntPtr pMode);
+        [PreserveSig] int SetShareMode(string pszDeviceName, IntPtr pMode);
+        [PreserveSig] int GetPropertyValue(string pszDeviceName, bool bFxStore, ref PROPERTYKEY key, out PROPVARIANT pv);
+        [PreserveSig] int SetPropertyValue(string pszDeviceName, bool bFxStore, ref PROPERTYKEY key, ref PROPVARIANT pv);
+        [PreserveSig] int SetDefaultEndpoint(string pszDeviceName, int eRole);
+        [PreserveSig] int SetEndpointVisibility(string pszDeviceName, bool bVisible);
     }
 
     [ComImport, Guid("D666063F-1587-4E43-81F1-B948E807363F"),
@@ -452,38 +473,25 @@ namespace AutoSwitch
 
         // Devuelve: 1 = SysFx deshabilitado, 0 = SysFx habilitado,
         //          -1 = no se pudo leer (endpoint inexistente / COM fallo).
+        // IMPORTANTE: se lee con IPolicyConfig.GetPropertyValue(deviceId,
+        // bFxStore=true), el MISMO store donde el helper elevado escribe. El
+        // IPropertyStore del endpoint (OpenPropertyStore) NO contiene
+        // PKEY_AudioEndpoint_Disable_SysFx, por lo que leeria siempre
+        // "habilitados" aunque esten deshabilitados.
         public static int ReadSysFx(string deviceId)
         {
-            object comObj = new MMDeviceEnumeratorComObject();
-            IMMDeviceEnumerator enumerator = (IMMDeviceEnumerator)comObj;
-
-            IntPtr devicePtr = IntPtr.Zero;
-            int hr = enumerator.GetDevice(deviceId, out devicePtr);
-            if (hr != 0 || devicePtr == IntPtr.Zero)
-            {
-                return -1;
-            }
-
-            IMMDevice device = (IMMDevice)Marshal.GetObjectForIUnknown(devicePtr);
-
-            IntPtr storePtr = IntPtr.Zero;
-            int hrStore = device.OpenPropertyStore(0, out storePtr); // STGM_READ = 0
-            if (hrStore != 0 || storePtr == IntPtr.Zero)
-            {
-                return -1;
-            }
-
-            IPropertyStore store = (IPropertyStore)Marshal.GetObjectForIUnknown(storePtr);
+            object comObj = new CPolicyConfigVistaClient();
+            IPolicyConfig policy = (IPolicyConfig)comObj;
 
             PROPERTYKEY pkey = new PROPERTYKEY();
             pkey.fmtid = PKEY_AudioEndpoint_Disable_SysFx;
             pkey.pid = PID_SYSFX;
 
             PROPVARIANT pv = new PROPVARIANT();
-            int hrGet = store.GetValue(ref pkey, out pv);
-            if (hrGet != 0)
+            int hr = policy.GetPropertyValue(deviceId, true, ref pkey, out pv);
+            if (hr != 0)
             {
-                return 0; // propiedad no presente -> enhancements habilitados
+                return -1; // no se pudo leer -> estado desconocido
             }
 
             return pv.ulVal != 0 ? 1 : 0;
