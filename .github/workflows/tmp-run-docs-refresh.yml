@@ -1,0 +1,46 @@
+name: tmp-run-docs-refresh
+
+on:
+  push:
+    branches:
+      - agent/docs-v123-refresh
+    paths:
+      - '.github/workflows/tmp-run-docs-refresh.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/docs-v123-refresh
+          fetch-depth: 0
+      - name: Extract and run patch script
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          src = Path('.github/workflows/tmp-docs-refresh.yml').read_text(encoding='utf-8')
+          begin = src.index("          from pathlib import Path\n")
+          end = src.index("\n          PY\n", begin)
+          block = src[begin:end]
+          lines = block.splitlines()
+          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines) + '\n'
+          Path('/tmp/docs_patch.py').write_text(script, encoding='utf-8')
+          PY
+          python3 /tmp/docs_patch.py
+      - name: Commit final branch changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/tmp-docs-refresh.yml .github/workflows/tmp-run-docs-refresh.yml
+          git add Runtime-PROX2-AutoSwitch.ps1 lib/AutoSwitchCore.psm1 tests/AutoSwitchCore.Tests.ps1 README.md AGENT.md SOURCES.md SECURITY.md CHANGELOG.md docs/WindowsEndpointProvider.md site/index.html
+          git diff --cached --check
+          git commit -m "fix: harden Bluetooth identity and refresh docs"
+          git push origin HEAD:agent/docs-v123-refresh
