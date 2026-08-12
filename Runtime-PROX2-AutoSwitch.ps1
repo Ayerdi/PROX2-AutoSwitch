@@ -523,9 +523,15 @@ function Get-HeadsetStateForId {
     .SYNOPSIS
         Igual que Get-HeadsetEndpointState pero para un Item ID arbitrario
         (el del headset que se esta seleccionando en el wizard).
+    .DESCRIPTION
+        Bluetooth headsets can disappear from the svcl export while off and
+        come back with a DIFFERENT Item ID when reconnected. So when the row
+        is not found by ItemId, fall back to matching the Device Name/Name
+        (stable across reconnects). Returns Connected/Disconnected/Unknown.
     #>
     param(
         [Parameter(Mandatory = $true)][string]$ItemId,
+        [string]$DeviceName,
         [switch]$Diagnose
     )
 
@@ -542,6 +548,28 @@ function Get-HeadsetStateForId {
             $null -ne $id -and $id.Trim().ToLowerInvariant() -eq $ItemId.Trim().ToLowerInvariant()
         } |
         Select-Object -First 1
+
+    # Fallback por nombre: el Item ID de un BT puede cambiar al reconectar.
+    if (-not $row -and -not [string]::IsNullOrWhiteSpace($DeviceName)) {
+        $wantName = $DeviceName.Trim()
+        $row = $rows |
+            Where-Object {
+                $dn = Get-CsvColumn -Row $_ -Names @('Device Name', 'Name')
+                $null -ne $dn -and $dn.Trim() -ieq $wantName
+            } |
+            Select-Object -First 1
+        if ($row) {
+            $id = Get-CsvColumn -Row $row -Names @('Item ID')
+            if ($Diagnose) {
+                Write-AutoSwitchLog ("Get-HeadsetStateForId: {0} no encontrado por Item ID; coincidencia por nombre '{1}' -> nuevo Item ID {2}" -f $ItemId, $DeviceName, $id)
+            }
+            # Devolver la fila encontrada junto con el Item ID observado.
+            return [pscustomobject]@{
+                State    = (Resolve-EndpointState -State (Get-CsvColumn -Row $row -Names @('Device State', 'State')))
+                FoundId  = $id
+            }
+        }
+    }
 
     if (-not $row) {
         if ($Diagnose) {
@@ -576,28 +604,47 @@ function Wait-ForHeadsetState {
         Hace polling del estado del endpoint hasta que coincida con el esperado
         o expire el timeout. Un headset Bluetooth (p. ej. Jabra) puede tardar
         varios segundos en reflejar el cambio fisico en Windows; una lectura
-        unica a los 500/800 ms lee demasiado pronto.
+        unica a los 500/800 ms lee demasiado pronto. Tambien puede desaparecer
+        y volver con otro Item ID -> se busca por nombre como respaldo y se
+        devuelve el Item ID observado.
     #>
     param(
         [Parameter(Mandatory = $true)][string]$ItemId,
         [Parameter(Mandatory = $true)][string]$Expected,
+        [string]$DeviceName,
         [int]$TimeoutSeconds = 12,
         [int]$PollIntervalMs = 500
     )
 
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $last = $null
+    $foundId = $null
 
     do {
-        $last = Get-HeadsetStateForId -ItemId $ItemId
-        if ($last -eq $Expected) { return $last }
+        $res = Get-HeadsetStateForId -ItemId $ItemId -DeviceName $DeviceName
+        if ($res -is [pscustomobject]) {
+            $last = $res.State
+            if ($res.FoundId) { $foundId = $res.FoundId }
+        }
+        else {
+            $last = $res
+        }
+        if ($last -eq $Expected) {
+            return [pscustomobject]@{
+                State   = $last
+                FoundId = $foundId
+            }
+        }
         Start-Sleep -Milliseconds $PollIntervalMs
     } while ((Get-Date) -lt $deadline)
 
     # Timeout: el estado observado no alcanzo el esperado. Diagnostico con contexto.
     Write-AutoSwitchLog ("Wait-ForHeadsetState: timeout esperando '{0}' para {1}. Ultimo estado observado: {2}" -f $Expected, $ItemId, $last)
-    [void](Get-HeadsetStateForId -ItemId $ItemId -Diagnose)
-    return $last
+    [void](Get-HeadsetStateForId -ItemId $ItemId -DeviceName $DeviceName -Diagnose)
+    return [pscustomobject]@{
+        State   = $last
+        FoundId = $foundId
+    }
 }
 
 function Test-GHubProX2 {
@@ -754,7 +801,7 @@ function Show-ReconfigureDialog {
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Information
             ) | Out-Null
-            $s1 = Wait-ForHeadsetState -ItemId $newHeadsetId -Expected 'Connected' -TimeoutSeconds 15
+            $r1 = Wait-ForHeadsetState -ItemId $newHeadsetId -DeviceName $newHeadsetName -Expected 'Connected' -TimeoutSeconds 15
 
             [System.Windows.Forms.MessageBox]::Show(
                 "Turn the headset OFF now, then click OK.`n(It can take several seconds for Windows to notice.)",
@@ -762,7 +809,7 @@ function Show-ReconfigureDialog {
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Information
             ) | Out-Null
-            $s2 = Wait-ForHeadsetState -ItemId $newHeadsetId -Expected 'Disconnected' -TimeoutSeconds 15
+            $r2 = Wait-ForHeadsetState -ItemId $newHeadsetId -DeviceName $newHeadsetName -Expected 'Disconnected' -TimeoutSeconds 15
 
             [System.Windows.Forms.MessageBox]::Show(
                 "Turn the headset back ON now, then click OK.`n(It can take several seconds for Windows to notice.)",
@@ -770,12 +817,23 @@ function Show-ReconfigureDialog {
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Information
             ) | Out-Null
-            $s3 = Wait-ForHeadsetState -ItemId $newHeadsetId -Expected 'Connected' -TimeoutSeconds 20
+            $r3 = Wait-ForHeadsetState -ItemId $newHeadsetId -DeviceName $newHeadsetName -Expected 'Connected' -TimeoutSeconds 20
+
+            $s1 = $r1.State
+            $s2 = $r2.State
+            $s3 = $r3.State
 
             $lblStatus.Text = "Step 2/3: ON=$s1  OFF=$s2  ON=$s3"
             $lblStatus.Refresh()
 
-            Write-AutoSwitchLog ("Reconfigure wizard: ON=$s1 OFF=$s2 ON=$s3 (headset={0})" -f $newHeadsetName)
+            # Si el BT reaparecio con un Item ID nuevo, persistir el observado
+            # (el ultimo FoundId no nulo, preferentemente el del paso 3).
+            $observedId = $null
+            if ($r3.FoundId) { $observedId = $r3.FoundId }
+            elseif ($r1.FoundId) { $observedId = $r1.FoundId }
+            if ($observedId) { $newHeadsetId = $observedId }
+
+            Write-AutoSwitchLog ("Reconfigure wizard: ON=$s1 OFF=$s2 ON=$s3 (headset={0} itemId={1})" -f $newHeadsetName, $newHeadsetId)
 
             $newMode = $null
             $newGhubName = $null
