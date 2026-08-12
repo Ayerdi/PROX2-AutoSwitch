@@ -407,7 +407,7 @@
 <footer>
   <div class="wrap">
     <span data-i18n="footer"></span>
-    <span><a href="https://github.com/Ayerdi/PROX2-AutoSwitch">github.com/Ayerdi/PROX2-AutoSwitch</a></span>
+    <span><a href="https://github.com/Ayerdi/PROX2-AutoSwitch/releases/latest">Latest release</a> · <a href="https://github.com/Ayerdi/PROX2-AutoSwitch">GitHub</a> · <a href="https://github.com/Ayerdi/PROX2-AutoSwitch/wiki">Wiki</a></span>
   </div>
 </footer>
 
@@ -422,7 +422,7 @@
       what1: "<strong>Auriculares conectados</strong> → Windows usa la salida de los auriculares.",
       what2: "<strong>Auriculares desconectados</strong> → Windows vuelve a la salida alternativa (p. ej. los altavoces).",
       what3: "Funciona con auriculares inalámbricos cuyo estado de conexión lo exponga Windows; el PRO X 2 se soporta vía Logitech G HUB.",
-      what4: "Icono de bandeja: ver el auricular y el fallback configurados, activar/pausar AutoSwitch, reconfigurar con el asistente de detección (sin reinstalar) y deshabilitar/habilitar los Audio Enhancements del auricular.",
+      what4: "Icono de bandeja: ver el auricular y el fallback, activar/pausar AutoSwitch, reconfigurar sin reinstalar (con polling Bluetooth y refresco del endpoint si Windows lo recrea) y deshabilitar/habilitar los Audio Enhancements.",
       what5: "Corre en segundo plano <strong>sin ventana de PowerShell</strong> al iniciar sesión.",
       whyTitle: "Por qué existe",
       why1: "Los auriculares inalámbricos mantienen su endpoint USB/LIGHTSPEED visible para Windows aunque estén apagados físicamente. Windows no sabe que debe volver a tus altavoces. Hacerlo a mano — quitarte el auricular, abrir ajustes, cambiar la salida — se hace viejo muy rápido.",
@@ -432,7 +432,7 @@
       demo2: "<strong>Auriculares apagados</strong> → la salida vuelve automáticamente a los altavoces.",
       demo3: "Sin tocar nada: solo encender o apagar los auriculares.",
       howTitle: "Cómo funciona",
-      howIntro: "Dos modos de detección, elegidos automáticamente al instalar: WindowsEndpoint (el estado Active ↔ Unplugged del endpoint de Windows) y LogitechGHub (payload de batería de G HUB para el PRO X 2). El polling corre en un proceso worker separado para no bloquear la bandeja.",
+      howIntro: "Dos modos de detección, elegidos automáticamente: WindowsEndpoint (estado Active ↔ Unplugged) y LogitechGHub (payload de batería para PRO X 2). Reconfigure valida ON→OFF→ON con esperas acotadas; si Bluetooth recrea el endpoint, vuelve a resolver su identidad y actualiza el Item ID. El polling normal corre en un worker separado.",
       howDiagram: "Auriculares inalámbricos\n   │\n   ▼\nWindowsEndpoint (Active ↔ Unplugged)\n        │  (o G HUB ws://localhost:9010 para PRO X 2)\n        ▼\nConnected / Disconnected / Unknown\n        │        │\n   (debounce)  └──► Unknown: no cambiar\n        ▼\nSoundVolumeCommandLine\n        │\n/SetDefault <Item ID> all\n        │\n        ▼\n     Windows",
       installTitle: "Instalación",
       quickTitle: "Instalación en un clic",
@@ -449,7 +449,7 @@
       id3: "Captura el Item ID real de Windows de cada salida y prueba ambos cambios de verdad.",
       id4: "Copia el runtime, crea un inicio automático invisible (wscript.exe) y arranca AutoSwitch.",
       id5: "Deja la configuración en %LOCALAPPDATA%\\PROX2AutoSwitch\\.",
-      idNote: "Los Item ID de audio de Windows no se reutilizan entre instalaciones: el instalador captura los del Windows actual. No copies config.json de otro equipo.",
+      idNote: "Los Item ID son locales y pueden cambiar tras drivers o recreación del endpoint. Una instalación limpia captura los actuales y Reconfigure puede refrescar el del auricular. No copies config.json de otro equipo.",
       reqsTitle: "Requisitos",
       req1: "Windows 10/11 x64",
       req2: "PowerShell 5.1 o superior",
@@ -459,9 +459,9 @@
       verifyTitle: "Comprobar que funciona",
       verifyCmd: 'powershell.exe -ExecutionPolicy Bypass -File "Verificar-PROX2-AutoSwitch.ps1"',
       v1: "Conecta / enciende el auricular.",
-      v2: "Espera ~1–2 segundos. Windows debería seleccionar los auriculares.",
+      v2: "Espera unos segundos; algunos Bluetooth tardan más al reconectar. Windows debería seleccionar los auriculares.",
       v3: "Desconéctalo / apágalo.",
-      v4: "Tras dos comprobaciones consecutivas (~3 segundos), Windows debería seleccionar la salida alternativa.",
+      v4: "Cuando Windows refleje la desconexión y dos comprobaciones consecutivas la confirmen (normalmente pocos segundos), debería seleccionar la salida alternativa.",
       v5: "El log está en %LOCALAPPDATA%\\PROX2AutoSwitch\\autoswitch.log.",
       secTitle: "Notas de seguridad",
       sec1: "El WebSocket de G HUB (localhost:9010) no es una API oficial de Logitech: es una interfaz local usada por proyectos de terceros. Logitech puede cambiarla en futuras versiones. Si deja de funcionar tras una actualización, revisa AGENT.md.",
@@ -475,7 +475,7 @@
       what1: "<strong>Headset connected</strong> → Windows uses the headset output.",
       what2: "<strong>Headset disconnected</strong> → Windows falls back to your alternative output (e.g. PC speakers).",
       what3: "Works with wireless headsets whose connection state Windows exposes; PRO X 2 is supported via Logitech G HUB.",
-      what4: "Tray icon: see the configured headset and fallback, enable/pause AutoSwitch, reconfigure with the detection wizard (no reinstall) and disable/enable the headset's Audio Enhancements.",
+      what4: "Tray icon: see the headset/fallback, enable/pause AutoSwitch, reconfigure without reinstalling (with Bluetooth polling and endpoint refresh if Windows recreates it), and disable/enable Audio Enhancements.",
       what5: "Runs in the background with <strong>no PowerShell window</strong> at login.",
       whyTitle: "Why this exists",
       why1: "Wireless headsets keep their USB/LIGHTSPEED endpoint visible to Windows even when the physical headset is turned off, so Windows doesn't know it should switch back to your speakers. Doing it by hand — taking off the headset, opening sound settings, changing the output — gets old fast.",
@@ -485,7 +485,7 @@
       demo2: "<strong>Headset off</strong> → the output automatically switches back to the speakers.",
       demo3: "No clicking needed: just power the headset on or off.",
       howTitle: "How it works",
-      howIntro: "Two detection modes, chosen automatically at install: WindowsEndpoint (the endpoint's Active ↔ Unplugged state) and LogitechGHub (G HUB battery payload for PRO X 2). Polling runs in a separate worker process so the tray never blocks.",
+      howIntro: "Two detection modes, chosen automatically: WindowsEndpoint (Active ↔ Unplugged) and LogitechGHub (G HUB battery payload for PRO X 2). Reconfigure validates ON→OFF→ON with bounded waits; if Bluetooth recreates the endpoint, it re-resolves its identity and updates the Item ID. Normal polling runs in a separate worker.",
       howDiagram: "Wireless headset\n   │\n   ▼\nWindowsEndpoint (Active ↔ Unplugged)\n        │  (or G HUB ws://localhost:9010 for PRO X 2)\n        ▼\nConnected / Disconnected / Unknown\n        │        │\n   (debounce)  └──► Unknown: do not switch\n        ▼\nSoundVolumeCommandLine\n        │\n/SetDefault <Item ID> all\n        │\n        ▼\n     Windows",
       installTitle: "Installation",
       quickTitle: "One-click install",
@@ -502,7 +502,7 @@
       id3: "Captures the real Windows Item ID of each output and actually tests both switches.",
       id4: "Copies the runtime, creates an invisible autostart entry (wscript.exe) and starts AutoSwitch.",
       id5: "Keeps its config in %LOCALAPPDATA%\\PROX2AutoSwitch\\.",
-      idNote: "Windows audio Item IDs are not reused across installs: the installer captures them from your current Windows. Don't copy config.json from another machine.",
+      idNote: "Windows audio Item IDs are local and can change after driver/endpoint recreation. A clean install captures current IDs and Reconfigure can refresh the headset ID. Don't copy config.json from another machine.",
       reqsTitle: "Requirements",
       req1: "Windows 10/11 x64",
       req2: "PowerShell 5.1 or newer",
@@ -512,9 +512,9 @@
       verifyTitle: "Verify it works",
       verifyCmd: 'powershell.exe -ExecutionPolicy Bypass -File "Verificar-PROX2-AutoSwitch.ps1"',
       v1: "Connect / power on the headset.",
-      v2: "Wait ~1–2 seconds. Windows should select the headset.",
+      v2: "Wait a few seconds; some Bluetooth devices take longer after reconnecting. Windows should select the headset.",
       v3: "Disconnect / power it off.",
-      v4: "After two consecutive checks (~3 seconds), Windows should select the alternative output.",
+      v4: "Once Windows reflects disconnect and two consecutive checks confirm it (normally a few seconds), Windows should select the alternative output.",
       v5: "The log lives in %LOCALAPPDATA%\\PROX2AutoSwitch\\autoswitch.log.",
       secTitle: "Security notes",
       sec1: "The G HUB WebSocket (localhost:9010) is not an official Logitech API: it's a local interface used by third-party projects. Logitech can change it in future versions. If it stops working after a G HUB update, check AGENT.md.",

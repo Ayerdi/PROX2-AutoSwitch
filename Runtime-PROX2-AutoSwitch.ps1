@@ -532,6 +532,7 @@ function Get-HeadsetStateForId {
     param(
         [Parameter(Mandatory = $true)][string]$ItemId,
         [string]$DeviceName,
+        [string]$EndpointName,
         [switch]$Diagnose
     )
 
@@ -549,24 +550,22 @@ function Get-HeadsetStateForId {
         } |
         Select-Object -First 1
 
-    # Fallback por nombre: el Item ID de un BT puede cambiar al reconectar.
-    if (-not $row -and -not [string]::IsNullOrWhiteSpace($DeviceName)) {
-        $wantName = $DeviceName.Trim()
-        $row = $rows |
-            Where-Object {
-                $dn = Get-CsvColumn -Row $_ -Names @('Device Name', 'Name')
-                $null -ne $dn -and $dn.Trim() -ieq $wantName
-            } |
-            Select-Object -First 1
+    # Fallback de identidad: un endpoint Bluetooth puede reaparecer con otro
+    # Item ID. No usar la etiqueta visible "Device Name — Name" como si fuera
+    # una columna: resolver por las dos columnas reales evita además confundir
+    # dos endpoints Render del mismo dispositivo.
+    if (-not $row -and
+        (-not [string]::IsNullOrWhiteSpace($DeviceName) -or
+         -not [string]::IsNullOrWhiteSpace($EndpointName))) {
+        $row = Find-SvclRenderDeviceByIdentity -Rows $rows -DeviceName $DeviceName -Name $EndpointName
         if ($row) {
             $id = Get-CsvColumn -Row $row -Names @('Item ID')
             if ($Diagnose) {
-                Write-AutoSwitchLog ("Get-HeadsetStateForId: {0} no encontrado por Item ID; coincidencia por nombre '{1}' -> nuevo Item ID {2}" -f $ItemId, $DeviceName, $id)
+                Write-AutoSwitchLog ("Get-HeadsetStateForId: {0} no encontrado por Item ID; identidad DeviceName='{1}' Name='{2}' -> nuevo Item ID {3}" -f $ItemId, $DeviceName, $EndpointName, $id)
             }
-            # Devolver la fila encontrada junto con el Item ID observado.
             return [pscustomobject]@{
-                State    = (Resolve-EndpointState -State (Get-CsvColumn -Row $row -Names @('Device State', 'State')))
-                FoundId  = $id
+                State   = (Resolve-EndpointState -State (Get-CsvColumn -Row $row -Names @('Device State', 'State')))
+                FoundId = $id
             }
         }
     }
@@ -612,6 +611,7 @@ function Wait-ForHeadsetState {
         [Parameter(Mandatory = $true)][string]$ItemId,
         [Parameter(Mandatory = $true)][string]$Expected,
         [string]$DeviceName,
+        [string]$EndpointName,
         [int]$TimeoutSeconds = 12,
         [int]$PollIntervalMs = 500
     )
@@ -621,7 +621,7 @@ function Wait-ForHeadsetState {
     $foundId = $null
 
     do {
-        $res = Get-HeadsetStateForId -ItemId $ItemId -DeviceName $DeviceName
+        $res = Get-HeadsetStateForId -ItemId $ItemId -DeviceName $DeviceName -EndpointName $EndpointName
         if ($res -is [pscustomobject]) {
             $last = $res.State
             if ($res.FoundId) { $foundId = $res.FoundId }
@@ -640,7 +640,7 @@ function Wait-ForHeadsetState {
 
     # Timeout: el estado observado no alcanzo el esperado. Diagnostico con contexto.
     Write-AutoSwitchLog ("Wait-ForHeadsetState: timeout esperando '{0}' para {1}. Ultimo estado observado: {2}" -f $Expected, $ItemId, $last)
-    [void](Get-HeadsetStateForId -ItemId $ItemId -DeviceName $DeviceName -Diagnose)
+    [void](Get-HeadsetStateForId -ItemId $ItemId -DeviceName $DeviceName -EndpointName $EndpointName -Diagnose)
     return [pscustomobject]@{
         State   = $last
         FoundId = $foundId
@@ -786,12 +786,16 @@ function Show-ReconfigureDialog {
                 return
             }
 
-            $newHeadsetName = Get-SvclDeviceLabel -Row $devices[$comboHeadset.SelectedIndex]
+            $selectedHeadsetRow = $devices[$comboHeadset.SelectedIndex]
+            $newHeadsetName = Get-SvclDeviceLabel -Row $selectedHeadsetRow
+            $newHeadsetDeviceName = Get-CsvColumn -Row $selectedHeadsetRow -Names @('Device Name')
+            $newHeadsetEndpointName = Get-CsvColumn -Row $selectedHeadsetRow -Names @('Name')
             $newSpeakerName = Get-SvclDeviceLabel -Row $devices[$comboFallback.SelectedIndex]
 
             # --- Ciclo ON -> OFF -> ON del headset seleccionado ---
-            # Se espera el estado esperado con polling (hasta 6 s) en vez de una
-            # lectura unica a los 500/800 ms: un Bluetooth tarda en reflejarse.
+            # El wizard hace polling porque Bluetooth/Core Audio puede tardar
+            # varios segundos en reflejar cada transicion. Si Windows recrea el
+            # endpoint, se re-resuelve por Device Name + Name y se persiste el ID.
             $lblStatus.Text = "Step 1/3: turn the headset ON, then click OK in the prompt."
             $lblStatus.Refresh()
 
@@ -801,7 +805,7 @@ function Show-ReconfigureDialog {
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Information
             ) | Out-Null
-            $r1 = Wait-ForHeadsetState -ItemId $newHeadsetId -DeviceName $newHeadsetName -Expected 'Connected' -TimeoutSeconds 15
+            $r1 = Wait-ForHeadsetState -ItemId $newHeadsetId -DeviceName $newHeadsetDeviceName -EndpointName $newHeadsetEndpointName -Expected 'Connected' -TimeoutSeconds 15
 
             [System.Windows.Forms.MessageBox]::Show(
                 "Turn the headset OFF now, then click OK.`n(It can take several seconds for Windows to notice.)",
@@ -809,7 +813,7 @@ function Show-ReconfigureDialog {
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Information
             ) | Out-Null
-            $r2 = Wait-ForHeadsetState -ItemId $newHeadsetId -DeviceName $newHeadsetName -Expected 'Disconnected' -TimeoutSeconds 15
+            $r2 = Wait-ForHeadsetState -ItemId $newHeadsetId -DeviceName $newHeadsetDeviceName -EndpointName $newHeadsetEndpointName -Expected 'Disconnected' -TimeoutSeconds 15
 
             [System.Windows.Forms.MessageBox]::Show(
                 "Turn the headset back ON now, then click OK.`n(It can take several seconds for Windows to notice.)",
@@ -817,7 +821,7 @@ function Show-ReconfigureDialog {
                 [System.Windows.Forms.MessageBoxButtons]::OK,
                 [System.Windows.Forms.MessageBoxIcon]::Information
             ) | Out-Null
-            $r3 = Wait-ForHeadsetState -ItemId $newHeadsetId -DeviceName $newHeadsetName -Expected 'Connected' -TimeoutSeconds 20
+            $r3 = Wait-ForHeadsetState -ItemId $newHeadsetId -DeviceName $newHeadsetDeviceName -EndpointName $newHeadsetEndpointName -Expected 'Connected' -TimeoutSeconds 20
 
             $s1 = $r1.State
             $s2 = $r2.State

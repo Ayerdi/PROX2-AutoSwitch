@@ -1,4 +1,4 @@
-# AGENT.md — maintaining PRO X 2 AutoSwitch (universal)
+# AGENT.md — maintaining Audio AutoSwitch
 
 ## Goal
 
@@ -38,9 +38,11 @@ On the original machine, 2026-08-07:
 
 Do not persist `dev000000XX`: it can change. Persist `extendedDisplayName` and resolve the current ID via `/devices/list`.
 
-On 2026-08-10, the universal path was validated with a **Jabra Evolve 65**: the endpoint `Item ID`
-stays the same and only its `State` changes (`Active` ↔ `Unplugged`) with physical power, so no
-vendor software is needed.
+On 2026-08-10, the universal path was validated with a **Jabra Evolve 65**: Windows exposed
+`Active ↔ Unplugged`, so no vendor software is needed. The first controlled cycles happened to keep
+the same `Item ID`, but **do not treat that as a guarantee**. On 2026-08-12, Reconfigure testing showed
+that Bluetooth/Core Audio can take several seconds to recreate/report the endpoint, and the design was
+hardened to tolerate a recreated endpoint whose `Item ID` changes.
 
 ## Design constraints
 
@@ -48,7 +50,10 @@ vendor software is needed.
    - They change after reinstalling Windows, drivers or recreating endpoints.
    - The installer must capture the IDs of the current system.
 
-2. For duplicated endpoints, use `Item ID`, not just `Name`.
+2. For duplicated endpoints, use `Item ID` for normal runtime targeting. During **Reconfigure only**,
+   if that ID disappears after a Bluetooth reconnect, re-resolve the endpoint by the two real `svcl`
+   identity columns (`Device Name` + `Name`) and then persist the newly observed `Item ID`. Never use
+   the combined display label as if it were a raw column value.
 
 3. To set the output:
    ```powershell
@@ -116,6 +121,13 @@ vendor software is needed.
 14. **Paths**: launch the worker with `$PSCommandPath` (captured once as `$script:RuntimePath` at the top
     of the runtime). `$MyInvocation.MyCommand.Path` inside a function can be empty in PS 5.1. Files with
     non-ASCII characters must be saved with a UTF-8 BOM (PSScriptAnalyzer requirement).
+
+15. **Reconfigure identity and timing**:
+    - validation cycle is `Connected → Disconnected → Connected`;
+    - poll every 500 ms with bounded waits (15 s first ON, 15 s OFF, 20 s final ON);
+    - if `Item ID` disappears, match **both** `Device Name` and `Name` when available;
+    - prefer the final-ON observed ID and save it to `config.json`;
+    - if detection cannot be proven, leave the existing config untouched.
 
 ## Local G HUB API used
 
@@ -230,6 +242,15 @@ Before changing the hash:
 - Confirm the tray icon stays responsive while polling (Timer-driven).
 - Confirm reasonable log.
 
+### Reconfigure (required after endpoint/detection changes)
+
+- `WindowsEndpoint → WindowsEndpoint`: ON → OFF → ON succeeds.
+- `LogitechGHub → WindowsEndpoint` (validated with Jabra Evolve 65): mode changes and worker reloads config.
+- `WindowsEndpoint → LogitechGHub`: G HUB association and port are created correctly.
+- Exit/start after reconfigure and repeat OFF → ON.
+- Simulate a recreated Bluetooth row with the same `Device Name` + `Name` but a different `Item ID`; the identity matcher must select that exact Render endpoint and persist the new ID.
+- If one physical device exposes multiple Render endpoints, identity matching must not pick the wrong `Name`.
+
 ### Enhancements
 
 - Menu shows "Disable for …" when enabled; after verified disable, flips to "Enable for …".
@@ -239,7 +260,7 @@ Before changing the hash:
 ### Failure cases
 
 - G HUB closed (Logitech mode): do not switch output.
-- Endpoint removed/recreated: log SetDefault failure; ask for reinstall/recalibration.
+- Endpoint removed/recreated during Reconfigure: re-resolve by `Device Name` + `Name`, persist the newest ID, and fail without changing config if identity is ambiguous/missing. A runtime endpoint that disappears outside Reconfigure remains a diagnostic/reconfigure case; never guess a target.
 - NirSoft hash differs: abort install.
 - `/devices/list` does not contain the PRO X 2: fall back to WindowsEndpoint path; do not invent a `deviceId`.
 - svcl `State` read fails or is `Disabled`/garbage: `Unknown`, do not switch.
@@ -248,7 +269,6 @@ Before changing the hash:
 
 - Event-driven `IMMNotificationClient` for instant `Active ↔ Unplugged` (could replace the 1.5 s polling; the COM interop pattern in `lib/AutoSwitchCore.psm1` already compiles C#).
 - Subscribe to `/battery/state/changed` to reduce polling.
-- Recalibration without reinstalling.
 - More vendor-specific providers (Jabra Direct, BT APIs) for headsets Windows cannot detect.
 - Settings GUI (per-device config).
 - Scheduled task as an alternative to Startup+WScript if VBScript disappears from future Windows versions.
@@ -259,5 +279,5 @@ Before changing the hash:
 - Do not assume all Logitech devices behave the same.
 - Do not assume `deviceId` is stable.
 - Do not assume speaker names will always be the same.
-- Do not assume the Item ID survives a format.
+- Do not assume the Item ID survives a format, driver change, endpoint recreation or Bluetooth reconnect.
 - Do not assume the G HUB API is officially supported.

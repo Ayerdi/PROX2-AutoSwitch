@@ -174,6 +174,35 @@ Describe 'Get-SvclDeviceLabel' {
     }
 }
 
+Describe 'Find-SvclRenderDeviceByIdentity' {
+    It 'matches the Jabra render endpoint by Device Name + Name' {
+        $rows = @(ConvertFrom-SvclCsv -Text $script:FixtureCsv)
+        $row = Find-SvclRenderDeviceByIdentity -Rows $rows -DeviceName '2- Jabra Evolve 65' -Name 'Auriculares'
+        $row | Should -Not -BeNullOrEmpty
+        $row.'Item ID' | Should -Be '{0.0.0.00000000}.{ed043b5e-65dc-4ba6-a847-310517ac1849}'
+    }
+
+    It 'does not confuse two render endpoints from the same device' {
+        $rows = @(
+            [pscustomobject]@{ Type='Device'; Direction='Render'; 'Device Name'='BT Headset'; Name='Stereo'; 'Item ID'='stereo' },
+            [pscustomobject]@{ Type='Device'; Direction='Render'; 'Device Name'='BT Headset'; Name='Hands-Free'; 'Item ID'='handsfree' }
+        )
+        $row = Find-SvclRenderDeviceByIdentity -Rows $rows -DeviceName 'BT Headset' -Name 'Hands-Free'
+        $row.'Item ID' | Should -Be 'handsfree'
+    }
+
+    It 'can match by Name alone when Device Name is unavailable' {
+        $rows = @([pscustomobject]@{ Type='Device'; Direction='Render'; Name='USB Headphones'; 'Item ID'='usb' })
+        $row = Find-SvclRenderDeviceByIdentity -Rows $rows -Name 'USB Headphones'
+        $row.'Item ID' | Should -Be 'usb'
+    }
+
+    It 'returns null when no stable identity was supplied' {
+        $rows = @(ConvertFrom-SvclCsv -Text $script:FixtureCsv)
+        Find-SvclRenderDeviceByIdentity -Rows $rows | Should -BeNullOrEmpty
+    }
+}
+
 Describe 'Resolve-EndpointState' {
     It 'maps Active to Connected' {
         Resolve-EndpointState -State 'Active' | Should -Be 'Connected'

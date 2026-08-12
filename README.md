@@ -1,7 +1,8 @@
-# PRO X 2 LIGHTSPEED AutoSwitch
+# Audio AutoSwitch
 
 [![validate](https://github.com/Ayerdi/PROX2-AutoSwitch/actions/workflows/validate.yml/badge.svg)](https://github.com/Ayerdi/PROX2-AutoSwitch/actions/workflows/validate.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/Ayerdi/PROX2-AutoSwitch)](https://github.com/Ayerdi/PROX2-AutoSwitch/releases/latest)
 [![Pages](https://github.com/Ayerdi/PROX2-AutoSwitch/actions/workflows/pages.yml/badge.svg)](https://github.com/Ayerdi/PROX2-AutoSwitch/actions/workflows/pages.yml)
 
 Automatically switch your Windows default audio output when you put on or take off your wireless headset.
@@ -18,7 +19,7 @@ See it live on the [project page](https://ayerdi.github.io/PROX2-AutoSwitch/).
 
 ## Why this exists
 
-Wireless headsets keep their USB/LIGHTSPEED endpoint visible to Windows even when the physical headset is turned off. So Windows doesn't know it should switch back to your speakers.
+Some wireless headsets — especially USB-dongle/LIGHTSPEED models — keep their audio endpoint visible to Windows even when the physical headset is turned off. Others, such as the tested Jabra Evolve 65, expose a useful `Active ↔ Unplugged` transition. AutoSwitch handles both patterns through its detection modes.
 
 The manual dance got old fast:
 
@@ -123,12 +124,12 @@ Once running, an icon appears in the system tray:
 - **Headset / Fallback / Next switch** — info lines showing the configured devices and which output AutoSwitch would switch to right now (refreshed every 5 s).
 - **AutoSwitch: Enabled / Disabled** — pause or resume switching without quitting.
 - **Disable / Enable Audio Enhancements for <headset>** — toggles the global Windows audio enhancements of the configured headset endpoint (a UAC prompt appears; the menu updates only if the change is verified).
-- **Reconfigure...** — re-run the detection wizard without reinstalling: pick a new headset and fallback from the current Windows output devices, turn the headset OFF and back ON, and it re-determines the detection mode (`WindowsEndpoint` or `LogitechGHub` with a G HUB PRO X 2 match). It saves `config.json` (including `DetectionMode`, the G HUB association and the enhancements target) and the worker picks it up on the next poll. If no compatible method is found for the new headset, the config is left untouched.
+- **Reconfigure...** — re-run the detection wizard without reinstalling: pick a new headset and fallback, then validate `ON → OFF → ON`. Bluetooth/Core Audio transitions can take several seconds, so the wizard polls with bounded waits (15 s / 15 s / 20 s). If a Bluetooth endpoint is recreated with a new `Item ID`, current `main` re-resolves the same render endpoint by its real `Device Name` + `Name` identity and persists the newest ID. It then re-determines `WindowsEndpoint` or `LogitechGHub`. If no compatible method is found, the config is left untouched.
 - **Exit** — stop AutoSwitch.
 
 ### Important
 
-Windows audio `Item ID`s are **not reused** across installs. The installer is designed to capture them from your current Windows. Don't copy `config.json` from another machine.
+Windows audio `Item ID`s are **machine-local and can change** after driver changes, endpoint recreation or a new installation. A clean install captures the current IDs; `Reconfigure...` can also refresh the headset ID when a Bluetooth endpoint is recreated. Don't copy `config.json` from another machine.
 
 The `dev000000XX` ID from G HUB isn't persisted either. The runtime keeps the `extendedDisplayName` and discovers the current `deviceId` at startup.
 
@@ -177,10 +178,10 @@ powershell.exe -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\PROX2AutoSwitch\
 Manual test:
 
 1. Power on / connect the headset.
-2. Wait ~1–2 seconds.
+2. Wait a few seconds (some Bluetooth devices can take longer after reconnecting).
 3. Windows should select the headset.
 4. Power off / disconnect it.
-5. After two consecutive checks (~3 seconds), Windows should select the alternative output.
+5. After the endpoint reports OFF and two consecutive runtime checks confirm it (normally a few seconds), Windows should select the alternative output.
 
 Two consecutive OFF readings are required before treating the headset as disconnected, to avoid flapping on a one-off reading.
 
@@ -251,7 +252,7 @@ then extract only:
 - `Verificar-PROX2-AutoSwitch.ps1` — quick diagnostics.
 - `lib/AutoSwitchCore.psm1` — shared pure logic (Item ID extraction, CSV parse, endpoint state mapping, OFF debounce, config validation/migration, C# COM interop) used by installer, runtime and tests.
 - `assets/icon.ico` — tray icon.
-- `docs/` — design notes (the `WindowsEndpointProvider.md` is superseded; see CHANGELOG v1.2.0).
+- `docs/` — design/history notes. `WindowsEndpointProvider.md` is superseded and explicitly records which early assumptions were invalidated by later Bluetooth testing.
 - `tests/` — Pester coverage for the pure logic (with a real `svcl /scomma` fixture).
 - `site/` — the [GitHub Pages site](https://ayerdi.github.io/PROX2-AutoSwitch/), ES/EN.
 - `AGENT.md` — context so an AI agent can maintain/rebuild the project.
