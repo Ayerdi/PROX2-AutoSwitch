@@ -1,0 +1,6 @@
+Name,Type,Direction,Device Name,Device State,Item ID,Default
+"Auriculares",Device,Render,2- Jabra Evolve 65,Active,"{0.0.0.00000000}.{ed043b5e-65dc-4ba6-a847-310517ac1849}","Render"
+"Altavoces",Device,Render,Altavoces AMAZON,Active,"{0.0.0.00000000}.{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}","Render"
+"Auriculares",Device,Render,PRO X 2 Lightspeed Gaming Headset,Active,"{0.0.0.00000000}.{11111111-2222-3333-4444-555555555555}","Render"
+"Microphone",Device,Capture,Jabra Evolve 65 Microphone,Active,"{1.0.0.00000000}.{12345678-1234-1234-1234-123456789012}",""
+"Speakers (Application)",Application,Render,Speakers (Application),Active,"",""

@@ -1,8 +1,8 @@
 ﻿#requires -Version 5.1
 $ErrorActionPreference = "Stop"
 
-# PowerShell 5.1 sobre .NET antiguo puede negociar TLS 1.0/1.1 y fallar
-# contra GitHub/NirSoft. Forzamos TLS 1.2.
+# PowerShell 5.1 on old .NET can negotiate TLS 1.0/1.1 and fail against
+# GitHub/NirSoft. Force TLS 1.2.
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $PackageDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -11,45 +11,48 @@ $RuntimeSrc   = Join-Path $PackageDir "Runtime-PROX2-AutoSwitch.ps1"
 $UninstallSrc = Join-Path $PackageDir "Desinstalar-PROX2-AutoSwitch.ps1"
 $VerifySrc    = Join-Path $PackageDir "Verificar-PROX2-AutoSwitch.ps1"
 $ModuleSrc    = Join-Path $PackageDir "lib\AutoSwitchCore.psm1"
+$HelperSrc    = Join-Path $PackageDir "Toggle-AudioEnhancements.ps1"
+$IconSrc      = Join-Path $PackageDir "assets\icon.ico"
 
 $MainScript   = Join-Path $InstallDir "PROX2AutoSwitch.ps1"
 $ConfigPath   = Join-Path $InstallDir "config.json"
 $SvclPath     = Join-Path $InstallDir "svcl.exe"
 $LauncherVbs  = Join-Path $InstallDir "Iniciar-Oculto.vbs"
 $LogPath      = Join-Path $InstallDir "autoswitch.log"
+$HelperPath   = Join-Path $InstallDir "Toggle-AudioEnhancements.ps1"
 
 $StartupDir   = [Environment]::GetFolderPath("Startup")
 $ShortcutPath = Join-Path $StartupDir "PRO X 2 AutoSwitch.lnk"
 
 $SvclUrl = "https://www.nirsoft.net/utils/svcl-x64.zip"
-# Verificado en la pagina oficial de hashes de NirSoft el 2026-08-07.
-# Si NirSoft actualiza svcl, este hash cambiara: NO desactives la verificacion.
+# Verified on the official NirSoft hashes page on 2026-08-07.
+# If NirSoft updates svcl this hash will change: DO NOT disable the check.
 $ExpectedSha256 = "7ba008e9ece8b3eda323ef01711e4647eb7f40b28dc25f98b2ed6a738810bfcd"
 $ZipPath = Join-Path $env:TEMP "svcl-x64.zip"
 
-foreach ($required in @($RuntimeSrc, $UninstallSrc, $VerifySrc, $ModuleSrc)) {
+foreach ($required in @($RuntimeSrc, $UninstallSrc, $VerifySrc, $ModuleSrc, $HelperSrc, $IconSrc)) {
     if (-not (Test-Path $required)) {
-        throw "Falta un fichero del paquete: $required. Extrae el ZIP completo antes de instalar."
+        throw "A package file is missing: $required. Extract the full ZIP before installing."
     }
 }
 
-# Logica compartida (extraccion de Item ID, validacion de config, debounce).
+# Shared logic (Item ID extraction, config validation, debounce).
 Import-Module $ModuleSrc -ErrorAction Stop
 
 if (-not [Environment]::Is64BitOperatingSystem) {
-    throw "Este paquete esta preparado para Windows x64."
+    throw "This package is built for Windows x64."
 }
 
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host " PRO X 2 LIGHTSPEED - AutoSwitch de audio" -ForegroundColor Cyan
-Write-Host " Instalacion limpia" -ForegroundColor Cyan
+Write-Host " PRO X 2 LIGHTSPEED - Audio AutoSwitch" -ForegroundColor Cyan
+Write-Host " Clean installation" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 Write-Host ""
 
 New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 
-# Parar una instalacion anterior, si existe.
+# Stop a previous installation, if any.
 $escapedMain = [regex]::Escape($MainScript)
 Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
     Where-Object {
@@ -57,62 +60,70 @@ Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
         $_.CommandLine -match $escapedMain
     } |
     ForEach-Object {
-        Write-Host "Deteniendo instancia anterior (PID $($_.ProcessId))..." -ForegroundColor DarkGray
+        Write-Host "Stopping previous instance (PID $($_.ProcessId))..." -ForegroundColor DarkGray
         Invoke-CimMethod -InputObject $_ -MethodName Terminate | Out-Null
     }
 
 Start-Sleep -Milliseconds 500
 
-Write-Host "[1/7] Descargando SoundVolumeCommandLine desde NirSoft..." -ForegroundColor Yellow
-Invoke-WebRequest -UseBasicParsing -Uri $SvclUrl -OutFile $ZipPath
+# SoundVolumeCommandLine: skip the download if svcl.exe is already installed.
+if (Test-Path $SvclPath) {
+    Write-Host "[1/7] SoundVolumeCommandLine already installed. Skipping download." -ForegroundColor Green
+}
+else {
+    Write-Host "[1/7] Downloading SoundVolumeCommandLine from NirSoft..." -ForegroundColor Yellow
+    Invoke-WebRequest -UseBasicParsing -Uri $SvclUrl -OutFile $ZipPath
 
-$ActualSha256 = (Get-FileHash -Algorithm SHA256 -Path $ZipPath).Hash.ToLowerInvariant()
-if ($ActualSha256 -ne $ExpectedSha256) {
-    Remove-Item $ZipPath -Force -ErrorAction SilentlyContinue
-    throw @"
-El SHA-256 de svcl-x64.zip no coincide con el verificado al crear este paquete.
+    $ActualSha256 = (Get-FileHash -Algorithm SHA256 -Path $ZipPath).Hash.ToLowerInvariant()
+    if ($ActualSha256 -ne $ExpectedSha256) {
+        Remove-Item $ZipPath -Force -ErrorAction SilentlyContinue
+        throw @"
+The SHA-256 of svcl-x64.zip does not match the one verified when this package was created.
 
-Esperado: $ExpectedSha256
-Obtenido: $ActualSha256
+Expected: $ExpectedSha256
+Got:      $ActualSha256
 
-Esto puede significar que NirSoft ha publicado una version nueva.
-No continues desactivando la comprobacion. Verifica el SHA-256 actual en:
+This can mean NirSoft published a new version.
+Do not continue by disabling the check. Verify the current SHA-256 at:
 https://www.nirsoft.net/hash_check/?software=svcl
-y actualiza ExpectedSha256 en este instalador.
+and update ExpectedSha256 in this installer.
 "@
+    }
+
+    Write-Host "      SHA-256 OK." -ForegroundColor Green
+
+    Write-Host "[2/7] Installing SoundVolumeCommandLine..." -ForegroundColor Yellow
+    Expand-Archive -Path $ZipPath -DestinationPath $InstallDir -Force
+    Remove-Item $ZipPath -Force -ErrorAction SilentlyContinue
+
+    if (-not (Test-Path $SvclPath)) {
+        throw "svcl.exe was not found after extracting the ZIP."
+    }
 }
 
-Write-Host "      SHA-256 correcto." -ForegroundColor Green
-
-Write-Host "[2/7] Instalando SoundVolumeCommandLine..." -ForegroundColor Yellow
-Expand-Archive -Path $ZipPath -DestinationPath $InstallDir -Force
-Remove-Item $ZipPath -Force -ErrorAction SilentlyContinue
-
-if (-not (Test-Path $SvclPath)) {
-    throw "No se encontro svcl.exe despues de extraer el ZIP."
-}
-
-# Copiamos la version fuente del runtime y utilidades.
+# Copy the source version of the runtime and utilities.
 Copy-Item $RuntimeSrc $MainScript -Force
 Copy-Item $UninstallSrc (Join-Path $InstallDir "Desinstalar-PROX2-AutoSwitch.ps1") -Force
 Copy-Item $VerifySrc (Join-Path $InstallDir "Verificar-PROX2-AutoSwitch.ps1") -Force
+Copy-Item $HelperSrc (Join-Path $InstallDir "Toggle-AudioEnhancements.ps1") -Force
+Copy-Item $IconSrc (Join-Path $InstallDir "icon.ico") -Force
 New-Item -ItemType Directory -Path (Join-Path $InstallDir "lib") -Force | Out-Null
 Copy-Item $ModuleSrc (Join-Path $InstallDir "lib\AutoSwitchCore.psm1") -Force
 
-# --- Funciones G HUB para la instalacion ---
+# --- G HUB functions for the installer ---
 $script:Ws  = $null
 
-# Timeouts de G HUB (ms): la comprobacion de G HUB del asistente no puede
-# colgarse si G HUB acepta la conexion y deja de responder.
+# G HUB timeouts (ms): the assistant's G HUB check must not hang if G HUB
+# accepts the connection and then stops responding.
 $script:ConnectTimeoutMs = 5000
 $script:ReceiveTimeoutMs = 5000
 $script:RequestTimeoutMs = 10000
 
-# Token de timeout G HUB: definido en lib\AutoSwitchCore.psm1 (importado arriba).
+# G HUB timeout token: defined in lib\AutoSwitchCore.psm1 (imported above).
 
 function Close-GHubConnection {
-    # El cierre no debe colgar el asistente: si CloseAsync no termina en 1 s
-    # (o falla), Abort() + Dispose() garantizan salida.
+    # Closing must not hang the assistant: if CloseAsync does not finish in
+    # 1 s (or fails), Abort() + Dispose() guarantee exit.
     if ($null -ne $script:Ws -and
         $script:Ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
         $closeCts = New-Object System.Threading.CancellationTokenSource
@@ -160,14 +171,14 @@ function Connect-GHub {
         $script:Ws.ConnectAsync($uri, $timeout.Token).GetAwaiter().GetResult() | Out-Null
     }
     catch [System.OperationCanceledException] {
-        throw "Timeout al conectar con G HUB ($($script:ConnectTimeoutMs) ms)."
+        throw "Timeout connecting to G HUB ($($script:ConnectTimeoutMs) ms)."
     }
     finally {
         $timeout.Dispose()
     }
 
     if ($script:Ws.State -ne [System.Net.WebSockets.WebSocketState]::Open) {
-        throw "No se pudo abrir ws://localhost:9010."
+        throw "Could not open ws://localhost:9010."
     }
 }
 
@@ -188,7 +199,7 @@ function Send-GHubJson {
         ).GetAwaiter().GetResult() | Out-Null
     }
     catch [System.OperationCanceledException] {
-        throw "Timeout al enviar peticion a G HUB ($($script:ReceiveTimeoutMs) ms)."
+        throw "Timeout sending request to G HUB ($($script:ReceiveTimeoutMs) ms)."
     }
     finally {
         $timeout.Dispose()
@@ -197,7 +208,7 @@ function Send-GHubJson {
 
 function Receive-GHubText {
     param(
-        # Deadline duro de la peticion: ningun fragmento puede cruzar este punto.
+        # Hard deadline for the request: no fragment may cross this point.
         [Parameter(Mandatory=$true)][datetime]$Deadline
     )
 
@@ -208,10 +219,10 @@ function Receive-GHubText {
         do {
             $remainingMs = [int](($Deadline - (Get-Date)).TotalMilliseconds)
             if ($remainingMs -le 0) {
-                throw "Timeout de peticion G HUB ($($script:RequestTimeoutMs) ms)."
+                throw "G HUB request timeout ($($script:RequestTimeoutMs) ms)."
             }
-            # El fragmento espera como mucho ReceiveTimeoutMs, nunca mas alla
-            # del deadline global de la peticion.
+            # Each fragment waits at most ReceiveTimeoutMs, never past the
+            # global request deadline.
             $fragmentMs = [Math]::Min($script:ReceiveTimeoutMs, $remainingMs)
 
             $segment = New-Object 'System.ArraySegment[byte]' -ArgumentList (,$buffer)
@@ -224,14 +235,14 @@ function Receive-GHubText {
                 ).GetAwaiter().GetResult()
             }
             catch [System.OperationCanceledException] {
-                throw "Timeout esperando respuesta de G HUB ($($fragmentMs) ms)."
+                throw "Timeout waiting for a G HUB response ($($fragmentMs) ms)."
             }
             finally {
                 $timeout.Dispose()
             }
 
             if ($result.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) {
-                throw "G HUB cerro el WebSocket."
+                throw "G HUB closed the WebSocket."
             }
 
             if ($result.Count -gt 0) {
@@ -257,13 +268,13 @@ function Invoke-GHubGet {
         path  = $Path
     }
 
-    # Limite global por peticion: aunque G HUB intercale eventos,
-    # la respuesta buscada debe llegar antes del deadline.
+    # Global per-request limit: even if G HUB interleaves events, the expected
+    # response must arrive before the deadline.
     $deadline = (Get-Date).AddMilliseconds($script:RequestTimeoutMs)
 
     while ($true) {
         if ((Get-Date) -gt $deadline) {
-            throw "Timeout de peticion G HUB ($($script:RequestTimeoutMs) ms): $Path"
+            throw "G HUB request timeout ($($script:RequestTimeoutMs) ms): $Path"
         }
 
         $raw = Receive-GHubText -Deadline $deadline
@@ -275,11 +286,11 @@ function Invoke-GHubGet {
     }
 }
 
-# --- Funciones de audio ---
+# --- Audio functions ---
 function Get-DefaultColumn {
     param([Parameter(Mandatory=$true)][string]$Column)
 
-    # IMPORTANTE: no usar /Stdout con /GetColumnValue.
+    # IMPORTANT: do not use /Stdout with /GetColumnValue.
     $raw = & $SvclPath /GetColumnValue "DefaultRenderDevice" $Column 2>&1
     return (($raw | Out-String).Trim())
 }
@@ -289,39 +300,10 @@ function Get-DefaultRenderItemId {
 
     $id = Get-RenderItemIdFromText -Text $text
     if (-not $id) {
-        throw "No pude extraer el Item ID del dispositivo predeterminado. Salida: $text"
+        throw "Could not extract the Item ID of the default device. Output: $text"
     }
 
     return $id
-}
-
-function Get-DefaultRenderName {
-    $text = Get-DefaultColumn "Name"
-    $lines = @($text -split "(`r`n|`n|`r)") |
-        ForEach-Object { $_.Trim() } |
-        Where-Object { $_ -ne "" }
-
-    if ($lines.Count -eq 0) { return "<desconocido>" }
-    return $lines[-1]
-}
-
-function Capture-DefaultOutput {
-    param([Parameter(Mandatory=$true)][string]$PromptText)
-
-    Write-Host ""
-    Write-Host $PromptText -ForegroundColor Cyan
-    [void](Read-Host "Cuando sea la salida predeterminada de Windows, pulsa ENTER")
-
-    $name = Get-DefaultRenderName
-    $id   = Get-DefaultRenderItemId
-
-    Write-Host "      Capturado: $name" -ForegroundColor Green
-    Write-Host "      Item ID:   $id" -ForegroundColor DarkGray
-
-    return [pscustomobject]@{
-        Name   = $name
-        ItemId = $id
-    }
 }
 
 function Test-SetDefault {
@@ -331,7 +313,7 @@ function Test-SetDefault {
     )
 
     Write-Host ""
-    Write-Host "Probando cambio real -> $Label" -ForegroundColor Yellow
+    Write-Host "Testing real switch -> $Label" -ForegroundColor Yellow
 
     $out = & $SvclPath /Stdout /SetDefault $Id all 2>&1
     $text = ($out | Out-String).Trim()
@@ -345,87 +327,187 @@ function Test-SetDefault {
     $actual = Get-DefaultRenderItemId
 
     if ($actual -ieq $Id) {
-        Write-Host "      PRUEBA OK" -ForegroundColor Green
+        Write-Host "      TEST OK" -ForegroundColor Green
         return $true
     }
 
-    Write-Host "      PRUEBA FALLIDA. Actual: $actual" -ForegroundColor Red
+    Write-Host "      TEST FAILED. Actual: $actual" -ForegroundColor Red
     return $false
 }
 
 try {
-    Write-Host "[3/7] Comprobando Logitech G HUB..." -ForegroundColor Yellow
-    try {
-        Connect-GHub
-    }
-    catch {
-        throw "No puedo conectar con Logitech G HUB en localhost:9010. Abre G HUB y vuelve a ejecutar el instalador. Detalle: $($_.Exception.Message)"
-    }
+    # --- Step 3: pick headset and fallback FIRST ---
+    # DetectionMode is not decided until the device has been chosen and we
+    # have validated that Windows (or G HUB) can observe its physical state.
+    $DetectionMode = $null
+    $ghubHeadset = $null
 
-    $devices = Invoke-GHubGet -Path "/devices/list"
-    $deviceInfos = @($devices.payload.deviceInfos)
+    Write-Host "[3/7] Selecting headset and fallback..." -ForegroundColor Yellow
 
-    if ($deviceInfos.Count -eq 0) {
-        throw "G HUB no devolvio dispositivos."
+    $csvText = (& $SvclPath /scomma "" 2>&1 | Out-String).Trim()
+    if ([string]::IsNullOrWhiteSpace($csvText)) {
+        throw "Could not read the Windows audio device list (svcl /scomma)."
     }
 
-    $candidates = @($deviceInfos | Where-Object {
-        $_.extendedDisplayName -match "PRO\s*X\s*2"
-    })
-
-    if ($candidates.Count -eq 0) {
-        Write-Host ""
-        Write-Host "G HUB devuelve estos dispositivos:" -ForegroundColor Yellow
-        $deviceInfos |
-            Select-Object id, extendedDisplayName, deviceType |
-            Format-Table -AutoSize
-
-        throw "No se encontro automaticamente un Logitech PRO X 2."
+    $renderRows = @(Get-SvclRenderDevice -CsvText $csvText)
+    if ($renderRows.Count -eq 0) {
+        throw "No render (output) devices found in the Windows list."
     }
 
-    if ($candidates.Count -eq 1) {
-        $ghubHeadset = $candidates[0]
+    Write-Host ""
+    Write-Host "Detected output devices:" -ForegroundColor Yellow
+    for ($i = 0; $i -lt $renderRows.Count; $i++) {
+        $label = Get-SvclDeviceLabel -Row $renderRows[$i]
+        $state = Get-CsvColumn -Row $renderRows[$i] -Names @('Device State')
+        Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $label, $state)
+    }
+
+    $chosenHeadset = $null
+    do {
+        $choice = Read-Host "Enter the number of the HEADSET"
+        $parsed = 0
+        $valid = [int]::TryParse($choice, [ref]$parsed) -and
+                 $parsed -ge 1 -and
+                 $parsed -le $renderRows.Count
+    } until ($valid)
+    $chosenHeadset = $renderRows[$parsed - 1]
+
+    $chosenSpeaker = $null
+    do {
+        $choice = Read-Host "Enter the number of the FALLBACK device (speakers)"
+        $parsed = 0
+        $valid = [int]::TryParse($choice, [ref]$parsed) -and
+                 $parsed -ge 1 -and
+                 $parsed -le $renderRows.Count
+    } until ($valid)
+    $chosenSpeaker = $renderRows[$parsed - 1]
+
+    $headsetId   = Get-CsvColumn -Row $chosenHeadset -Names @('Item ID')
+    $speakerId   = Get-CsvColumn -Row $chosenSpeaker -Names @('Item ID')
+    $headsetName = Get-SvclDeviceLabel -Row $chosenHeadset
+    $speakerName = Get-SvclDeviceLabel -Row $chosenSpeaker
+
+    if (-not (Test-ValidAudioConfig -HeadsetId $headsetId -SpeakerId $speakerId)) {
+        throw "You chose the same device for headset and fallback. Run the installer again."
+    }
+
+    Write-Host "      Headset:  $headsetName" -ForegroundColor Green
+    Write-Host "      Fallback: $speakerName" -ForegroundColor Green
+
+    # --- Validate the headset ON -> OFF -> ON cycle ---
+    # The headset must be ON now. We ask for OFF and then ON, and check that
+    # Windows reflects the change on each transition.
+    Write-Host ""
+    Write-Host "Checking that Windows reflects the physical state of the headset..." -ForegroundColor Cyan
+    Write-Host "      The headset must be ON now. Checking..." -ForegroundColor DarkGray
+
+    function Get-HeadsetCsvState {
+        param([string]$ItemId)
+        $txt = (& $SvclPath /scomma "" 2>&1 | Out-String).Trim()
+        # Invalid/empty export -> Unknown (never assume off). Only when the
+        # export is valid and the row is missing is the endpoint absent -> Disconnected.
+        if (-not (Test-SvclExportValid -CsvText $txt)) { return 'Unknown' }
+        $r = @(ConvertFrom-SvclCsv -Text $txt) | Where-Object {
+            $id = Get-CsvColumn -Row $_ -Names @('Item ID')
+            $null -ne $id -and $id.Trim().ToLowerInvariant() -eq $ItemId.ToLowerInvariant()
+        } | Select-Object -First 1
+        if (-not $r) { return 'Disconnected' }
+        $st = Get-CsvColumn -Row $r -Names @('Device State')
+        if ($null -eq $st) { return 'Unknown' }
+        return Resolve-EndpointState -State $st
+    }
+
+    Start-Sleep -Milliseconds 500
+    $sOn1 = Get-HeadsetCsvState -ItemId $headsetId
+
+    Write-Host ""
+    Write-Host "Turn the headset OFF and press ENTER..." -ForegroundColor Cyan
+    [void](Read-Host)
+    Start-Sleep -Milliseconds 800
+    $sOff = Get-HeadsetCsvState -ItemId $headsetId
+
+    Write-Host "Turn the headset back ON and press ENTER..." -ForegroundColor Cyan
+    [void](Read-Host)
+    Start-Sleep -Milliseconds 800
+    $sOn2 = Get-HeadsetCsvState -ItemId $headsetId
+
+    Write-Host ""
+    Write-Host ("      State ON (initial):  {0}" -f $sOn1) -ForegroundColor DarkGray
+    Write-Host ("      State OFF:           {0}" -f $sOff) -ForegroundColor DarkGray
+    Write-Host ("      State ON (final):    {0}" -f $sOn2) -ForegroundColor DarkGray
+
+    if ($sOn1 -eq 'Connected' -and $sOff -eq 'Disconnected' -and $sOn2 -eq 'Connected') {
+        $DetectionMode = "WindowsEndpoint"
+        Write-Host "      Windows reflects the ON->OFF->ON cycle: universal mode." -ForegroundColor Green
     }
     else {
+        Write-Host "      Windows does NOT reflect the physical cycle of this headset." -ForegroundColor DarkGray
+
+        # G HUB fallback: ONLY if the user confirms that the chosen headset is
+        # a Logitech PRO X 2 listed by G HUB. Never associate $logi[0].
         Write-Host ""
-        Write-Host "Se encontraron varios candidatos:" -ForegroundColor Yellow
-        for ($i = 0; $i -lt $candidates.Count; $i++) {
-            Write-Host "[$($i + 1)] $($candidates[$i].extendedDisplayName)"
+        $conf = Read-Host "Is this headset a Logitech PRO X 2 detected by G HUB? (y/N)"
+        if ($conf -match '^(s|si|sí|y|yes)$') {
+            try {
+                Connect-GHub
+                $devices = Invoke-GHubGet -Path "/devices/list"
+                $deviceInfos = @($devices.payload.deviceInfos)
+
+                Write-Host ""
+                # Filter to ONLY PRO X 2 candidates: prevents accidentally
+                # picking a Logitech mouse/keyboard and watching its battery.
+                $ghubCandidates = @($deviceInfos | Where-Object {
+                    $_.extendedDisplayName -match 'PRO\s*X\s*2'
+                })
+
+                if ($ghubCandidates.Count -eq 0) {
+                    Write-Host "      G HUB reports no PRO X 2." -ForegroundColor Red
+                }
+                else {
+                    Write-Host "PRO X 2 headsets detected by G HUB:" -ForegroundColor Yellow
+                    for ($i = 0; $i -lt $ghubCandidates.Count; $i++) {
+                        Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $ghubCandidates[$i].extendedDisplayName, $ghubCandidates[$i].id)
+                    }
+
+                    $ghubChoice = 0
+                    do {
+                        $gc = Read-Host "Enter the number of the PRO X 2 that matches '$headsetName'"
+                        $ghubValid = [int]::TryParse($gc, [ref]$ghubChoice) -and
+                                     $ghubChoice -ge 1 -and
+                                     $ghubChoice -le $ghubCandidates.Count
+                    } until ($ghubValid)
+
+                    $ghubHeadset = $ghubCandidates[$ghubChoice - 1]
+                    $DetectionMode = "LogitechGHub"
+                    Write-Host "      G HUB: $($ghubHeadset.extendedDisplayName)" -ForegroundColor Green
+                }
+            }
+            catch {
+                Write-Host "      Could not connect to G HUB. Detail: $($_.Exception.Message)" -ForegroundColor Red
+            }
         }
-
-        do {
-            $choice = Read-Host "Elige el numero del PRO X 2"
-            $parsed = 0
-            $valid = [int]::TryParse($choice, [ref]$parsed) -and
-                     $parsed -ge 1 -and
-                     $parsed -le $candidates.Count
-        } until ($valid)
-
-        $ghubHeadset = $candidates[$parsed - 1]
     }
 
-    Write-Host "      G HUB: $($ghubHeadset.extendedDisplayName)" -ForegroundColor Green
-
-    Write-Host ""
-    Write-Host "[4/7] Calibrando salidas de Windows..." -ForegroundColor Yellow
-    Write-Host "No se guardan IDs antiguos: se capturan los del Windows actual." -ForegroundColor DarkGray
-
-    $headsetOutput = Capture-DefaultOutput @"
-PASO A - AURICULARES
-Enciende los PRO X 2 y selecciona manualmente en Windows la salida de los auriculares.
-"@
-
-    $speakerOutput = Capture-DefaultOutput @"
-PASO B - ALTAVOCES
-Selecciona manualmente en Windows la salida que quieres usar cuando los PRO X 2 esten apagados.
-"@
-
-    if (-not (Test-ValidAudioConfig -HeadsetId $headsetOutput.ItemId -SpeakerId $speakerOutput.ItemId)) {
-        throw "Has capturado el mismo dispositivo dos veces. Repite la instalacion."
+    if (-not $DetectionMode) {
+        throw "Windows cannot detect the physical state of this headset and there is no compatible method (nor a confirmed G HUB). Not installing."
     }
 
     Write-Host ""
-    Write-Host "[5/7] Validando cambios de audio antes de instalar..." -ForegroundColor Yellow
+    Write-Host "[4/7] Calibrating Windows outputs..." -ForegroundColor Yellow
+    Write-Host "No old IDs are kept: the current Windows ones are captured." -ForegroundColor DarkGray
+
+    # In both modes we already have the IDs captured from the Windows list.
+    $headsetOutput = [pscustomobject]@{
+        Name   = $headsetName
+        ItemId = $headsetId
+    }
+    $speakerOutput = [pscustomobject]@{
+        Name   = $speakerName
+        ItemId = $speakerId
+    }
+
+    Write-Host ""
+    Write-Host "[5/7] Validating audio switches before installing..." -ForegroundColor Yellow
 
     $okHeadset = Test-SetDefault `
         -Id $headsetOutput.ItemId `
@@ -436,35 +518,71 @@ Selecciona manualmente en Windows la salida que quieres usar cuando los PRO X 2 
         -Label $speakerOutput.Name
 
     if (-not ($okHeadset -and $okSpeaker)) {
-        throw "Una de las pruebas reales de cambio de salida ha fallado. No se instalara el AutoSwitch."
+        throw "One of the real audio switch tests failed. AutoSwitch will not be installed."
     }
 
     $config = [ordered]@{
-        Version           = "1.1.0"
-        GHubDisplayName   = [string]$ghubHeadset.extendedDisplayName
-        GHubPort          = 9010
-        HeadsetName       = [string]$headsetOutput.Name
-        HeadsetId         = [string]$headsetOutput.ItemId
-        SpeakerName       = [string]$speakerOutput.Name
-        SpeakerId         = [string]$speakerOutput.ItemId
-        PollMilliseconds  = 1500
-        OffMissThreshold  = 2
-        ConnectTimeoutMs  = 5000
-        ReceiveTimeoutMs  = 5000
-        RequestTimeoutMs  = 10000
-        InstalledAt       = (Get-Date).ToString("o")
+        Version                = "1.2.0"
+        DetectionMode          = $DetectionMode
+        HeadsetName            = [string]$headsetOutput.Name
+        HeadsetId              = [string]$headsetOutput.ItemId
+        SpeakerName            = [string]$speakerOutput.Name
+        SpeakerId              = [string]$speakerOutput.ItemId
+        PollMilliseconds       = 1500
+        OffMissThreshold       = 2
+        ConnectTimeoutMs       = 5000
+        ReceiveTimeoutMs       = 5000
+        RequestTimeoutMs       = 10000
+        DisableEnhancementsOnStart = $false
+        InstalledAt            = (Get-Date).ToString("o")
+    }
+
+    # G HUB mode specific fields.
+    if ($DetectionMode -eq 'LogitechGHub' -and $ghubHeadset) {
+        $config['GHubDisplayName'] = [string]$ghubHeadset.extendedDisplayName
+        $config['GHubPort']        = 9010
+    }
+
+    # Ask whether to disable the headset's audio enhancements now (requires a
+    # one-off elevation via UAC).
+    Write-Host ""
+    Write-Host "Windows Audio Enhancements:" -ForegroundColor Yellow
+    $enhChoice = Read-Host "Do you want to disable the headset's audio enhancements? (y/N)"
+    if ($enhChoice -match '^(s|si|sí|y|yes)$') {
+        $config['EnhancementsDeviceId'] = [string]$headsetOutput.ItemId
+        $config['DisableEnhancementsOnStart'] = $true
+        Write-Host "      They will be disabled (a UAC window may appear)..." -ForegroundColor DarkGray
     }
 
     $config | ConvertTo-Json -Depth 10 |
         Set-Content -Path $ConfigPath -Encoding UTF8
 
-    Write-Host "[6/7] Configurando inicio invisible..." -ForegroundColor Yellow
+    if ($config['DisableEnhancementsOnStart']) {
+        try {
+            $proc = Start-Process -FilePath (Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe") `
+                -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$HelperPath`" -DeviceId `"$($config['HeadsetId'])`" -Action Disable" `
+                -Verb RunAs -WindowStyle Hidden -PassThru -ErrorAction Stop
+            $proc.WaitForExit()
+            if ($proc.ExitCode -eq 0) {
+                Write-Host "      Enhancements disabled and verified." -ForegroundColor Green
+            }
+            else {
+                Write-Warning "The enhancements helper did not confirm the change (exit code $($proc.ExitCode))."
+            }
+        }
+        catch {
+            Write-Warning "Could not disable enhancements now (UAC canceled or error): $($_.Exception.Message)"
+            Write-Host "      You can do it later from the tray icon." -ForegroundColor DarkGray
+        }
+    }
+
+    Write-Host "[6/7] Setting up invisible startup..." -ForegroundColor Yellow
 
     $PowerShellExe = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
     $WScriptExe    = Join-Path $env:SystemRoot "System32\wscript.exe"
 
     if (-not (Test-Path $WScriptExe)) {
-        throw "No se encuentra wscript.exe. Este instalador usa WScript para evitar una ventana de PowerShell al iniciar sesion."
+        throw "wscript.exe was not found. This installer uses WScript to avoid a PowerShell window at login."
     }
 
     $vbs = @"
@@ -476,18 +594,18 @@ Set shell = Nothing
 
     Set-Content -Path $LauncherVbs -Value $vbs -Encoding ASCII
 
-    # El acceso directo inicia wscript.exe, no PowerShell directamente.
-    # Asi no queda una consola visible al iniciar sesion.
+    # The shortcut launches wscript.exe, not PowerShell directly, so no
+    # console window remains visible at login.
     $WshShell = New-Object -ComObject WScript.Shell
     $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
     $Shortcut.TargetPath = $WScriptExe
     $Shortcut.Arguments = "`"$LauncherVbs`""
     $Shortcut.WorkingDirectory = $InstallDir
     $Shortcut.IconLocation = "$env:SystemRoot\System32\SndVol.exe,0"
-    $Shortcut.Description = "PRO X 2 AutoSwitch - inicio invisible"
+    $Shortcut.Description = "PRO X 2 AutoSwitch - invisible startup"
     $Shortcut.Save()
 
-    # Arrancar ahora oculto.
+    # Start now, hidden.
     Start-Process -FilePath $WScriptExe -ArgumentList "`"$LauncherVbs`"" -WindowStyle Hidden
     Start-Sleep -Seconds 2
 
@@ -495,26 +613,26 @@ Set shell = Nothing
         Where-Object { $_.CommandLine -match $escapedMain } |
         Select-Object -First 1
 
-    Write-Host "[7/7] Finalizando..." -ForegroundColor Yellow
+    Write-Host "[7/7] Finalizing..." -ForegroundColor Yellow
     Write-Host ""
 
     if ($running) {
-        Write-Host "INSTALACION COMPLETADA." -ForegroundColor Green
-        Write-Host "AutoSwitch ejecutandose en segundo plano (PID $($running.ProcessId))." -ForegroundColor Green
+        Write-Host "INSTALLATION COMPLETED." -ForegroundColor Green
+        Write-Host "AutoSwitch running in the background (PID $($running.ProcessId))." -ForegroundColor Green
     }
     else {
-        Write-Warning "La instalacion termino, pero no pude confirmar el proceso oculto."
-        Write-Host "Ejecuta el verificador incluido en el paquete."
+        Write-Warning "The installation finished, but I could not confirm the hidden process."
+        Write-Host "Run the included verifier."
     }
 
     Write-Host ""
-    Write-Host "Auriculares ON  -> $($headsetOutput.Name)"
-    Write-Host "Auriculares OFF -> $($speakerOutput.Name)"
+    Write-Host "Headset ON  -> $($headsetOutput.Name)"
+    Write-Host "Headset OFF -> $($speakerOutput.Name)"
     Write-Host ""
-    Write-Host "Instalado en: $InstallDir" -ForegroundColor DarkGray
+    Write-Host "Installed at: $InstallDir" -ForegroundColor DarkGray
     Write-Host "Log:          $LogPath" -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "Prueba ahora a encender y apagar los PRO X 2." -ForegroundColor Cyan
+    Write-Host "Now try turning the headset on and off." -ForegroundColor Cyan
 }
 finally {
     Close-GHubConnection

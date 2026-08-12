@@ -25,6 +25,7 @@ jobs:
              Runtime-PROX2-AutoSwitch.ps1 \
              Desinstalar-PROX2-AutoSwitch.ps1 \
              Verificar-PROX2-AutoSwitch.ps1 \
+             Toggle-AudioEnhancements.ps1 \
              install.ps1 \
              README.md AGENT.md SOURCES.md SECURITY.md LICENSE CHANGELOG.md \
              "$PACKAGE_DIR/"
