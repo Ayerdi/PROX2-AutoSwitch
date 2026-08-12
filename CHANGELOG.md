@@ -4,6 +4,13 @@ Todas las versiones notables de este proyecto se documentan aquí.
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 Este proyecto se adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-08-12
+
+### Fixed
+- **Reconfigure endurecido al cambiar entre `WindowsEndpoint` y `LogitechGHub`**: una config de `WindowsEndpoint` podía no tener `GHubPort`; al reconfigurar a un PRO X 2, `Connect-GHub` usa ahora el puerto seguro por defecto (9010) en vez de fallar por una propiedad ausente.
+- Los campos opcionales de config (`DetectionMode`, `EnhancementsDeviceId`, `GHubDisplayName`, `GHubPort`) se gestionan con `Add-Member -Force` (crea o actualiza) y se **eliminan los campos G HUB obsoletos** al pasar a `WindowsEndpoint`, para no dejar asociaciones fantasma.
+- **Varios PRO X 2 en G HUB**: el wizard ya no adivina cuál corresponde; pregunta al usuario (Sí/No/Cancelar) por cada candidato hasta confirmar uno, o cancela y deja la config intacta.
+
 ## [1.2.1] - 2026-08-12
 
 ### Fixed
