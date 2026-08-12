@@ -23,20 +23,25 @@ TEXT_NAMES = {"LICENSE"}
 SPANISH_PATTERNS = [
     re.compile(r"[áéíóúüñ¿¡]", re.IGNORECASE),
     re.compile(
-        r"\b(?:no debe|no se puede|debe ser|se añadió|se agreg[oó]|"
+        r"\b(?:"
+        r"no debe|no se puede|no esta|debe ser|se agreg[oó]|se reintentara|"
         r"auricular(?:es)?|altavoces?|bandeja|instalaci[oó]n|desinstalaci[oó]n|"
-        r"configuraci[oó]n|verificaci[oó]n|conectado|desconectado|"
+        r"configuraci[oó]n|reconfiguraci[oó]n|verificaci[oó]n|conectado|desconectado|"
         r"encendido|apagado|selecciona|seleccionar|salida de audio|"
-        r"prueba|modo universal|versi[oó]n estable)\b",
+        r"prueba|modo universal|versi[oó]n estable|exportacion|transicion|"
+        r"reconexion|icono|notificaciones|menu|hilo|bucle|unico|lectura"
+        r")\b",
         re.IGNORECASE,
     ),
 ]
 
+# These words are deliberately chosen for low overlap with normal English code.
+# Two matches on the same line are enough to flag likely Spanish prose.
 SPANISH_STOPWORDS = {
     "aqui", "antes", "bajo", "cada", "cuando", "debe", "deben", "del",
-    "desde", "despues", "donde", "el", "esta", "este", "esto", "la", "las",
-    "los", "para", "pero", "por", "porque", "que", "se", "si", "sin", "solo",
-    "tambien", "una", "uno", "ya",
+    "desde", "despues", "donde", "esta", "este", "esto", "hasta", "la", "las",
+    "los", "para", "pero", "por", "porque", "que", "sin", "solo", "tambien",
+    "una", "uno", "varios", "ya",
 }
 
 # Localized labels and multilingual input literals are compatibility metadata,
@@ -73,7 +78,7 @@ def looks_spanish(line: str) -> bool:
     if any(pattern.search(candidate) for pattern in SPANISH_PATTERNS):
         return True
     words = re.findall(r"[a-z]+", strip_diacritics(candidate).casefold())
-    return sum(word in SPANISH_STOPWORDS for word in words) >= 3
+    return sum(word in SPANISH_STOPWORDS for word in words) >= 2
 
 
 def main() -> int:
