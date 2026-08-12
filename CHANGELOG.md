@@ -6,7 +6,15 @@ Este proyecto se adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## [Unreleased]
 
+### Added
+- Double-click `Install.cmd`, `Verify.cmd`, and `Uninstall.cmd` launchers for users who download the release ZIP.
+- Release packaging now also publishes a stable `Audio-AutoSwitch.zip` + SHA-256 alias in addition to the versioned archive.
+
 ### Fixed
+- Clean installation now polls Bluetooth/Core Audio transitions for 15 s / 15 s / 20 s and refreshes a recreated headset Item ID by `Device Name` + `Name`, matching the hardened Reconfigure flow.
+- The verifier no longer reports G HUB as a failure for generic `WindowsEndpoint` installations.
+- The one-command bootstrap now uses English/generic Audio AutoSwitch wording.
+- Removed leftover one-shot documentation workflows/scripts from `.github/`.
 - `Reconfigure...` re-resolves a recreated Bluetooth endpoint using the real `svcl` identity columns **`Device Name` + `Name`**, not the combined display label. This fixes the edge case where a headset returns after power-on with a different `Item ID`, while avoiding collisions between multiple render endpoints belonging to the same device. Regression tests cover exact identity matching.
 
 ### Changed

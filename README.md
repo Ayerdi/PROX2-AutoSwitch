@@ -17,6 +17,29 @@ Automatically switch your Windows default audio output when you put on or take o
 
 See it live on the [project page](https://ayerdi.github.io/PROX2-AutoSwitch/).
 
+
+## Quick start
+
+### Recommended: download the ZIP (v1.2.4+)
+
+Releases built with this onboarding flow publish both the versioned archive and a stable **`Audio-AutoSwitch.zip`** name. Until v1.2.4 is published, v1.2.3 remains the latest stable release and does not contain the `.cmd` launchers yet.
+
+1. Open the [latest release](https://github.com/Ayerdi/PROX2-AutoSwitch/releases/latest) and download `Audio-AutoSwitch.zip` (v1.2.4+).
+2. Extract the ZIP to a normal folder.
+3. Double-click **`Install.cmd`**.
+4. Pick your headset and fallback output, then follow the ON → OFF → ON wizard.
+5. When installation finishes, turn the headset off/on once to confirm the real switch.
+
+`Install.cmd` is only a small launcher for the PowerShell installer; all installation logic remains in the reviewed `.ps1` files. The release also includes **`Verify.cmd`** and **`Uninstall.cmd`** for double-click diagnostics/removal.
+
+### One-command install
+
+If you prefer PowerShell, this bootstrap downloads the latest versioned release ZIP plus its SHA-256 checksum, verifies it, and then starts the same installer:
+
+```powershell
+powershell.exe -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Ayerdi/PROX2-AutoSwitch/main/install.ps1 | iex"
+```
+
 ## Why this exists
 
 Some wireless headsets — especially USB-dongle/LIGHTSPEED models — keep their audio endpoint visible to Windows even when the physical headset is turned off. Others, such as the tested Jabra Evolve 65, expose a useful `Active ↔ Unplugged` transition. AutoSwitch handles both patterns through its detection modes.
@@ -80,27 +103,12 @@ In both modes the rule is the same: an **unknown** state never switches the outp
 
 No admin rights should be required for normal operation. Only toggling **Audio Enhancements** asks for a one-time UAC elevation.
 
-## Installation
+## Installation details
 
-**One click** (downloads the latest release ZIP and its SHA-256 checksum, verifies the ZIP before extracting, then runs the full installer):
-
-```powershell
-powershell.exe -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Ayerdi/PROX2-AutoSwitch/main/install.ps1 | iex"
-```
-
-Or manually:
-
-1. Extract the whole ZIP to a normal folder. Don't run the installer from inside the ZIP.
-2. Open PowerShell in that folder.
-3. If Windows blocked the downloaded scripts:
+The recommended ZIP path is **extract → double-click `Install.cmd`**. If Windows has marked the downloaded scripts as blocked and the launcher cannot run them, open PowerShell in the extracted folder and run:
 
 ```powershell
 Get-ChildItem . -Filter *.ps1 | Unblock-File
-```
-
-4. Run:
-
-```powershell
 powershell.exe -ExecutionPolicy Bypass -File ".\Instalar-PROX2-AutoSwitch.ps1"
 ```
 
@@ -108,7 +116,7 @@ The installer will:
 
 - download SoundVolumeCommandLine from NirSoft only if it is not already installed, and verify its SHA-256 before running it;
 - list the Windows audio output devices so you pick the **headset** and the **fallback**;
-- ask you to turn the headset OFF and back ON — if Windows reflects `Active → Unplugged → Active`, it picks `WindowsEndpoint` mode automatically; if not, it asks you to confirm the headset is a Logitech PRO X 2, lists only the PRO X 2 candidates from G HUB for you to pick the matching one, and uses `LogitechGHub` mode; if nothing works, it aborts instead of installing something that can't work;
+- ask you to turn the headset OFF and back ON — it polls Windows for up to 15 s / 15 s / 20 s instead of trusting one fast Bluetooth reading; if Windows reflects `Active → Unplugged → Active`, it picks `WindowsEndpoint` mode automatically; if the endpoint is recreated with a new Item ID during that cycle, the installer re-resolves it by `Device Name` + `Name` and keeps the newest ID; if not, it asks you to confirm the headset is a Logitech PRO X 2, lists only the PRO X 2 candidates from G HUB for you to pick the matching one, and uses `LogitechGHub` mode; if nothing works, it aborts instead of installing something that can't work;
 - capture the real **Item ID**s of the current Windows;
 - actually test both switches;
 - offer to disable the headset's **Audio Enhancements** (one UAC prompt);
@@ -149,14 +157,14 @@ Main contents:
 PROX2AutoSwitch.ps1        # runtime (tray)
 config.json
 svcl.exe
-Toggle-AudioEnhancements.ps1   # helper elevado (UAC) de enhancements
+Toggle-AudioEnhancements.ps1   # elevated helper (UAC) for enhancements
 icon.ico
 Iniciar-Oculto.vbs
 autoswitch.log
 Desinstalar-PROX2-AutoSwitch.ps1
 Verificar-PROX2-AutoSwitch.ps1
-lib\AutoSwitchCore.psm1    # lógica compartida
-control\                   # flags de comunicación tray <-> worker
+lib\AutoSwitchCore.psm1    # shared logic
+control\                   # tray <-> worker control flags
 ```
 
 Autostart is created in the user's Startup folder as:
@@ -248,7 +256,8 @@ then extract only:
 
 ## Repository layout
 
-- `install.ps1` — one-click bootstrap: fetches the latest release ZIP and its `.sha256`, verifies the hash, then runs the installer.
+- `install.ps1` — one-command bootstrap: fetches the latest versioned release ZIP and its `.sha256`, verifies the hash, then runs the installer.
+- `Install.cmd` / `Verify.cmd` / `Uninstall.cmd` — tiny double-click launchers; the real logic remains in PowerShell.
 - `Instalar-PROX2-AutoSwitch.ps1` — clean install (universal + G HUB paths, auto detection mode). Skips the `svcl.exe` download if it is already installed.
 - `Runtime-PROX2-AutoSwitch.ps1` — the runtime copied to `%LOCALAPPDATA%`: tray icon + invisible `Form` message pump, with the polling in a separate worker process (`AUTOSWITCH_WORKER=1`).
 - `Toggle-AudioEnhancements.ps1` — elevated helper (UAC) that disables/enables the headset's Audio Enhancements.
