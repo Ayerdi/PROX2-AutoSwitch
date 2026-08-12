@@ -1,0 +1,45 @@
+name: tmp-fix-identity-export
+
+on:
+  push:
+    branches:
+      - agent/docs-v123-refresh
+    paths:
+      - '.github/workflows/tmp-fix-identity-export.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/docs-v123-refresh
+          fetch-depth: 0
+      - name: Export identity helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('lib/AutoSwitchCore.psm1')
+          text = p.read_text(encoding='utf-8-sig')
+          old = 'Get-SvclRenderDevice, Get-SvclDeviceLabel, Get-EndpointFxState, Get-ConfigDetectionMode'
+          new = 'Get-SvclRenderDevice, Get-SvclDeviceLabel, Find-SvclRenderDeviceByIdentity, Get-EndpointFxState, Get-ConfigDetectionMode'
+          if text.count(old) != 1:
+              raise SystemExit('Export-ModuleMember marker mismatch')
+          p.write_text(text.replace(old, new, 1), encoding='utf-8-sig')
+          PY
+      - name: Commit and clean workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/tmp-fix-identity-export.yml
+          git add lib/AutoSwitchCore.psm1
+          git diff --cached --check
+          git commit -m "fix: export Bluetooth identity helper"
+          git push origin HEAD:agent/docs-v123-refresh
