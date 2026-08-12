@@ -105,12 +105,9 @@ powershell.exe -ExecutionPolicy Bypass -File ".\Instalar-PROX2-AutoSwitch.ps1"
 
 The installer will:
 
-- download SoundVolumeCommandLine from NirSoft;
-- verify its SHA-256 before running it;
-- detect the headset automatically:
-  - if G HUB reports a PRO X 2 → `LogitechGHub` mode;
-  - otherwise list the Windows audio endpoints so you pick the **headset** and the **fallback**;
-  - ask you to turn the headset OFF and press Enter — if Windows shows `Active → Unplugged`, it picks `WindowsEndpoint` mode automatically; if not, it tries G HUB (Logitech only); if nothing works, it aborts instead of installing something that can't work;
+- download SoundVolumeCommandLine from NirSoft only if it is not already installed, and verify its SHA-256 before running it;
+- list the Windows audio output devices so you pick the **headset** and the **fallback**;
+- ask you to turn the headset OFF and back ON — if Windows reflects `Active → Unplugged → Active`, it picks `WindowsEndpoint` mode automatically; if not, it asks you to confirm the headset is a Logitech PRO X 2, lists only the PRO X 2 candidates from G HUB for you to pick the matching one, and uses `LogitechGHub` mode; if nothing works, it aborts instead of installing something that can't work;
 - capture the real **Item ID**s of the current Windows;
 - actually test both switches;
 - offer to disable the headset's **Audio Enhancements** (one UAC prompt);
