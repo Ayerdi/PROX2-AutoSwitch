@@ -578,13 +578,15 @@ function Show-ReconfigureDialog {
     $btnCancel.Location = New-Object System.Drawing.Point(240, 120)
     $btnCancel.Width = 90
 
-    $result = $null
+    # El resultado se comunica via $form.Tag (PSScriptAnalyzer no considera
+    # "usada" una variable local asignada solo dentro de handlers/closures).
+    $form.Tag = 'cancel'
     $btnSave.Add_Click({
-        $result = 'save'
+        $form.Tag = 'save'
         $form.Close()
     })
     $btnCancel.Add_Click({
-        $result = 'cancel'
+        $form.Tag = 'cancel'
         $form.Close()
     })
 
@@ -597,7 +599,7 @@ function Show-ReconfigureDialog {
 
     $form.ShowDialog() | Out-Null
 
-    if ($result -ne 'save') { return }
+    if ($form.Tag -ne 'save') { return }
     if ($comboHeadset.SelectedIndex -lt 0 -or $comboFallback.SelectedIndex -lt 0) { return }
 
     $newHeadsetId = Get-CsvColumn -Row $devices[$comboHeadset.SelectedIndex] -Names @('Item ID')
