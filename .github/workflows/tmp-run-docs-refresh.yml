@@ -37,7 +37,16 @@ jobs:
               out.append(cooked)
               if cooked.count("'''") % 2 == 1:
                   inside_triple = not inside_triple
-          Path('/tmp/docs_patch.py').write_text('\n'.join(out) + '\n', encoding='utf-8')
+          script = '\n'.join(out) + '\n'
+          script = script.replace(
+              'Polling runs in a separate worker process so the tray stays responsive.',
+              'Polling runs in a separate worker process so the tray never blocks.'
+          )
+          script = script.replace(
+              "Windows audio Item IDs are not reused across installs: the installer captures the current machine's IDs. Don't copy config.json from another PC.",
+              "Windows audio Item IDs are not reused across installs: the installer captures them from your current Windows. Don't copy config.json from another machine."
+          )
+          Path('/tmp/docs_patch.py').write_text(script, encoding='utf-8')
           PY
           python3 /tmp/docs_patch.py
       - name: Commit final branch changes
