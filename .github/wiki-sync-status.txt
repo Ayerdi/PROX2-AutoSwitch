@@ -1,5 +1,0 @@
-v1.2.4 documentation sync completed
-wiki_commit=b185a32972339cdd47cbb75b184a8b053ddfcb07
-wiki_pages=Home.md,Guia-Instalacion-ES.md,Install-Guide-EN.md,Verificar-ES.md,Verify-EN.md,Desinstalar-ES.md,Uninstall-EN.md
-pages_markers=Install.cmd,Verify.cmd,Uninstall.cmd
-readme_markers=Verify.cmd,Uninstall.cmd
