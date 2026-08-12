@@ -27,10 +27,17 @@ jobs:
           src = Path('.github/workflows/tmp-docs-refresh.yml').read_text(encoding='utf-8')
           begin = src.index("          from pathlib import Path\n")
           end = src.index("\n          PY\n", begin)
-          block = src[begin:end]
-          lines = block.splitlines()
-          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines) + '\n'
-          Path('/tmp/docs_patch.py').write_text(script, encoding='utf-8')
+          lines = src[begin:end].splitlines()
+          out = []
+          inside_triple = False
+          for line in lines:
+              cooked = line
+              if not inside_triple and line.startswith('          '):
+                  cooked = line[10:]
+              out.append(cooked)
+              if cooked.count("'''") % 2 == 1:
+                  inside_triple = not inside_triple
+          Path('/tmp/docs_patch.py').write_text('\n'.join(out) + '\n', encoding='utf-8')
           PY
           python3 /tmp/docs_patch.py
       - name: Commit final branch changes
