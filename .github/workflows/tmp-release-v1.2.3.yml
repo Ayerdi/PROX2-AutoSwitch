@@ -1,0 +1,92 @@
+name: tmp-release-v1.2.3
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/tmp-release-v1.2.3.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Finalize v1.2.3 changelog
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('CHANGELOG.md')
+          text = path.read_text(encoding='utf-8')
+          start = text.index('## [1.2.3] - 2026-08-12')
+          end = text.index('## [1.2.2] - 2026-08-12')
+          section = '''## [1.2.3] - 2026-08-12
+
+### Fixed
+- **`Reconfigure...` tolera la latencia real de headsets Bluetooth**: el wizard hace polling cada 500 ms y usa ventanas de hasta 15 s para el primer ON y el OFF, y hasta 20 s para el ON final. Esto evita falsos negativos cuando Windows tarda varios segundos en reflejar `Active`/`Unplugged`.
+- **Los headsets Bluetooth pueden reaparecer con un `Item ID` distinto** tras apagarse y reconectarse. Si el ID original ya no aparece, Reconfigure vuelve a localizar el endpoint por su nombre estable, usa el estado observado y persiste el `Item ID` más reciente en `config.json`. Validado en hardware real con Jabra Evolve 65 (`ON → OFF → ON`, reinicio y nuevo `OFF → ON`).
+- Se añadió diagnóstico detallado cuando un estado no llega a tiempo: el log muestra el estado final y los endpoints/IDs que `svcl` está viendo, para distinguir timing de un endpoint recreado.
+- `Invoke-Reconfigure` envuelve también la apertura/construcción del diálogo en `try/catch`, de modo que los fallos previos a `Detect mode...` quedan registrados en `autoswitch.log`.
+
+'''
+          path.write_text(text[:start] + section + text[end:], encoding='utf-8')
+          PY
+
+      - name: Commit final release notes and remove one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/tmp-release-v1.2.3.yml
+          git add CHANGELOG.md
+          git commit -m "docs: finalize v1.2.3 release notes"
+          git push origin HEAD:main
+
+      - name: Build release ZIP and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="v1.2.3"
+          PACKAGE_DIR="PROX2-AutoSwitch-$VERSION"
+          rm -rf "$PACKAGE_DIR"
+          mkdir -p "$PACKAGE_DIR/lib" "$PACKAGE_DIR/assets"
+          cp Instalar-PROX2-AutoSwitch.ps1 \
+             Runtime-PROX2-AutoSwitch.ps1 \
+             Desinstalar-PROX2-AutoSwitch.ps1 \
+             Verificar-PROX2-AutoSwitch.ps1 \
+             Toggle-AudioEnhancements.ps1 \
+             install.ps1 \
+             README.md AGENT.md SOURCES.md SECURITY.md LICENSE CHANGELOG.md \
+             "$PACKAGE_DIR/"
+          cp lib/AutoSwitchCore.psm1 "$PACKAGE_DIR/lib/"
+          cp assets/icon.ico "$PACKAGE_DIR/assets/"
+          zip -r "PROX2-AutoSwitch-$VERSION.zip" "$PACKAGE_DIR"
+          sha256sum "PROX2-AutoSwitch-$VERSION.zip" > "PROX2-AutoSwitch-$VERSION.zip.sha256"
+          unzip -l "PROX2-AutoSwitch-$VERSION.zip" | grep -q 'Runtime-PROX2-AutoSwitch.ps1'
+          unzip -l "PROX2-AutoSwitch-$VERSION.zip" | grep -q 'assets/icon.ico'
+          unzip -l "PROX2-AutoSwitch-$VERSION.zip" | grep -q 'lib/AutoSwitchCore.psm1'
+
+      - name: Publish v1.2.3
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          FINAL_SHA="$(git rev-parse HEAD)"
+          gh release create v1.2.3 \
+            PROX2-AutoSwitch-v1.2.3.zip \
+            PROX2-AutoSwitch-v1.2.3.zip.sha256 \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$FINAL_SHA" \
+            --title "v1.2.3" \
+            --generate-notes
