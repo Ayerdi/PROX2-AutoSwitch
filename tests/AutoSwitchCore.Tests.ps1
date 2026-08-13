@@ -279,3 +279,18 @@ Describe 'Get-ConfigDetectionMode' {
         Get-ConfigDetectionMode -Config $cfg | Should -BeNullOrEmpty
     }
 }
+
+
+Describe 'Native Core Audio bridge' {
+    It 'exports the native Core Audio commands' {
+        (Get-Command Initialize-CoreAudioBackend -ErrorAction Stop).Name | Should -Be 'Initialize-CoreAudioBackend'
+        (Get-Command Get-CoreAudioRenderDevices -ErrorAction Stop).Name | Should -Be 'Get-CoreAudioRenderDevices'
+        (Get-Command Get-CoreAudioDefaultRenderDeviceId -ErrorAction Stop).Name | Should -Be 'Get-CoreAudioDefaultRenderDeviceId'
+        (Get-Command Set-CoreAudioDefaultRenderDevice -ErrorAction Stop).Name | Should -Be 'Set-CoreAudioDefaultRenderDevice'
+    }
+
+    It 'compiles the embedded COM bridge without touching hardware' {
+        { Initialize-CoreAudioBackend } | Should -Not -Throw
+        ('AutoSwitch.NativeAudio.CoreAudio' -as [type]) | Should -Not -BeNullOrEmpty
+    }
+}

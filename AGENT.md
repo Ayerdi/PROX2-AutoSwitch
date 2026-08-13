@@ -16,7 +16,7 @@ The LIGHTSPEED receiver stays connected, so you **cannot** use the presence of t
 ## Detection modes (config `DetectionMode`)
 
 - `WindowsEndpoint` (default for new installs): read the headset endpoint `State` from the
-  `svcl.exe /scomma` export and map it:
+  native Core Audio endpoint list and map it:
   - `Active` → `Connected` → headset.
   - `Unplugged` / `NotPresent` / row absent → `Disconnected` → fallback.
   - `Disabled` / `Error` / unparseable → `Unknown` → **never switch**.
@@ -51,29 +51,23 @@ hardened to tolerate a recreated endpoint whose `Item ID` changes.
    - The installer must capture the IDs of the current system.
 
 2. For duplicated endpoints, use `Item ID` for normal runtime targeting. During **Reconfigure only**,
-   if that ID disappears after a Bluetooth reconnect, re-resolve the endpoint by the two real `svcl`
-   identity columns (`Device Name` + `Name`) and then persist the newly observed `Item ID`. Never use
+   if that ID disappears after a Bluetooth reconnect, re-resolve the endpoint by the two native endpoint identity properties
+   (`PKEY_DeviceInterface_FriendlyName` + `PKEY_Device_DeviceDesc`) and then persist the newly observed `Item ID`. Never use
    the combined display label as if it were a raw column value.
 
-3. To set the output:
-   ```powershell
-   svcl.exe /SetDefault "<Item ID>" all
-   ```
-   `all` covers Console, Multimedia and Communications.
+3. To set the output, use the in-process Core Audio bridge in `lib/AutoSwitchCore.psm1`.
+   `Set-CoreAudioDefaultRenderDevice` applies the target to Console, Multimedia and Communications.
 
-4. To read a column:
-   ```powershell
-   svcl.exe /GetColumnValue "DefaultRenderDevice" "Item ID"
-   ```
-   **Do NOT add `/Stdout`** to `/GetColumnValue`.
+4. To read the current defaults, use `Get-CoreAudioDefaultRenderDeviceIds`.
+   Do not infer success from the setter alone.
 
-5. Verify the switch:
-   - run `/SetDefault`;
-   - re-read `DefaultRenderDevice` → `Item ID`;
-   - compare with the target;
+5. Verify every switch:
+   - set all three roles;
+   - re-read Console, Multimedia and Communications;
+   - require every role to match the target;
    - allow a single short retry.
 
-6. Unknown state (svcl failure, `Disabled`, garbage):
+6. Unknown state (Core Audio failure, `Disabled`, unmapped state):
    - do not guess the state;
    - do not switch the output;
    - write a log entry;
@@ -95,7 +89,7 @@ hardened to tolerate a recreated endpoint whose `Item ID` changes.
     The worker is a single synchronous loop (`Start-Sleep PollMilliseconds`), which is itself the guard
     against concurrent polls — it never starts a new poll while the previous one is still running.
     The main process communicates via control flags (`control/enabled.flag`, `control/stop.flag`).
-    Do NOT run svcl/G HUB/Set-AudioOutput on the UI thread. Pass `[System.Windows.Forms.Application]::Run($form)`
+    Do NOT run Core Audio/G HUB/Set-AudioOutput on the UI thread. Pass `[System.Windows.Forms.Application]::Run($form)`
     an invisible `Form`; `Application.Run()` without a Form is not reliably kept alive across all .NET builds.
 
 11. **Audio Enhancements**: toggled only for the configured `HeadsetId` via a temporary elevated
@@ -103,14 +97,11 @@ hardened to tolerate a recreated endpoint whose `Item ID` changes.
     `PKEY_AudioEndpoint_Disable_SysFx` (1da5d803-d492-4edd-8c23-e0c0ffee7f0e, 5) through
     `IPolicyConfig::SetPropertyValue(deviceId, bFxStore=true)`, verifies, and exits. The runtime itself
     is never elevated. The menu label updates only after a verified success (UAC cancel → no visual change).
-    Do **NOT** use `svcl /SetBooleanFxProperty` for this (individual effects only, not the global
-    "Disable audio enhancements" switch).
 
 12. **COM interop lives in C#**: PowerShell 5.1 cannot cast a COM RCW to a custom `[ComImport]` interface
     (`New-Object`, `Activator` or `GetTypeFromCLSID` all fail with "the COM interface cast fails at runtime"). The cast is
     native in C#, so both the helper and `lib/AutoSwitchCore.psm1` compile the whole COM block with
-    `Add-Type` and expose a static method (`AutoSwitch.AudioEnhancements.SetSysFx`,
-    `AutoSwitch.EndpointFx.ReadSysFx`). Read the SysFx state with `IPolicyConfig::GetPropertyValue` on the
+    `Add-Type` and expose static methods for endpoint enumeration/default switching and enhancements. Read the SysFx state with `IPolicyConfig::GetPropertyValue` on the
     **FxStore** (`bFxStore=true`) — the endpoint `IPropertyStore` does **not** contain
     `PKEY_AudioEndpoint_Disable_SysFx`, so reading it there always reports "enabled".
 
@@ -186,27 +177,13 @@ SUBSCRIBE /battery/state/changed
 
 To evolve the runtime, one option is to use WebSocket events and keep polling as a fallback. Do not change it without testing power-on, power-off, G HUB restart, sleep and a clean login.
 
-## SoundVolumeCommandLine
+## Native Core Audio backend
 
-Provider: NirSoft.
-
-Current x64 URL in this package's version:
-
-```text
-https://www.nirsoft.net/utils/svcl-x64.zip
-```
-
-SHA-256 verified on 2026-08-07:
-
-```text
-7ba008e9ece8b3eda323ef01711e4647eb7f40b28dc25f98b2ed6a738810bfcd
-```
-
-Before changing the hash:
-1. check the official hashes page;
-2. confirm it matches `svcl-x64.zip` exactly;
-3. update the comment/date;
-4. do not disable the check.
+- `IMMDeviceEnumerator` / `IMMDevice` enumerate render endpoints, states and endpoint IDs.
+- `IPropertyStore` reads `PKEY_Device_DeviceDesc`, `PKEY_DeviceInterface_FriendlyName` and `PKEY_Device_FriendlyName`.
+- `IPolicyConfig::SetDefaultEndpoint` is used for Console, Multimedia and Communications, then all three roles are re-read and verified.
+- `IPolicyConfig` is not a documented public Windows API. This project already depended on the same COM family for Audio Enhancements; keep the boundary isolated in embedded C# and fail safely on HRESULT errors.
+- Clean install no longer downloads or hashes a third-party audio-control executable.
 
 ## Required tests after any change
 
@@ -261,9 +238,8 @@ Before changing the hash:
 
 - G HUB closed (Logitech mode): do not switch output.
 - Endpoint removed/recreated during Reconfigure: re-resolve by `Device Name` + `Name`, persist the newest ID, and fail without changing config if identity is ambiguous/missing. A runtime endpoint that disappears outside Reconfigure remains a diagnostic/reconfigure case; never guess a target.
-- NirSoft hash differs: abort install.
 - `/devices/list` does not contain the PRO X 2: fall back to WindowsEndpoint path; do not invent a `deviceId`.
-- svcl `State` read fails or is `Disabled`/garbage: `Unknown`, do not switch.
+- Core Audio enumeration/state read fails or is `Disabled`/unmapped: `Unknown`, do not switch.
 
 ## Possible future improvements
 

@@ -7,16 +7,14 @@ $script:RuntimePath = $PSCommandPath
 
 $InstallDir = Split-Path -Parent $script:RuntimePath
 $ConfigPath = Join-Path $InstallDir "config.json"
-$SvclPath   = Join-Path $InstallDir "svcl.exe"
 $LogPath    = Join-Path $InstallDir "autoswitch.log"
 $script:HelperPath = Join-Path $InstallDir "Toggle-AudioEnhancements.ps1"
 
 if (-not (Test-Path $ConfigPath)) { exit 10 }
-if (-not (Test-Path $SvclPath))   { exit 11 }
 
 $Config = Get-Content -Raw -Path $ConfigPath | ConvertFrom-Json
 
-# Logica compartida (extraccion de Item ID, debounce, CSV, estados, config).
+# Shared logic (Core Audio interop, debounce, endpoint identity, config).
 $ModulePath = Join-Path $InstallDir "lib\AutoSwitchCore.psm1"
 if (-not (Test-Path $ModulePath)) { exit 12 }
 Import-Module $ModulePath -ErrorAction Stop
@@ -286,17 +284,7 @@ function Get-ProX2BatteryPath {
 }
 
 function Get-DefaultRenderItemId {
-    # IMPORTANT: /GetColumnValue already writes the value to stdout.
-    # Do not add /Stdout here: it adds item information and breaks parsing.
-    $raw = & $SvclPath /GetColumnValue "DefaultRenderDevice" "Item ID" 2>&1
-    $text = ($raw | Out-String).Trim()
-
-    $id = Get-RenderItemIdFromText -Text $text
-    if (-not $id) {
-        throw "Could not read the default device Item ID. Output: $text"
-    }
-
-    return $id
+    return Get-CoreAudioDefaultRenderDeviceId
 }
 
 function Set-AudioOutput {
@@ -306,60 +294,53 @@ function Set-AudioOutput {
     )
 
     $current = $null
-    try { $current = Get-DefaultRenderItemId } catch {}
+    try { $current = Get-DefaultRenderItemId } catch { }
 
-    if ($current -and ($current -ieq $DeviceId)) {
+    if ($current -and ($current -ieq $DeviceId) -and
+        (Test-CoreAudioDefaultRenderDevice -DeviceId $DeviceId)) {
         return
     }
 
-    & $SvclPath /SetDefault $DeviceId all | Out-Null
+    Set-CoreAudioDefaultRenderDevice -DeviceId $DeviceId
     Start-Sleep -Milliseconds 350
 
-    $actual = Get-DefaultRenderItemId
-    if ($actual -ieq $DeviceId) {
+    if (Test-CoreAudioDefaultRenderDevice -DeviceId $DeviceId) {
         Write-AutoSwitchLog "Output changed -> $Label"
         return
     }
 
     # Retry once in case Windows was recreating the endpoint.
     Start-Sleep -Milliseconds 500
-    & $SvclPath /SetDefault $DeviceId all | Out-Null
+    Set-CoreAudioDefaultRenderDevice -DeviceId $DeviceId
     Start-Sleep -Milliseconds 350
 
-    $actual = Get-DefaultRenderItemId
-    if ($actual -ieq $DeviceId) {
+    if (Test-CoreAudioDefaultRenderDevice -DeviceId $DeviceId) {
         Write-AutoSwitchLog "Output changed -> $Label (second attempt)"
         return
     }
 
-    throw "svcl could not set '$Label'. Expected=$DeviceId Actual=$actual"
+    $roles = $null
+    try { $roles = Get-CoreAudioDefaultRenderDeviceIds } catch { }
+    throw "Core Audio could not set '$Label' for all roles. Expected=$DeviceId Actual=$($roles | ConvertTo-Json -Compress)"
 }
 
 # --- Windows endpoint state (DetectionMode=WindowsEndpoint) ---
-
-function Get-SvclCsvExport {
-    # Export ALL sound items as CSV. /scomma "" lists everything.
-    $raw = & $SvclPath /scomma "" 2>&1
-    return ($raw | Out-String).Trim()
-}
 
 function Get-HeadsetEndpointState {
     <#
     .SYNOPSIS
         Returns 'Connected' / 'Disconnected' / 'Unknown' for the headset endpoint.
     .DESCRIPTION
-        - Valid export + matching Item ID row -> normalized state.
-        - Valid export + missing row (endpoint not present) -> Disconnected.
-        - Invalid/empty export (svcl failure/garbage) -> Unknown (do nothing).
+        - Successful Core Audio enumeration + matching Item ID -> normalized state.
+        - Successful enumeration + missing endpoint -> Disconnected.
+        - Core Audio failure -> Unknown (do nothing).
     #>
-    $csv = Get-SvclCsvExport
-
-    if (-not (Test-SvclExportValid -CsvText $csv)) {
-        # svcl did not return a valid export: state is unknown; do NOT assume off.
+    try {
+        $rows = @(Get-CoreAudioRenderDevices)
+    }
+    catch {
         return 'Unknown'
     }
-
-    $rows = ConvertFrom-SvclCsv -Text $csv
 
     $row = $rows |
         Where-Object {
@@ -369,8 +350,6 @@ function Get-HeadsetEndpointState {
         Select-Object -First 1
 
     if (-not $row) {
-        # Valid export but the endpoint is absent: Windows treats this as
-        # endpoint is not present -> Disconnected.
         return 'Disconnected'
     }
 
@@ -470,10 +449,9 @@ function Invoke-EnhancementsToggle {
 
 # --- Tray info: headset, fallback and the output that would be selected now ---
 
-function Get-RenderDevicesFromCsv {
-    $csv = Get-SvclCsvExport
-    if (-not (Test-SvclExportValid -CsvText $csv)) { return @() }
-    return @(Get-SvclRenderDevice -CsvText $csv)
+function Get-RenderDevices {
+    try { return @(Get-CoreAudioRenderDevices) }
+    catch { return @() }
 }
 
 function Update-TrayInfo {
@@ -524,7 +502,7 @@ function Get-HeadsetStateForId {
         Equivalent to Get-HeadsetEndpointState for an arbitrary Item ID
         (the headset currently being selected in the wizard).
     .DESCRIPTION
-        Bluetooth headsets can disappear from the svcl export while off and
+        Bluetooth headsets can disappear from the Core Audio endpoint list while off and
         come back with a DIFFERENT Item ID when reconnected. So when the row
         is not found by ItemId, fall back to matching the Device Name/Name
         (stable across reconnects). Returns Connected/Disconnected/Unknown.
@@ -536,13 +514,13 @@ function Get-HeadsetStateForId {
         [switch]$Diagnose
     )
 
-    $csv = Get-SvclCsvExport
-    if (-not (Test-SvclExportValid -CsvText $csv)) {
-        if ($Diagnose) { Write-AutoSwitchLog ("Get-HeadsetStateForId: invalid/empty svcl export for {0}" -f $ItemId) }
+    try {
+        $rows = @(Get-CoreAudioRenderDevices)
+    }
+    catch {
+        if ($Diagnose) { Write-AutoSwitchLog ("Get-HeadsetStateForId: Core Audio enumeration failed for {0}: {1}" -f $ItemId, $_.Exception.Message) }
         return 'Unknown'
     }
-
-    $rows = @(ConvertFrom-SvclCsv -Text $csv)
     $row = $rows |
         Where-Object {
             $id = Get-CsvColumn -Row $_ -Names @('Item ID')
@@ -572,7 +550,7 @@ function Get-HeadsetStateForId {
 
     if (-not $row) {
         if ($Diagnose) {
-            # What is in the export? Render devices with their states and IDs.
+            # What is currently in Core Audio? Render devices with their states and IDs.
             $lines = @()
             foreach ($r in $rows) {
                 $name  = Get-CsvColumn -Row $r -Names @('Device Name', 'Name')
@@ -582,7 +560,7 @@ function Get-HeadsetStateForId {
                 $dir   = Get-CsvColumn -Row $r -Names @('Direction')
                 $lines += "[$type/$dir] '$name' id='$id' state='$st'"
             }
-            Write-AutoSwitchLog ("Get-HeadsetStateForId: was NOT found {0} in the export. Available row(s):`n{1}" -f $ItemId, ($lines -join "`n"))
+            Write-AutoSwitchLog ("Get-HeadsetStateForId: was NOT found {0} in Core Audio. Available endpoint(s):`n{1}" -f $ItemId, ($lines -join "`n"))
         }
         return 'Disconnected'
     }
@@ -689,10 +667,10 @@ function Test-GHubProX2 {
 }
 
 function Show-ReconfigureDialog {
-    $devices = Get-RenderDevicesFromCsv
+    $devices = Get-RenderDevices
     if ($devices.Count -lt 2) {
         [System.Windows.Forms.MessageBox]::Show(
-            "Could not read the Windows output devices. Is svcl.exe present and the audio system OK?",
+            "Could not read the Windows output devices through Core Audio.",
             "Audio AutoSwitch",
             [System.Windows.Forms.MessageBoxButtons]::OK,
             [System.Windows.Forms.MessageBoxIcon]::Warning

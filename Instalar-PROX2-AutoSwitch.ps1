@@ -1,10 +1,6 @@
 ﻿#requires -Version 5.1
 $ErrorActionPreference = "Stop"
 
-# PowerShell 5.1 on old .NET can negotiate TLS 1.0/1.1 and fail against
-# GitHub/NirSoft. Force TLS 1.2.
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-
 $PackageDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $InstallDir   = Join-Path $env:LOCALAPPDATA "PROX2AutoSwitch"
 $RuntimeSrc   = Join-Path $PackageDir "Runtime-PROX2-AutoSwitch.ps1"
@@ -16,7 +12,6 @@ $IconSrc      = Join-Path $PackageDir "assets\icon.ico"
 
 $MainScript   = Join-Path $InstallDir "PROX2AutoSwitch.ps1"
 $ConfigPath   = Join-Path $InstallDir "config.json"
-$SvclPath     = Join-Path $InstallDir "svcl.exe"
 $LauncherVbs  = Join-Path $InstallDir "Iniciar-Oculto.vbs"
 $LogPath      = Join-Path $InstallDir "autoswitch.log"
 $HelperPath   = Join-Path $InstallDir "Toggle-AudioEnhancements.ps1"
@@ -24,11 +19,6 @@ $HelperPath   = Join-Path $InstallDir "Toggle-AudioEnhancements.ps1"
 $StartupDir   = [Environment]::GetFolderPath("Startup")
 $ShortcutPath = Join-Path $StartupDir "PRO X 2 AutoSwitch.lnk"
 
-$SvclUrl = "https://www.nirsoft.net/utils/svcl-x64.zip"
-# Verified on the official NirSoft hashes page on 2026-08-07.
-# If NirSoft updates svcl this hash will change: DO NOT disable the check.
-$ExpectedSha256 = "7ba008e9ece8b3eda323ef01711e4647eb7f40b28dc25f98b2ed6a738810bfcd"
-$ZipPath = Join-Path $env:TEMP "svcl-x64.zip"
 
 foreach ($required in @($RuntimeSrc, $UninstallSrc, $VerifySrc, $ModuleSrc, $HelperSrc, $IconSrc)) {
     if (-not (Test-Path $required)) {
@@ -66,39 +56,24 @@ Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
 
 Start-Sleep -Milliseconds 500
 
-# SoundVolumeCommandLine: skip the download if svcl.exe is already installed.
-if (Test-Path $SvclPath) {
-    Write-Host "[1/7] SoundVolumeCommandLine already installed. Skipping download." -ForegroundColor Green
+# Native Core Audio backend: no third-party audio executable is downloaded.
+Write-Host "[1/6] Checking native Windows Core Audio..." -ForegroundColor Yellow
+try {
+    $nativeDevices = @(Get-CoreAudioRenderDevices)
+    if ($nativeDevices.Count -eq 0) {
+        throw "Windows returned no render endpoints."
+    }
+    [void](Get-CoreAudioDefaultRenderDeviceId)
 }
-else {
-    Write-Host "[1/7] Downloading SoundVolumeCommandLine from NirSoft..." -ForegroundColor Yellow
-    Invoke-WebRequest -UseBasicParsing -Uri $SvclUrl -OutFile $ZipPath
+catch {
+    throw "Native Windows Core Audio is unavailable: $($_.Exception.Message)"
+}
+Write-Host "      Core Audio OK ($($nativeDevices.Count) render endpoint(s))." -ForegroundColor Green
 
-    $ActualSha256 = (Get-FileHash -Algorithm SHA256 -Path $ZipPath).Hash.ToLowerInvariant()
-    if ($ActualSha256 -ne $ExpectedSha256) {
-        Remove-Item $ZipPath -Force -ErrorAction SilentlyContinue
-        throw @"
-The SHA-256 of svcl-x64.zip does not match the one verified when this package was created.
-
-Expected: $ExpectedSha256
-Got:      $ActualSha256
-
-This can mean NirSoft published a new version.
-Do not continue by disabling the check. Verify the current SHA-256 at:
-https://www.nirsoft.net/hash_check/?software=svcl
-and update ExpectedSha256 in this installer.
-"@
-    }
-
-    Write-Host "      SHA-256 OK." -ForegroundColor Green
-
-    Write-Host "[2/7] Installing SoundVolumeCommandLine..." -ForegroundColor Yellow
-    Expand-Archive -Path $ZipPath -DestinationPath $InstallDir -Force
-    Remove-Item $ZipPath -Force -ErrorAction SilentlyContinue
-
-    if (-not (Test-Path $SvclPath)) {
-        throw "svcl.exe was not found after extracting the ZIP."
-    }
+# Remove a stale dependency left by installations older than the native backend.
+$legacySvclPath = Join-Path $InstallDir "svcl.exe"
+if (Test-Path $legacySvclPath) {
+    Remove-Item $legacySvclPath -Force -ErrorAction SilentlyContinue
 }
 
 # Copy the source version of the runtime and utilities.
@@ -287,23 +262,8 @@ function Invoke-GHubGet {
 }
 
 # --- Audio functions ---
-function Get-DefaultColumn {
-    param([Parameter(Mandatory=$true)][string]$Column)
-
-    # IMPORTANT: do not use /Stdout with /GetColumnValue.
-    $raw = & $SvclPath /GetColumnValue "DefaultRenderDevice" $Column 2>&1
-    return (($raw | Out-String).Trim())
-}
-
 function Get-DefaultRenderItemId {
-    $text = Get-DefaultColumn "Item ID"
-
-    $id = Get-RenderItemIdFromText -Text $text
-    if (-not $id) {
-        throw "Could not extract the Item ID of the default device. Output: $text"
-    }
-
-    return $id
+    return Get-CoreAudioDefaultRenderDeviceId
 }
 
 function Test-SetDefault {
@@ -315,23 +275,23 @@ function Test-SetDefault {
     Write-Host ""
     Write-Host "Testing real switch -> $Label" -ForegroundColor Yellow
 
-    $out = & $SvclPath /Stdout /SetDefault $Id all 2>&1
-    $text = ($out | Out-String).Trim()
-
-    if ($text -match "No items found") {
-        Write-Host $text -ForegroundColor Red
+    try {
+        Set-CoreAudioDefaultRenderDevice -DeviceId $Id
+    }
+    catch {
+        Write-Host ("      TEST FAILED. Core Audio error: {0}" -f $_.Exception.Message) -ForegroundColor Red
         return $false
     }
 
     Start-Sleep -Milliseconds 800
-    $actual = Get-DefaultRenderItemId
-
-    if ($actual -ieq $Id) {
-        Write-Host "      TEST OK" -ForegroundColor Green
+    if (Test-CoreAudioDefaultRenderDevice -DeviceId $Id) {
+        Write-Host "      TEST OK (Console/Multimedia/Communications)" -ForegroundColor Green
         return $true
     }
 
-    Write-Host "      TEST FAILED. Actual: $actual" -ForegroundColor Red
+    $actual = $null
+    try { $actual = Get-CoreAudioDefaultRenderDeviceIds } catch { }
+    Write-Host ("      TEST FAILED. Actual roles: {0}" -f ($actual | ConvertTo-Json -Compress)) -ForegroundColor Red
     return $false
 }
 
@@ -342,14 +302,14 @@ try {
     $DetectionMode = $null
     $ghubHeadset = $null
 
-    Write-Host "[3/7] Selecting headset and fallback..." -ForegroundColor Yellow
+    Write-Host "[2/6] Selecting headset and fallback..." -ForegroundColor Yellow
 
-    $csvText = (& $SvclPath /scomma "" 2>&1 | Out-String).Trim()
-    if ([string]::IsNullOrWhiteSpace($csvText)) {
-        throw "Could not read the Windows audio device list (svcl /scomma)."
+    try {
+        $renderRows = @(Get-CoreAudioRenderDevices)
     }
-
-    $renderRows = @(Get-SvclRenderDevice -CsvText $csvText)
+    catch {
+        throw "Could not read the Windows audio device list through Core Audio: $($_.Exception.Message)"
+    }
     if ($renderRows.Count -eq 0) {
         throw "No render (output) devices found in the Windows list."
     }
@@ -410,19 +370,19 @@ try {
             [string]$EndpointName
         )
 
-        $txt = (& $SvclPath /scomma "" 2>&1 | Out-String).Trim()
-        if (-not (Test-SvclExportValid -CsvText $txt)) {
+        try {
+            $rows = @(Get-CoreAudioRenderDevices)
+        }
+        catch {
             return [pscustomobject]@{ State = 'Unknown'; FoundId = $null }
         }
-
-        $rows = @(ConvertFrom-SvclCsv -Text $txt)
         $row = $rows | Where-Object {
             $id = Get-CsvColumn -Row $_ -Names @('Item ID')
             $null -ne $id -and $id.Trim() -ieq $ItemId.Trim()
         } | Select-Object -First 1
 
         # Bluetooth can recreate an endpoint with a new Item ID after reconnect.
-        # Resolve the same Render endpoint by its real svcl identity rather than
+        # Resolve the same Render endpoint by its native Core Audio identity rather than
         # treating the user-facing "Device Name — Name" label as one column.
         if (-not $row -and
             (-not [string]::IsNullOrWhiteSpace($DeviceName) -or
@@ -564,7 +524,7 @@ try {
     }
 
     Write-Host ""
-    Write-Host "[4/7] Calibrating Windows outputs..." -ForegroundColor Yellow
+    Write-Host "[3/6] Calibrating Windows outputs..." -ForegroundColor Yellow
     Write-Host "No old IDs are kept: the current Windows ones are captured." -ForegroundColor DarkGray
 
     # In both modes we already have the IDs captured from the Windows list.
@@ -578,7 +538,7 @@ try {
     }
 
     Write-Host ""
-    Write-Host "[5/7] Validating audio switches before installing..." -ForegroundColor Yellow
+    Write-Host "[4/6] Validating audio switches before installing..." -ForegroundColor Yellow
 
     $okHeadset = Test-SetDefault `
         -Id $headsetOutput.ItemId `
@@ -647,7 +607,7 @@ try {
         }
     }
 
-    Write-Host "[6/7] Setting up invisible startup..." -ForegroundColor Yellow
+    Write-Host "[5/6] Setting up invisible startup..." -ForegroundColor Yellow
 
     $PowerShellExe = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
     $WScriptExe    = Join-Path $env:SystemRoot "System32\wscript.exe"
@@ -684,7 +644,7 @@ Set shell = Nothing
         Where-Object { $_.CommandLine -match $escapedMain } |
         Select-Object -First 1
 
-    Write-Host "[7/7] Finalizing..." -ForegroundColor Yellow
+    Write-Host "[6/6] Finalizing..." -ForegroundColor Yellow
     Write-Host ""
 
     if ($running) {

@@ -14,11 +14,9 @@ Include the affected release, impact, minimal reproduction and any known mitigat
 
 `ws://localhost:9010` is an undocumented, reverse-engineered local interface. It is **not** an official Logitech API. Treat responses as untrusted input and keep bounded connection/request/close timeouts.
 
-### NirSoft SoundVolumeCommandLine
+### Windows audio COM boundary
 
-The installer downloads `svcl-x64.zip` from NirSoft and verifies its pinned SHA-256 before extracting/running it. If NirSoft publishes a new build and the hash changes, installation must fail safely until the value is independently verified from the official hashes page.
-
-**Never disable the checksum check to make installation succeed.**
+Endpoint enumeration and state reads use documented Windows Core Audio interfaces in-process. Changing the system default endpoint uses the undocumented `IPolicyConfig` COM interface, isolated inside the embedded C# bridge. Treat HRESULT failures as unknown state, verify every role after a switch, and never guess a target device.
 
 ## Local configuration
 
