@@ -1,165 +1,148 @@
 #requires -Version 5.1
-$ErrorActionPreference = "Continue"
+$ErrorActionPreference = 'Continue'
 
-$InstallDir   = Join-Path $env:LOCALAPPDATA "PROX2AutoSwitch"
-$MainScript   = Join-Path $InstallDir "PROX2AutoSwitch.ps1"
-$ConfigPath   = Join-Path $InstallDir "config.json"
-$SvclPath     = Join-Path $InstallDir "svcl.exe"
-$LogPath      = Join-Path $InstallDir "autoswitch.log"
-$ShortcutPath = Join-Path ([Environment]::GetFolderPath("Startup")) "PRO X 2 AutoSwitch.lnk"
+$InstallDir = Join-Path $env:LOCALAPPDATA 'PROX2AutoSwitch'
+$MainScript = Join-Path $InstallDir 'PROX2AutoSwitch.ps1'
+$ConfigPath = Join-Path $InstallDir 'config.json'
+$SvclPath = Join-Path $InstallDir 'svcl.exe'
+$LogPath = Join-Path $InstallDir 'autoswitch.log'
+$CoreModule = Join-Path $InstallDir 'lib\AutoSwitchCore.psm1'
+$SteelSeriesModule = Join-Path $InstallDir 'lib\SteelSeriesNova5.psm1'
+$DefaultHeadsetControlPath = Join-Path $InstallDir 'headsetcontrol.exe'
+$ShortcutPath = Join-Path ([Environment]::GetFolderPath('Startup')) 'PRO X 2 AutoSwitch.lnk'
 
-Write-Host ""
-Write-Host "=== Audio AutoSwitch verification ===" -ForegroundColor Cyan
-Write-Host ""
-
+$script:Failed = $false
 function Show-Test {
     param([string]$Label, [bool]$Ok, [string]$Detail)
-
-    if ($Ok) {
-        Write-Host "[OK]   $Label" -ForegroundColor Green
-    }
-    else {
-        Write-Host "[FAIL] $Label" -ForegroundColor Red
-    }
-
-    if ($Detail) {
-        Write-Host "       $Detail" -ForegroundColor DarkGray
-    }
+    if ($Ok) { Write-Host "[OK]   $Label" -ForegroundColor Green }
+    else { Write-Host "[FAIL] $Label" -ForegroundColor Red; $script:Failed = $true }
+    if ($Detail) { Write-Host "       $Detail" -ForegroundColor DarkGray }
 }
 
-Show-Test "Install directory" (Test-Path $InstallDir) $InstallDir
-Show-Test "Runtime" (Test-Path $MainScript) $MainScript
-Show-Test "Logic module (lib)" (Test-Path (Join-Path $InstallDir "lib\AutoSwitchCore.psm1")) (Join-Path $InstallDir "lib\AutoSwitchCore.psm1")
-Show-Test "Configuration" (Test-Path $ConfigPath) $ConfigPath
-Show-Test "svcl.exe" (Test-Path $SvclPath) $SvclPath
-Show-Test "Invisible autostart" (Test-Path $ShortcutPath) $ShortcutPath
+Write-Host ''
+Write-Host '=== Audio AutoSwitch verification ===' -ForegroundColor Cyan
+Write-Host ''
 
-# Module functions (Get-ConfigDetectionMode, ConvertFrom-SvclCsv, Get-EndpointFxState).
-$ModulePath = Join-Path $InstallDir "lib\AutoSwitchCore.psm1"
-if (Test-Path $ModulePath) {
-    Import-Module $ModulePath -ErrorAction SilentlyContinue
+Show-Test 'Install directory' (Test-Path -LiteralPath $InstallDir) $InstallDir
+Show-Test 'Runtime' (Test-Path -LiteralPath $MainScript) $MainScript
+Show-Test 'Logic module (lib)' (Test-Path -LiteralPath $CoreModule) $CoreModule
+Show-Test 'SteelSeries provider module' (Test-Path -LiteralPath $SteelSeriesModule) $SteelSeriesModule
+Show-Test 'Configuration' (Test-Path -LiteralPath $ConfigPath) $ConfigPath
+Show-Test 'svcl.exe' (Test-Path -LiteralPath $SvclPath) $SvclPath
+Show-Test 'Invisible autostart' (Test-Path -LiteralPath $ShortcutPath) $ShortcutPath
+
+if (Test-Path -LiteralPath $CoreModule) {
+    Import-Module $CoreModule -Force -ErrorAction SilentlyContinue
+}
+if (Test-Path -LiteralPath $SteelSeriesModule) {
+    Import-Module $SteelSeriesModule -Force -ErrorAction SilentlyContinue
 }
 
 $escaped = [regex]::Escape($MainScript)
 $process = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
     Where-Object { $_.CommandLine -match $escaped } |
     Select-Object -First 1
-
-$processDetail = "Not found"
-if ($process) {
-    $processDetail = "PID $($process.ProcessId)"
-}
-Show-Test "AutoSwitch process" ($null -ne $process) $processDetail
+Show-Test 'AutoSwitch process' ($null -ne $process) $(if ($process) { "PID $($process.ProcessId)" } else { 'Not found' })
 
 $cfg = $null
 $mode = $null
-if (Test-Path $ConfigPath) {
+if (Test-Path -LiteralPath $ConfigPath) {
     try {
-        $cfg = Get-Content -Raw $ConfigPath | ConvertFrom-Json
+        $cfg = Get-Content -Raw -LiteralPath $ConfigPath | ConvertFrom-Json
         $mode = Get-ConfigDetectionMode -Config $cfg
     }
-    catch {}
+    catch { }
 }
+Show-Test 'Detection mode' ($mode -in @('WindowsEndpoint', 'LogitechGHub', 'SteelSeriesNova5')) $(if ($mode) { $mode } else { 'Invalid or unreadable config' })
 
-# G HUB is a requirement only for the Logitech-specific detection path. A
-# generic WindowsEndpoint installation must not show a scary false failure.
-if ($mode -eq 'LogitechGHub') {
-    $ghubPort = $false
-    $ghubPortToTest = 9010
-    if ($cfg -and $cfg.PSObject.Properties['GHubPort'] -and $cfg.GHubPort) {
-        $ghubPortToTest = [int]$cfg.GHubPort
-    }
-
+$currentState = $null
+if ($mode -eq 'WindowsEndpoint' -and $cfg.HeadsetId -and (Test-Path -LiteralPath $SvclPath)) {
     try {
-        $client = New-Object System.Net.Sockets.TcpClient
-        $iar = $client.BeginConnect("127.0.0.1", $ghubPortToTest, $null, $null)
-        $ghubPort = $iar.AsyncWaitHandle.WaitOne(1000, $false)
-        if ($ghubPort) {
-            $client.EndConnect($iar)
-        }
-        $client.Close()
-    }
-    catch {
-        $ghubPort = $false
-    }
+        $csv = (& $SvclPath /scomma '' 2>&1 | Out-String).Trim()
+        if (Test-SvclExportValid -CsvText $csv) {
+            $rows = @(ConvertFrom-SvclCsv -Text $csv)
+            $row = $rows | Where-Object {
+                $id = Get-CsvColumn -Row $_ -Names @('Item ID')
+                $null -ne $id -and $id.Trim().ToLowerInvariant() -eq ([string]$cfg.HeadsetId).Trim().ToLowerInvariant()
+            } | Select-Object -First 1
 
-    $ghubDetail = if ($ghubPort) { "Port reachable" } else { "Open Logitech G HUB" }
-    Show-Test "G HUB localhost:$ghubPortToTest" $ghubPort $ghubDetail
-}
-elseif ($mode -eq 'WindowsEndpoint') {
-    Write-Host "[SKIP] G HUB (not used in WindowsEndpoint mode)" -ForegroundColor DarkGray
-}
-else {
-    Show-Test "Detection mode" $false "Could not read a valid DetectionMode from config.json"
-}
-
-if (Test-Path $ConfigPath) {
-    try {
-        if (-not $cfg) {
-            $cfg = Get-Content -Raw $ConfigPath | ConvertFrom-Json
-        }
-
-        Write-Host ""
-        Write-Host "Configuration:" -ForegroundColor Yellow
-
-        $mode = Get-ConfigDetectionMode -Config $cfg
-        Write-Host "  Detection mode: $mode"
-
-        if ($cfg.HeadsetName) { Write-Host "  Headset:        $($cfg.HeadsetName)" }
-        if ($cfg.SpeakerName) { Write-Host "  Fallback:       $($cfg.SpeakerName)" }
-
-        if ($mode -eq 'LogitechGHub' -and $cfg.GHubDisplayName) {
-            Write-Host "  G HUB:          $($cfg.GHubDisplayName)"
-        }
-
-        # Current state of the headset endpoint (WindowsEndpoint only).
-        if ($mode -eq 'WindowsEndpoint' -and $cfg.HeadsetId) {
-            try {
-                $csv = (& $SvclPath /scomma "" 2>&1 | Out-String).Trim()
-                $rows = @(ConvertFrom-SvclCsv -Text $csv)
-                $row = $rows | Where-Object {
-                    $id = Get-CsvColumn -Row $_ -Names @('Item ID')
-                    $null -ne $id -and $id.Trim().ToLowerInvariant() -eq [string]$cfg.HeadsetId
-                } | Select-Object -First 1
-                if ($row) {
-                    $st = Get-CsvColumn -Row $row -Names @('Device State', 'State')
-                    Write-Host "  Headset state:  $st"
-                }
-                else {
-                    Write-Host "  Headset state:  (endpoint not present)" -ForegroundColor DarkGray
-                }
-            }
-            catch {
-                Write-Host "  Headset state:  unreadable" -ForegroundColor DarkGray
-            }
-        }
-
-        # Enhancements state (non-elevated read).
-        if ($cfg.HeadsetId) {
-            $fx = Get-EndpointFxState -DeviceId ([string]$cfg.HeadsetId)
-            if ($null -eq $fx) {
-                Write-Host "  Enhancements:   unreadable" -ForegroundColor DarkGray
-            }
-            elseif ($fx) {
-                Write-Host "  Enhancements:   DISABLED" -ForegroundColor Green
+            if ($row) {
+                $rawState = Get-CsvColumn -Row $row -Names @('Device State', 'State')
+                $currentState = Resolve-EndpointState -State $rawState
             }
             else {
-                Write-Host "  Enhancements:   enabled" -ForegroundColor Yellow
+                $currentState = 'Disconnected'
             }
         }
     }
-    catch {
-        Write-Warning "config.json could not be read: $($_.Exception.Message)"
+    catch { }
+
+    Show-Test 'Windows headset state' ($currentState -in @('Connected', 'Disconnected')) $(if ($currentState) { "State: $currentState" } else { 'Unreadable' })
+}
+elseif ($mode -eq 'LogitechGHub') {
+    $port = 9010
+    if ($cfg.PSObject.Properties['GHubPort'] -and $cfg.GHubPort) { $port = [int]$cfg.GHubPort }
+    $reachable = $false
+    try {
+        $reachable = Test-NetConnection -ComputerName '127.0.0.1' -Port $port -InformationLevel Quiet -WarningAction SilentlyContinue
+    }
+    catch { $reachable = $false }
+    Show-Test "G HUB localhost:$port" ([bool]$reachable) $(if ($reachable) { 'Port reachable' } else { 'Open Logitech G HUB' })
+}
+elseif ($mode -eq 'SteelSeriesNova5') {
+    $hcPath = $DefaultHeadsetControlPath
+    if ($cfg.PSObject.Properties['HeadsetControlPath'] -and
+        -not [string]::IsNullOrWhiteSpace([string]$cfg.HeadsetControlPath)) {
+        $hcPath = [string]$cfg.HeadsetControlPath
+    }
+    Show-Test 'HeadsetControl provider' (Test-Path -LiteralPath $hcPath) $hcPath
+
+    $pid = 0
+    $pidOk = $false
+    if ($cfg.PSObject.Properties['SteelSeriesProductId']) {
+        try {
+            $pid = [int]$cfg.SteelSeriesProductId
+            $pidOk = $pid -in @(0x2232, 0x2253)
+        }
+        catch { }
+    }
+    Show-Test 'SteelSeries Nova 5/5X PID' $pidOk $(if ($pidOk) { '0x{0:X4}' -f $pid } else { 'Missing or unsupported PID' })
+
+    if ((Test-Path -LiteralPath $hcPath) -and $pidOk -and
+        (Get-Command Get-SteelSeriesNova5State -ErrorAction SilentlyContinue)) {
+        try {
+            $currentState = Get-SteelSeriesNova5State -HeadsetControlPath $hcPath -ProductId $pid
+        }
+        catch { $currentState = 'Unknown' }
+        Show-Test 'SteelSeries physical state' ($currentState -in @('Connected', 'Disconnected')) "State: $currentState"
     }
 }
 
-Write-Host ""
-Write-Host "Last log lines:" -ForegroundColor Yellow
-if (Test-Path $LogPath) {
-    Get-Content $LogPath -Tail 15
-}
-else {
-    Write-Host "(log does not exist yet)" -ForegroundColor DarkGray
+if ($cfg) {
+    Write-Host ''
+    Write-Host 'Configuration:' -ForegroundColor Yellow
+    Write-Host "  Detection mode: $mode"
+    if ($cfg.HeadsetName) { Write-Host "  Headset:        $($cfg.HeadsetName)" }
+    if ($cfg.SpeakerName) { Write-Host "  Fallback:       $($cfg.SpeakerName)" }
+    if ($mode -eq 'LogitechGHub' -and $cfg.GHubDisplayName) { Write-Host "  G HUB:          $($cfg.GHubDisplayName)" }
+    if ($mode -eq 'SteelSeriesNova5' -and $cfg.PSObject.Properties['SteelSeriesProductId']) {
+        Write-Host ('  SteelSeries PID: 0x{0:X4}' -f ([int]$cfg.SteelSeriesProductId))
+    }
+    if ($currentState) { Write-Host "  Headset state:  $currentState" }
+
+    if ($cfg.HeadsetId -and (Get-Command Get-EndpointFxState -ErrorAction SilentlyContinue)) {
+        $fx = Get-EndpointFxState -DeviceId ([string]$cfg.HeadsetId)
+        if ($null -eq $fx) { Write-Host '  Enhancements:   unreadable' -ForegroundColor DarkGray }
+        elseif ($fx) { Write-Host '  Enhancements:   DISABLED' -ForegroundColor Green }
+        else { Write-Host '  Enhancements:   enabled' -ForegroundColor Yellow }
+    }
 }
 
-Write-Host ""
+Write-Host ''
+Write-Host 'Last log lines:' -ForegroundColor Yellow
+if (Test-Path -LiteralPath $LogPath) { Get-Content -LiteralPath $LogPath -Tail 15 }
+else { Write-Host '(log does not exist yet)' -ForegroundColor DarkGray }
+Write-Host ''
+
+if ($script:Failed) { exit 1 }
+exit 0

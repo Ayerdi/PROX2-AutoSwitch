@@ -11,12 +11,14 @@ $RuntimeSrc   = Join-Path $PackageDir "Runtime-PROX2-AutoSwitch.ps1"
 $UninstallSrc = Join-Path $PackageDir "Desinstalar-PROX2-AutoSwitch.ps1"
 $VerifySrc    = Join-Path $PackageDir "Verificar-PROX2-AutoSwitch.ps1"
 $ModuleSrc    = Join-Path $PackageDir "lib\AutoSwitchCore.psm1"
+$SteelSeriesModuleSrc = Join-Path $PackageDir "lib\SteelSeriesNova5.psm1"
 $HelperSrc    = Join-Path $PackageDir "Toggle-AudioEnhancements.ps1"
 $IconSrc      = Join-Path $PackageDir "assets\icon.ico"
 
 $MainScript   = Join-Path $InstallDir "PROX2AutoSwitch.ps1"
 $ConfigPath   = Join-Path $InstallDir "config.json"
 $SvclPath     = Join-Path $InstallDir "svcl.exe"
+$HeadsetControlPath = Join-Path $InstallDir "headsetcontrol.exe"
 $LauncherVbs  = Join-Path $InstallDir "Iniciar-Oculto.vbs"
 $LogPath      = Join-Path $InstallDir "autoswitch.log"
 $HelperPath   = Join-Path $InstallDir "Toggle-AudioEnhancements.ps1"
@@ -30,7 +32,7 @@ $SvclUrl = "https://www.nirsoft.net/utils/svcl-x64.zip"
 $ExpectedSha256 = "7ba008e9ece8b3eda323ef01711e4647eb7f40b28dc25f98b2ed6a738810bfcd"
 $ZipPath = Join-Path $env:TEMP "svcl-x64.zip"
 
-foreach ($required in @($RuntimeSrc, $UninstallSrc, $VerifySrc, $ModuleSrc, $HelperSrc, $IconSrc)) {
+foreach ($required in @($RuntimeSrc, $UninstallSrc, $VerifySrc, $ModuleSrc, $SteelSeriesModuleSrc, $HelperSrc, $IconSrc)) {
     if (-not (Test-Path $required)) {
         throw "A package file is missing: $required. Extract the full ZIP before installing."
     }
@@ -38,6 +40,9 @@ foreach ($required in @($RuntimeSrc, $UninstallSrc, $VerifySrc, $ModuleSrc, $Hel
 
 # Shared logic (Item ID extraction, config validation, debounce).
 Import-Module $ModuleSrc -ErrorAction Stop
+# SteelSeries provider is imported last because it extends Get-ConfigDetectionMode
+# with the SteelSeriesNova5 mode while preserving the legacy migration behavior.
+Import-Module $SteelSeriesModuleSrc -ErrorAction Stop
 
 if (-not [Environment]::Is64BitOperatingSystem) {
     throw "This package is built for Windows x64."
@@ -109,6 +114,7 @@ Copy-Item $HelperSrc (Join-Path $InstallDir "Toggle-AudioEnhancements.ps1") -For
 Copy-Item $IconSrc (Join-Path $InstallDir "icon.ico") -Force
 New-Item -ItemType Directory -Path (Join-Path $InstallDir "lib") -Force | Out-Null
 Copy-Item $ModuleSrc (Join-Path $InstallDir "lib\AutoSwitchCore.psm1") -Force
+Copy-Item $SteelSeriesModuleSrc (Join-Path $InstallDir "lib\SteelSeriesNova5.psm1") -Force
 
 # --- G HUB functions for the installer ---
 $script:Ws  = $null
@@ -338,9 +344,11 @@ function Test-SetDefault {
 try {
     # --- Step 3: pick headset and fallback FIRST ---
     # DetectionMode is not decided until the device has been chosen and we
-    # have validated that Windows (or G HUB) can observe its physical state.
+    # have validated that Windows (or a device-specific provider) can observe
+    # its physical state.
     $DetectionMode = $null
     $ghubHeadset = $null
+    $steelSeriesProductId = $null
 
     Write-Host "[3/7] Selecting headset and fallback..." -ForegroundColor Yellow
 
@@ -397,8 +405,6 @@ try {
     Write-Host "      Fallback: $speakerName" -ForegroundColor Green
 
     # --- Validate the headset ON -> OFF -> ON cycle ---
-    # The headset must be ON now. We ask for OFF and then ON, and check that
-    # Windows reflects the change on each transition.
     Write-Host ""
     Write-Host "Checking that Windows reflects the physical state of the headset..." -ForegroundColor Cyan
     Write-Host "      The headset must be ON now. Checking..." -ForegroundColor DarkGray
@@ -421,9 +427,6 @@ try {
             $null -ne $id -and $id.Trim() -ieq $ItemId.Trim()
         } | Select-Object -First 1
 
-        # Bluetooth can recreate an endpoint with a new Item ID after reconnect.
-        # Resolve the same Render endpoint by its real svcl identity rather than
-        # treating the user-facing "Device Name — Name" label as one column.
         if (-not $row -and
             (-not [string]::IsNullOrWhiteSpace($DeviceName) -or
              -not [string]::IsNullOrWhiteSpace($EndpointName))) {
@@ -514,60 +517,94 @@ try {
     else {
         Write-Host "      Windows does NOT reflect the physical cycle of this headset." -ForegroundColor DarkGray
 
-        # G HUB fallback: ONLY if the user confirms that the chosen headset is
-        # a Logitech PRO X 2 listed by G HUB. Never associate $logi[0].
         Write-Host ""
-        $conf = Read-Host "Is this headset a Logitech PRO X 2 detected by G HUB? (y/N)"
-        if ($conf -match '^(s|si|sí|y|yes)$') {
+        $steelConf = Read-Host "Is this a SteelSeries Arctis Nova 5 or Nova 5X? (y/N)"
+        if ($steelConf -match '^(s|si|sí|y|yes)$') {
             try {
-                Connect-GHub
-                $devices = Invoke-GHubGet -Path "/devices/list"
-                $deviceInfos = @($devices.payload.deviceInfos)
+                Write-Host "      Preparing the SteelSeries HID provider (HeadsetControl 4.0.0)..." -ForegroundColor Yellow
+                [void](Install-HeadsetControlPortable -DestinationPath $HeadsetControlPath)
+                $steelSeriesProductId = Get-SteelSeriesNova5ConnectedProductId -HeadsetControlPath $HeadsetControlPath
 
-                Write-Host ""
-                # Filter to ONLY PRO X 2 candidates: prevents accidentally
-                # picking a Logitech mouse/keyboard and watching its battery.
-                $ghubCandidates = @($deviceInfos | Where-Object {
-                    $_.extendedDisplayName -match 'PRO\s*X\s*2'
-                })
+                if ($steelSeriesProductId) {
+                    Write-Host ("      Receiver detected: SteelSeries PID 0x{0:X4}." -f $steelSeriesProductId) -ForegroundColor Green
+                    Write-Host "Turn the headset OFF and press ENTER..." -ForegroundColor Cyan
+                    [void](Read-Host)
+                    $steelOff = Wait-SteelSeriesNova5State -Expected 'Disconnected' -HeadsetControlPath $HeadsetControlPath -ProductId $steelSeriesProductId -TimeoutSeconds 15
 
-                if ($ghubCandidates.Count -eq 0) {
-                    Write-Host "      G HUB reports no PRO X 2." -ForegroundColor Red
+                    Write-Host "Turn the headset back ON and press ENTER..." -ForegroundColor Cyan
+                    [void](Read-Host)
+                    $steelOn = Wait-SteelSeriesNova5State -Expected 'Connected' -HeadsetControlPath $HeadsetControlPath -ProductId $steelSeriesProductId -TimeoutSeconds 20
+
+                    Write-Host ("      SteelSeries state OFF: {0}" -f $steelOff) -ForegroundColor DarkGray
+                    Write-Host ("      SteelSeries state ON:  {0}" -f $steelOn) -ForegroundColor DarkGray
+
+                    if ($steelOff -eq 'Disconnected' -and $steelOn -eq 'Connected') {
+                        $DetectionMode = 'SteelSeriesNova5'
+                        Write-Host "      SteelSeries receiver reflects the physical state through HID." -ForegroundColor Green
+                    }
                 }
                 else {
-                    Write-Host "PRO X 2 headsets detected by G HUB:" -ForegroundColor Yellow
-                    for ($i = 0; $i -lt $ghubCandidates.Count; $i++) {
-                        Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $ghubCandidates[$i].extendedDisplayName, $ghubCandidates[$i].id)
-                    }
-
-                    $ghubChoice = 0
-                    do {
-                        $gc = Read-Host "Enter the number of the PRO X 2 that matches '$headsetName'"
-                        $ghubValid = [int]::TryParse($gc, [ref]$ghubChoice) -and
-                                     $ghubChoice -ge 1 -and
-                                     $ghubChoice -le $ghubCandidates.Count
-                    } until ($ghubValid)
-
-                    $ghubHeadset = $ghubCandidates[$ghubChoice - 1]
-                    $DetectionMode = "LogitechGHub"
-                    Write-Host "      G HUB: $($ghubHeadset.extendedDisplayName)" -ForegroundColor Green
+                    Write-Host "      No unique connected Nova 5/5X receiver was found." -ForegroundColor Red
                 }
             }
             catch {
-                Write-Host "      Could not connect to G HUB. Detail: $($_.Exception.Message)" -ForegroundColor Red
+                Write-Host "      SteelSeries provider check failed: $($_.Exception.Message)" -ForegroundColor Red
+            }
+        }
+
+        # G HUB fallback: ONLY if SteelSeries was not validated and the user
+        # confirms that the chosen headset is a Logitech PRO X 2 listed by G HUB.
+        if (-not $DetectionMode) {
+            Write-Host ""
+            $conf = Read-Host "Is this headset a Logitech PRO X 2 detected by G HUB? (y/N)"
+            if ($conf -match '^(s|si|sí|y|yes)$') {
+                try {
+                    Connect-GHub
+                    $devices = Invoke-GHubGet -Path "/devices/list"
+                    $deviceInfos = @($devices.payload.deviceInfos)
+
+                    Write-Host ""
+                    $ghubCandidates = @($deviceInfos | Where-Object {
+                        $_.extendedDisplayName -match 'PRO\s*X\s*2'
+                    })
+
+                    if ($ghubCandidates.Count -eq 0) {
+                        Write-Host "      G HUB reports no PRO X 2." -ForegroundColor Red
+                    }
+                    else {
+                        Write-Host "PRO X 2 headsets detected by G HUB:" -ForegroundColor Yellow
+                        for ($i = 0; $i -lt $ghubCandidates.Count; $i++) {
+                            Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $ghubCandidates[$i].extendedDisplayName, $ghubCandidates[$i].id)
+                        }
+
+                        $ghubChoice = 0
+                        do {
+                            $gc = Read-Host "Enter the number of the PRO X 2 that matches '$headsetName'"
+                            $ghubValid = [int]::TryParse($gc, [ref]$ghubChoice) -and
+                                         $ghubChoice -ge 1 -and
+                                         $ghubChoice -le $ghubCandidates.Count
+                        } until ($ghubValid)
+
+                        $ghubHeadset = $ghubCandidates[$ghubChoice - 1]
+                        $DetectionMode = "LogitechGHub"
+                        Write-Host "      G HUB: $($ghubHeadset.extendedDisplayName)" -ForegroundColor Green
+                    }
+                }
+                catch {
+                    Write-Host "      Could not connect to G HUB. Detail: $($_.Exception.Message)" -ForegroundColor Red
+                }
             }
         }
     }
 
     if (-not $DetectionMode) {
-        throw "Windows cannot detect the physical state of this headset and there is no compatible method (nor a confirmed G HUB). Not installing."
+        throw "No compatible physical-state provider was validated for this headset. Not installing."
     }
 
     Write-Host ""
     Write-Host "[4/7] Calibrating Windows outputs..." -ForegroundColor Yellow
     Write-Host "No old IDs are kept: the current Windows ones are captured." -ForegroundColor DarkGray
 
-    # In both modes we already have the IDs captured from the Windows list.
     $headsetOutput = [pscustomobject]@{
         Name   = $headsetName
         ItemId = $headsetId
@@ -580,20 +617,15 @@ try {
     Write-Host ""
     Write-Host "[5/7] Validating audio switches before installing..." -ForegroundColor Yellow
 
-    $okHeadset = Test-SetDefault `
-        -Id $headsetOutput.ItemId `
-        -Label $headsetOutput.Name
-
-    $okSpeaker = Test-SetDefault `
-        -Id $speakerOutput.ItemId `
-        -Label $speakerOutput.Name
+    $okHeadset = Test-SetDefault -Id $headsetOutput.ItemId -Label $headsetOutput.Name
+    $okSpeaker = Test-SetDefault -Id $speakerOutput.ItemId -Label $speakerOutput.Name
 
     if (-not ($okHeadset -and $okSpeaker)) {
         throw "One of the real audio switch tests failed. AutoSwitch will not be installed."
     }
 
     $config = [ordered]@{
-        Version                = "1.2.0"
+        Version                = "1.3.0"
         DetectionMode          = $DetectionMode
         HeadsetName            = [string]$headsetOutput.Name
         HeadsetId              = [string]$headsetOutput.ItemId
@@ -608,14 +640,16 @@ try {
         InstalledAt            = (Get-Date).ToString("o")
     }
 
-    # G HUB mode specific fields.
     if ($DetectionMode -eq 'LogitechGHub' -and $ghubHeadset) {
         $config['GHubDisplayName'] = [string]$ghubHeadset.extendedDisplayName
         $config['GHubPort']        = 9010
     }
 
-    # Ask whether to disable the headset's audio enhancements now (requires a
-    # one-off elevation via UAC).
+    if ($DetectionMode -eq 'SteelSeriesNova5' -and $steelSeriesProductId) {
+        $config['SteelSeriesProductId'] = [int]$steelSeriesProductId
+        $config['HeadsetControlPath'] = [string]$HeadsetControlPath
+    }
+
     Write-Host ""
     Write-Host "Windows Audio Enhancements:" -ForegroundColor Yellow
     $enhChoice = Read-Host "Do you want to disable the headset's audio enhancements? (y/N)"
@@ -625,8 +659,7 @@ try {
         Write-Host "      They will be disabled (a UAC window may appear)..." -ForegroundColor DarkGray
     }
 
-    $config | ConvertTo-Json -Depth 10 |
-        Set-Content -Path $ConfigPath -Encoding UTF8
+    $config | ConvertTo-Json -Depth 10 | Set-Content -Path $ConfigPath -Encoding UTF8
 
     if ($config['DisableEnhancementsOnStart']) {
         try {
@@ -665,8 +698,6 @@ Set shell = Nothing
 
     Set-Content -Path $LauncherVbs -Value $vbs -Encoding ASCII
 
-    # The shortcut launches wscript.exe, not PowerShell directly, so no
-    # console window remains visible at login.
     $WshShell = New-Object -ComObject WScript.Shell
     $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
     $Shortcut.TargetPath = $WScriptExe
@@ -676,7 +707,6 @@ Set shell = Nothing
     $Shortcut.Description = "PRO X 2 AutoSwitch - invisible startup"
     $Shortcut.Save()
 
-    # Start now, hidden.
     Start-Process -FilePath $WScriptExe -ArgumentList "`"$LauncherVbs`"" -WindowStyle Hidden
     Start-Sleep -Seconds 2
 
@@ -699,6 +729,7 @@ Set shell = Nothing
     Write-Host ""
     Write-Host "Headset ON  -> $($headsetOutput.Name)"
     Write-Host "Headset OFF -> $($speakerOutput.Name)"
+    Write-Host "Detection   -> $DetectionMode"
     Write-Host ""
     Write-Host "Installed at: $InstallDir" -ForegroundColor DarkGray
     Write-Host "Log:          $LogPath" -ForegroundColor DarkGray
