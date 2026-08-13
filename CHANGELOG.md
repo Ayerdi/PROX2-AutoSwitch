@@ -5,6 +5,12 @@ All notable changes to this project are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+### Changed
+
+- Replaced the downloaded SoundVolumeCommandLine dependency with an in-process Windows Core Audio COM backend for endpoint enumeration, state reads, default-device reads and output switching.
+- Default-output changes are now verified across Console, Multimedia and Communications roles before being accepted.
+- Clean installs remove a stale legacy `svcl.exe` when present and no longer require a third-party audio-control download.
+
 
 ## [1.2.5] - 2026-08-13
 

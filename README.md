@@ -89,7 +89,7 @@ GET /battery/<deviceId>/state
 payload present → ON
 payload absent  → OFF
   ↓
-SoundVolumeCommandLine /SetDefault <Item ID> all
+Windows Core Audio / IPolicyConfig → all default roles
 ```
 
 The G HUB interface is unofficial and may change in a future G HUB release. See [`SOURCES.md`](SOURCES.md) and [`AGENT.md`](AGENT.md) for the verified design notes.
@@ -101,13 +101,12 @@ Two rules are deliberate:
 1. An **unknown** state never changes the Windows output.
 2. Disconnection needs **two consecutive OFF observations** before switching to the fallback.
 
-A transient `svcl.exe` or G HUB failure therefore cannot send audio to the wrong device on a single bad read.
+A transient Core Audio or G HUB failure therefore cannot send audio to the wrong device on a single bad read.
 
 ## Requirements
 
 - Windows 10/11 x64.
 - PowerShell 5.1 or newer.
-- Internet access during installation so `svcl.exe` can be downloaded and hash-verified.
 - No vendor software for compatible `WindowsEndpoint` headsets.
 - Logitech G HUB installed and running for `LogitechGHub` mode.
 
@@ -117,7 +116,7 @@ Normal runtime operation does not require administrator rights. Toggling global 
 
 The installer:
 
-- downloads SoundVolumeCommandLine from NirSoft only when needed and verifies its SHA-256 before execution;
+- uses the Windows Core Audio APIs in-process, so no third-party audio-control executable is downloaded;
 - lists current Windows render devices and lets you choose the headset and fallback;
 - validates the real `ON → OFF → ON` cycle with bounded polling windows of 15 s / 15 s / 20 s;
 - handles a Bluetooth endpoint that returns with a new `Item ID`;
@@ -182,25 +181,13 @@ The main log is:
 %LOCALAPPDATA%\PROX2AutoSwitch\autoswitch.log
 ```
 
-## Important `svcl.exe` regression guard
+## Native Windows audio backend
 
-`svcl.exe /GetColumnValue` already writes the requested value to stdout. Do **not** combine it with `/Stdout`:
-
-```powershell
-svcl.exe /Stdout /GetColumnValue ...   # wrong
-```
-
-The supported form is:
-
-```powershell
-svcl.exe /GetColumnValue "DefaultRenderDevice" "Item ID"
-```
-
-An earlier implementation mixed metadata into the output and corrupted the Item ID passed to `/SetDefault`. Tests keep this regression covered.
+Endpoint enumeration, state reads and default-device verification now use Windows Core Audio directly in-process. The project keeps its existing PowerShell structure and embedded C# COM bridge; no separate audio-control executable is downloaded. Setting the default endpoint uses the same `IPolicyConfig` COM interop family already used by the project for Audio Enhancements, and every switch is verified across Console, Multimedia and Communications roles with one bounded retry.
 
 ## Security
 
-- The installer verifies the SHA-256 of the NirSoft download before running it.
+- Audio endpoint enumeration and switching run in-process; installation no longer downloads a third-party audio-control binary.
 - Release ZIPs publish SHA-256 checksums and are built reproducibly.
 - The G HUB WebSocket is local but unofficial; treat compatibility changes after G HUB updates as expected maintenance risk.
 - Normal runtime is non-elevated; only the Audio Enhancements helper requests UAC.
