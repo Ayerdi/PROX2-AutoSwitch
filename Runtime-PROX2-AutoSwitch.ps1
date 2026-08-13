@@ -450,7 +450,16 @@ function Invoke-EnhancementsToggle {
 # --- Tray info: headset, fallback and the output that would be selected now ---
 
 function Get-RenderDevices {
-    try { return @(Get-CoreAudioRenderDevices) }
+    # Solo endpoints Active (utilizables ahora). Si no hay ninguno, todos
+    # (el llamador puede mostrar el aviso).
+    try {
+        $all = @(Get-CoreAudioRenderDevices)
+        $active = @($all | Where-Object {
+            (Get-CsvColumn -Row $_ -Names @('Device State')) -ieq 'Active'
+        })
+        if ($active.Count -gt 0) { return $active }
+        return $all
+    }
     catch { return @() }
 }
 
