@@ -1239,7 +1239,7 @@ function Initialize-TrayAndTimer {
     $script:MenuItemEnhancements.Add_Click({ Invoke-EnhancementsToggle })
     [void]$menu.Items.Add($script:MenuItemEnhancements)
 
-    # Reconfiguration submenu (choose headset/fallback without reinstalling).
+    # Tray: change headset/fallback without reinstalling.
     $reconfigureItem = New-Object System.Windows.Forms.ToolStripMenuItem
     $reconfigureItem.Text = "Reconfigure..."
     $reconfigureItem.Add_Click({ Invoke-Reconfigure })
