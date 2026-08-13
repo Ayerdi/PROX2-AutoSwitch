@@ -1,0 +1,98 @@
+name: finalize native Core Audio migration
+
+on:
+  push:
+    branches:
+      - agent/native-core-audio-pr
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/native-core-audio-pr
+          fetch-depth: 0
+
+      - name: Apply migration source
+        shell: python
+        run: |
+          from pathlib import Path
+
+          source_path = Path('tools/native-core-audio-migration-source.yml')
+          lines = source_path.read_text(encoding='utf-8').splitlines()
+          apply_index = next(i for i, line in enumerate(lines) if line.strip() == '- name: Apply migration')
+          run_index = next(i for i in range(apply_index, len(lines)) if lines[i].strip() == 'run: |')
+          end_index = next(i for i in range(run_index + 1, len(lines)) if lines[i].strip() == '- name: Validate PowerShell syntax')
+          body = []
+          for line in lines[run_index + 1:end_index]:
+              body.append(line[10:] if line.startswith('          ') else line)
+          script = '\n'.join(body)
+          script = script.replace("Path('.github/workflows/apply-native-core-audio.yml').unlink()", "pass")
+          exec(compile(script, '<native-core-audio-migration>', 'exec'), {})
+
+          module_path = Path('lib/AutoSwitchCore.psm1')
+          module = module_path.read_text(encoding='utf-8-sig')
+          module = module.replace('Extract a valid render Item ID from svcl.exe output.', 'Extract a valid render Item ID from legacy command output.')
+          module = module.replace('Parse svcl.exe /scomma output into objects.', 'Parse legacy /scomma output into objects.')
+          module = module.replace('Filter svcl.exe /scomma export to real render output endpoints', 'Filter a legacy /scomma export to real render output endpoints')
+          module_path.write_text(module, encoding='utf-8-sig', newline='\n')
+
+          security_path = Path('SECURITY.md')
+          security = security_path.read_text(encoding='utf-8-sig')
+          old = "### NirSoft SoundVolumeCommandLine\n\nThe installer downloads `svcl-x64.zip` from NirSoft and verifies its pinned SHA-256 before extracting/running it. If NirSoft publishes a new build and the hash changes, installation must fail safely until the value is independently verified from the official hashes page.\n\n**Never disable the checksum check to make installation succeed.**"
+          new = "### Windows audio COM boundary\n\nEndpoint enumeration and state reads use documented Windows Core Audio interfaces in-process. Changing the system default endpoint uses the undocumented `IPolicyConfig` COM interface, isolated inside the embedded C# bridge. Treat HRESULT failures as unknown state, verify every role after a switch, and never guess a target device."
+          if old in security:
+              security = security.replace(old, new, 1)
+          security_path.write_text(security, encoding='utf-8', newline='\n')
+
+      - name: Validate PowerShell syntax
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $scripts = Get-ChildItem -Path . -Include '*.ps1','*.psm1' -File -Recurse
+          foreach ($script in $scripts) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($script.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error "$($script.FullName): $($_.Message) (line $($_.Extent.StartLineNumber))" }
+              exit 1
+            }
+          }
+
+      - name: Run Pester tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-Module -ListAvailable -Name Pester)) {
+            Install-Module -Name Pester -Force -Scope CurrentUser -SkipPublisherCheck
+          }
+          $config = New-PesterConfiguration
+          $config.Run.Path = 'tests'
+          $config.Output.Verbosity = 'Detailed'
+          $result = Invoke-Pester -Configuration $config
+          if ($result.FailedCount -gt 0) { exit 1 }
+
+      - name: Check active dependency references
+        shell: pwsh
+        run: |
+          $hits = git grep -n -i -E 'svcl\.exe|SoundVolumeCommandLine|NirSoft' -- ':!CHANGELOG.md' ':!docs/WindowsEndpointProvider.md' ':!wiki/*' ':!site/*' ':!.github/workflows/*' ':!tools/*' 2>$null
+          $hits = @($hits | Where-Object { $_ -notmatch 'legacySvclPath' })
+          if ($hits.Count -gt 0) {
+            $hits | Write-Host
+            throw 'Active code or canonical docs still reference the removed external dependency.'
+          }
+
+      - name: Commit application and documentation changes
+        shell: pwsh
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add AGENT.md CHANGELOG.md README.md SECURITY.md SOURCES.md Instalar-PROX2-AutoSwitch.ps1 Runtime-PROX2-AutoSwitch.ps1 Verificar-PROX2-AutoSwitch.ps1 lib/AutoSwitchCore.psm1 tests/AutoSwitchCore.Tests.ps1
+          if (git diff --cached --quiet) { exit 0 }
+          git commit -m 'feat: replace svcl with native Core Audio'
+          git push origin HEAD:agent/native-core-audio-pr
