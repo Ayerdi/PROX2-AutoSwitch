@@ -4,7 +4,16 @@ All notable changes to this project are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.3.0] - 2026-08-13
+
+### Changed
+- Replaced the downloaded SoundVolumeCommandLine (`svcl.exe`) dependency with an in-process Windows Core Audio COM backend for endpoint enumeration, state reads, default-device reads and output switching. No third-party audio-control download is needed anymore.
+- Default-output changes are now verified across Console, Multimedia and Communications roles before being accepted.
+- Clean installs remove a stale legacy `svcl.exe` when present and no longer require a third-party audio-control download.
+
+### Added
+- Device pickers (installer and Reconfigure wizard) now list only endpoints whose `Device State` is `Active`, so you cannot pick a `NotPresent`/`Disabled` device by mistake; if no endpoint is `Active`, all are shown with a notice.
+- Installer shortcut after picking headset/fallback: choose to validate the `ON → OFF → ON` cycle (auto-detects the detection mode) or use the selected endpoints as-is assuming `WindowsEndpoint` (skips the power on/off dance).
 
 ## [1.2.5] - 2026-08-13
 

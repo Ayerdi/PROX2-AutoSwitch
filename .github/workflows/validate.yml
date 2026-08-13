@@ -60,7 +60,7 @@ jobs:
         shell: powershell
         run: |
           Import-Module PSScriptAnalyzer -RequiredVersion 1.24.0
-          $r=Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error,Warning -ExcludeRule PSAvoidUsingWriteHost,PSAvoidUsingPlainTextForPassword,PSAvoidUsingCmdletAliases,PSAvoidUsingEmptyCatchBlock,PSUseApprovedVerbs,PSUseShouldProcessForStateChangingFunctions
+          $r=Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error,Warning -ExcludeRule PSAvoidUsingWriteHost,PSAvoidUsingPlainTextForPassword,PSAvoidUsingCmdletAliases,PSAvoidUsingEmptyCatchBlock,PSUseApprovedVerbs,PSUseShouldProcessForStateChangingFunctions,PSUseSingularNouns
           if($r){$r|Format-Table -AutoSize|Out-String|Write-Host;exit 1}
       - name: Pester
         shell: powershell

@@ -33,7 +33,7 @@ SPANISH_PATTERNS = [
         r"peticion|esperando|cerro|limite global|eventos asincronos|devuelve|"
         r"detectado|segundo intento|consiguio|estado del endpoint|exporta|fila|"
         r"ausente|desconocido|preseleccionar|cambio fisico|ultimo estado|"
-        r"encontrado por|nuevo item|reintentar|submen[uú]"
+        r"encontrado por|nuevo item|reintentar|submenú"
         r")\b",
         re.IGNORECASE,
     ),

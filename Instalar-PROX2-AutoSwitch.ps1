@@ -1,10 +1,6 @@
 ﻿#requires -Version 5.1
 $ErrorActionPreference = "Stop"
 
-# PowerShell 5.1 on old .NET can negotiate TLS 1.0/1.1 and fail against
-# GitHub/NirSoft. Force TLS 1.2.
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-
 $PackageDir   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $InstallDir   = Join-Path $env:LOCALAPPDATA "PROX2AutoSwitch"
 $RuntimeSrc   = Join-Path $PackageDir "Runtime-PROX2-AutoSwitch.ps1"
@@ -16,7 +12,6 @@ $IconSrc      = Join-Path $PackageDir "assets\icon.ico"
 
 $MainScript   = Join-Path $InstallDir "PROX2AutoSwitch.ps1"
 $ConfigPath   = Join-Path $InstallDir "config.json"
-$SvclPath     = Join-Path $InstallDir "svcl.exe"
 $LauncherVbs  = Join-Path $InstallDir "Iniciar-Oculto.vbs"
 $LogPath      = Join-Path $InstallDir "autoswitch.log"
 $HelperPath   = Join-Path $InstallDir "Toggle-AudioEnhancements.ps1"
@@ -24,11 +19,6 @@ $HelperPath   = Join-Path $InstallDir "Toggle-AudioEnhancements.ps1"
 $StartupDir   = [Environment]::GetFolderPath("Startup")
 $ShortcutPath = Join-Path $StartupDir "PRO X 2 AutoSwitch.lnk"
 
-$SvclUrl = "https://www.nirsoft.net/utils/svcl-x64.zip"
-# Verified on the official NirSoft hashes page on 2026-08-07.
-# If NirSoft updates svcl this hash will change: DO NOT disable the check.
-$ExpectedSha256 = "7ba008e9ece8b3eda323ef01711e4647eb7f40b28dc25f98b2ed6a738810bfcd"
-$ZipPath = Join-Path $env:TEMP "svcl-x64.zip"
 
 foreach ($required in @($RuntimeSrc, $UninstallSrc, $VerifySrc, $ModuleSrc, $HelperSrc, $IconSrc)) {
     if (-not (Test-Path $required)) {
@@ -66,39 +56,24 @@ Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
 
 Start-Sleep -Milliseconds 500
 
-# SoundVolumeCommandLine: skip the download if svcl.exe is already installed.
-if (Test-Path $SvclPath) {
-    Write-Host "[1/7] SoundVolumeCommandLine already installed. Skipping download." -ForegroundColor Green
+# Native Core Audio backend: no third-party audio executable is downloaded.
+Write-Host "[1/6] Checking native Windows Core Audio..." -ForegroundColor Yellow
+try {
+    $nativeDevices = @(Get-CoreAudioRenderDevices)
+    if ($nativeDevices.Count -eq 0) {
+        throw "Windows returned no render endpoints."
+    }
+    [void](Get-CoreAudioDefaultRenderDeviceId)
 }
-else {
-    Write-Host "[1/7] Downloading SoundVolumeCommandLine from NirSoft..." -ForegroundColor Yellow
-    Invoke-WebRequest -UseBasicParsing -Uri $SvclUrl -OutFile $ZipPath
+catch {
+    throw "Native Windows Core Audio is unavailable: $($_.Exception.Message)"
+}
+Write-Host "      Core Audio OK ($($nativeDevices.Count) render endpoint(s))." -ForegroundColor Green
 
-    $ActualSha256 = (Get-FileHash -Algorithm SHA256 -Path $ZipPath).Hash.ToLowerInvariant()
-    if ($ActualSha256 -ne $ExpectedSha256) {
-        Remove-Item $ZipPath -Force -ErrorAction SilentlyContinue
-        throw @"
-The SHA-256 of svcl-x64.zip does not match the one verified when this package was created.
-
-Expected: $ExpectedSha256
-Got:      $ActualSha256
-
-This can mean NirSoft published a new version.
-Do not continue by disabling the check. Verify the current SHA-256 at:
-https://www.nirsoft.net/hash_check/?software=svcl
-and update ExpectedSha256 in this installer.
-"@
-    }
-
-    Write-Host "      SHA-256 OK." -ForegroundColor Green
-
-    Write-Host "[2/7] Installing SoundVolumeCommandLine..." -ForegroundColor Yellow
-    Expand-Archive -Path $ZipPath -DestinationPath $InstallDir -Force
-    Remove-Item $ZipPath -Force -ErrorAction SilentlyContinue
-
-    if (-not (Test-Path $SvclPath)) {
-        throw "svcl.exe was not found after extracting the ZIP."
-    }
+# Remove a stale dependency left by installations older than the native backend.
+$legacySvclPath = Join-Path $InstallDir "svcl.exe"
+if (Test-Path $legacySvclPath) {
+    Remove-Item $legacySvclPath -Force -ErrorAction SilentlyContinue
 }
 
 # Copy the source version of the runtime and utilities.
@@ -287,23 +262,8 @@ function Invoke-GHubGet {
 }
 
 # --- Audio functions ---
-function Get-DefaultColumn {
-    param([Parameter(Mandatory=$true)][string]$Column)
-
-    # IMPORTANT: do not use /Stdout with /GetColumnValue.
-    $raw = & $SvclPath /GetColumnValue "DefaultRenderDevice" $Column 2>&1
-    return (($raw | Out-String).Trim())
-}
-
 function Get-DefaultRenderItemId {
-    $text = Get-DefaultColumn "Item ID"
-
-    $id = Get-RenderItemIdFromText -Text $text
-    if (-not $id) {
-        throw "Could not extract the Item ID of the default device. Output: $text"
-    }
-
-    return $id
+    return Get-CoreAudioDefaultRenderDeviceId
 }
 
 function Test-SetDefault {
@@ -315,23 +275,23 @@ function Test-SetDefault {
     Write-Host ""
     Write-Host "Testing real switch -> $Label" -ForegroundColor Yellow
 
-    $out = & $SvclPath /Stdout /SetDefault $Id all 2>&1
-    $text = ($out | Out-String).Trim()
-
-    if ($text -match "No items found") {
-        Write-Host $text -ForegroundColor Red
+    try {
+        Set-CoreAudioDefaultRenderDevice -DeviceId $Id
+    }
+    catch {
+        Write-Host ("      TEST FAILED. Core Audio error: {0}" -f $_.Exception.Message) -ForegroundColor Red
         return $false
     }
 
     Start-Sleep -Milliseconds 800
-    $actual = Get-DefaultRenderItemId
-
-    if ($actual -ieq $Id) {
-        Write-Host "      TEST OK" -ForegroundColor Green
+    if (Test-CoreAudioDefaultRenderDevice -DeviceId $Id) {
+        Write-Host "      TEST OK (Console/Multimedia/Communications)" -ForegroundColor Green
         return $true
     }
 
-    Write-Host "      TEST FAILED. Actual: $actual" -ForegroundColor Red
+    $actual = $null
+    try { $actual = Get-CoreAudioDefaultRenderDeviceIds } catch { }
+    Write-Host ("      TEST FAILED. Actual roles: {0}" -f ($actual | ConvertTo-Json -Compress)) -ForegroundColor Red
     return $false
 }
 
@@ -342,23 +302,33 @@ try {
     $DetectionMode = $null
     $ghubHeadset = $null
 
-    Write-Host "[3/7] Selecting headset and fallback..." -ForegroundColor Yellow
+    Write-Host "[2/6] Selecting headset and fallback..." -ForegroundColor Yellow
 
-    $csvText = (& $SvclPath /scomma "" 2>&1 | Out-String).Trim()
-    if ([string]::IsNullOrWhiteSpace($csvText)) {
-        throw "Could not read the Windows audio device list (svcl /scomma)."
+    try {
+        $renderRows = @(Get-CoreAudioRenderDevices)
     }
-
-    $renderRows = @(Get-SvclRenderDevice -CsvText $csvText)
+    catch {
+        throw "Could not read the Windows audio device list through Core Audio: $($_.Exception.Message)"
+    }
     if ($renderRows.Count -eq 0) {
         throw "No render (output) devices found in the Windows list."
     }
 
+    # Show only Active endpoints (usable right now). If there is none,
+    # show all with a notice so the install is not blocked.
+    $activeRows = @($renderRows | Where-Object {
+        (Get-CsvColumn -Row $_ -Names @('Device State')) -ieq 'Active'
+    })
+    $pickable = if ($activeRows.Count -gt 0) { $activeRows } else { $renderRows }
+
     Write-Host ""
     Write-Host "Detected output devices:" -ForegroundColor Yellow
-    for ($i = 0; $i -lt $renderRows.Count; $i++) {
-        $label = Get-SvclDeviceLabel -Row $renderRows[$i]
-        $state = Get-CsvColumn -Row $renderRows[$i] -Names @('Device State')
+    if ($activeRows.Count -eq 0) {
+        Write-Host "  (no Active endpoints found; showing all states)" -ForegroundColor DarkGray
+    }
+    for ($i = 0; $i -lt $pickable.Count; $i++) {
+        $label = Get-SvclDeviceLabel -Row $pickable[$i]
+        $state = Get-CsvColumn -Row $pickable[$i] -Names @('Device State')
         Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $label, $state)
     }
 
@@ -368,9 +338,9 @@ try {
         $parsed = 0
         $valid = [int]::TryParse($choice, [ref]$parsed) -and
                  $parsed -ge 1 -and
-                 $parsed -le $renderRows.Count
+                 $parsed -le $pickable.Count
     } until ($valid)
-    $chosenHeadset = $renderRows[$parsed - 1]
+    $chosenHeadset = $pickable[$parsed - 1]
 
     $chosenSpeaker = $null
     do {
@@ -378,9 +348,9 @@ try {
         $parsed = 0
         $valid = [int]::TryParse($choice, [ref]$parsed) -and
                  $parsed -ge 1 -and
-                 $parsed -le $renderRows.Count
+                 $parsed -le $pickable.Count
     } until ($valid)
-    $chosenSpeaker = $renderRows[$parsed - 1]
+    $chosenSpeaker = $pickable[$parsed - 1]
 
     $headsetId           = Get-CsvColumn -Row $chosenHeadset -Names @('Item ID')
     $speakerId           = Get-CsvColumn -Row $chosenSpeaker -Names @('Item ID')
@@ -396,6 +366,82 @@ try {
     Write-Host "      Headset:  $headsetName" -ForegroundColor Green
     Write-Host "      Fallback: $speakerName" -ForegroundColor Green
 
+    # --- Atajo: como usar el headset elegido ---
+    # El ciclo ON -> OFF -> ON confirma que Windows refleja el estado fisico
+    # (needed to detect ON/OFF at runtime). But if the user already
+    # knows the chosen endpoints are correct (e.g. tested before),
+    # they can skip the cycle and use WindowsEndpoint directly.
+    Write-Host ""
+    Write-Host "Which kind of headset is this?" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  [1] Standard wireless headset (Bluetooth/USB, e.g. Jabra)" -ForegroundColor White
+    Write-Host "      -> Use WindowsEndpoint: Windows detects the endpoint as" -ForegroundColor DarkGray
+    Write-Host "         Active when ON and Unplugged/absent when OFF." -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  [2] Logitech PRO X 2 (LIGHTSPEED dongle stays plugged in)" -ForegroundColor White
+    Write-Host "      -> Use LogitechGHub: Windows keeps the endpoint Active even" -ForegroundColor DarkGray
+    Write-Host "         when OFF, so detection uses the G HUB battery signal." -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  [3] Not sure - validate automatically" -ForegroundColor White
+    Write-Host "      -> Run the ON->OFF->ON cycle and auto-detect the mode" -ForegroundColor DarkGray
+    Write-Host "         (recommended if this is a new headset)." -ForegroundColor DarkGray
+    $cycleChoice = 0
+    do {
+        $cc = Read-Host "Choose 1, 2 or 3"
+        [int]::TryParse($cc, [ref]$cycleChoice) | Out-Null
+    } until ($cycleChoice -ge 1 -and $cycleChoice -le 3)
+
+    if ($cycleChoice -eq 1) {
+        # Standard wireless headset: assume WindowsEndpoint. The selected endpoints
+        # are already Active render endpoints, so the runtime will watch their
+        # Active/Unplugged state. No cycle needed.
+        $DetectionMode = "WindowsEndpoint"
+        Write-Host "      Using WindowsEndpoint mode with the selected endpoints." -ForegroundColor Green
+    }
+    elseif ($cycleChoice -eq 2) {
+        # Logitech PRO X 2: needs G HUB. The endpoint alone cannot tell ON from OFF.
+        Write-Host "      Assuming a Logitech PRO X 2. Looking up the headset in G HUB..." -ForegroundColor Yellow
+        try {
+            Connect-GHub
+            $devices = Invoke-GHubGet -Path "/devices/list"
+            $deviceInfos = @($devices.payload.deviceInfos)
+
+            $ghubCandidates = @($deviceInfos | Where-Object {
+                $_.extendedDisplayName -match 'PRO\s*X\s*2'
+            })
+
+            if ($ghubCandidates.Count -eq 0) {
+                Write-Host "      G HUB reports no PRO X 2. Try option 3 (auto-detect)." -ForegroundColor Red
+            }
+            else {
+                $ghubHeadset = $ghubCandidates[0]
+                if ($ghubCandidates.Count -gt 1) {
+                    Write-Host "PRO X 2 headsets detected by G HUB:" -ForegroundColor Yellow
+                    for ($i = 0; $i -lt $ghubCandidates.Count; $i++) {
+                        Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $ghubCandidates[$i].extendedDisplayName, $ghubCandidates[$i].id)
+                    }
+                    $ghubChoice = 0
+                    do {
+                        $gc = Read-Host "Enter the number of the PRO X 2 that matches '$headsetName'"
+                        $ghubValid = [int]::TryParse($gc, [ref]$ghubChoice) -and
+                                     $ghubChoice -ge 1 -and
+                                     $ghubChoice -le $ghubCandidates.Count
+                    } until ($ghubValid)
+                    $ghubHeadset = $ghubCandidates[$ghubChoice - 1]
+                }
+                $DetectionMode = "LogitechGHub"
+                Write-Host "      G HUB: $($ghubHeadset.extendedDisplayName)" -ForegroundColor Green
+            }
+        }
+        catch {
+            Write-Host "      Could not connect to G HUB. Detail: $($_.Exception.Message)" -ForegroundColor Red
+        }
+
+        if (-not $DetectionMode) {
+            Write-Host "      No G HUB association was set; the config will not be written." -ForegroundColor DarkGray
+        }
+    }
+    else {
     # --- Validate the headset ON -> OFF -> ON cycle ---
     # The headset must be ON now. We ask for OFF and then ON, and check that
     # Windows reflects the change on each transition.
@@ -410,19 +456,19 @@ try {
             [string]$EndpointName
         )
 
-        $txt = (& $SvclPath /scomma "" 2>&1 | Out-String).Trim()
-        if (-not (Test-SvclExportValid -CsvText $txt)) {
+        try {
+            $rows = @(Get-CoreAudioRenderDevices)
+        }
+        catch {
             return [pscustomobject]@{ State = 'Unknown'; FoundId = $null }
         }
-
-        $rows = @(ConvertFrom-SvclCsv -Text $txt)
         $row = $rows | Where-Object {
             $id = Get-CsvColumn -Row $_ -Names @('Item ID')
             $null -ne $id -and $id.Trim() -ieq $ItemId.Trim()
         } | Select-Object -First 1
 
         # Bluetooth can recreate an endpoint with a new Item ID after reconnect.
-        # Resolve the same Render endpoint by its real svcl identity rather than
+        # Resolve the same Render endpoint by its native Core Audio identity rather than
         # treating the user-facing "Device Name — Name" label as one column.
         if (-not $row -and
             (-not [string]::IsNullOrWhiteSpace($DeviceName) -or
@@ -558,13 +604,14 @@ try {
             }
         }
     }
+    }  # end of the shortcut cycle (ON->OFF->ON) else block
 
     if (-not $DetectionMode) {
         throw "Windows cannot detect the physical state of this headset and there is no compatible method (nor a confirmed G HUB). Not installing."
     }
 
     Write-Host ""
-    Write-Host "[4/7] Calibrating Windows outputs..." -ForegroundColor Yellow
+    Write-Host "[3/6] Calibrating Windows outputs..." -ForegroundColor Yellow
     Write-Host "No old IDs are kept: the current Windows ones are captured." -ForegroundColor DarkGray
 
     # In both modes we already have the IDs captured from the Windows list.
@@ -578,7 +625,7 @@ try {
     }
 
     Write-Host ""
-    Write-Host "[5/7] Validating audio switches before installing..." -ForegroundColor Yellow
+    Write-Host "[4/6] Validating audio switches before installing..." -ForegroundColor Yellow
 
     $okHeadset = Test-SetDefault `
         -Id $headsetOutput.ItemId `
@@ -593,7 +640,7 @@ try {
     }
 
     $config = [ordered]@{
-        Version                = "1.2.0"
+        Version                = "1.3.0"
         DetectionMode          = $DetectionMode
         HeadsetName            = [string]$headsetOutput.Name
         HeadsetId              = [string]$headsetOutput.ItemId
@@ -647,7 +694,7 @@ try {
         }
     }
 
-    Write-Host "[6/7] Setting up invisible startup..." -ForegroundColor Yellow
+    Write-Host "[5/6] Setting up invisible startup..." -ForegroundColor Yellow
 
     $PowerShellExe = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
     $WScriptExe    = Join-Path $env:SystemRoot "System32\wscript.exe"
@@ -684,7 +731,7 @@ Set shell = Nothing
         Where-Object { $_.CommandLine -match $escapedMain } |
         Select-Object -First 1
 
-    Write-Host "[7/7] Finalizing..." -ForegroundColor Yellow
+    Write-Host "[6/6] Finalizing..." -ForegroundColor Yellow
     Write-Host ""
 
     if ($running) {

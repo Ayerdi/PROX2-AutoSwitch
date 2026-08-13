@@ -1,13 +1,13 @@
 ﻿#requires -Version 5.1
 # AutoSwitchCore.psm1 - pure, testable logic for Audio AutoSwitch.
-# No G HUB or svcl.exe dependency is required for Pester tests.
+# No G HUB or third-party audio utility is required for Pester tests.
 
 Set-StrictMode -Version Latest
 
 function Get-RenderItemIdFromText {
     <#
     .SYNOPSIS
-        Extract a valid render Item ID from svcl.exe output.
+        Extract a valid render Item ID from legacy command output.
     .DESCRIPTION
         Use /GetColumnValue (NEVER /Stdout /GetColumnValue, which contaminates the output).
         Return $null when no valid render Item ID is present.
@@ -73,7 +73,7 @@ function Resolve-HeadsetState {
 function ConvertFrom-SvclCsv {
     <#
     .SYNOPSIS
-        Parse svcl.exe /scomma output into objects.
+        Parse legacy /scomma output into objects.
     .DESCRIPTION
         The first export line contains the column headers.
         Supports double-quoted fields and embedded commas.
@@ -302,7 +302,7 @@ function Test-SvclExportValid {
 function Get-SvclRenderDevice {
     <#
     .SYNOPSIS
-        Filter svcl.exe /scomma export to real render output endpoints
+        Filter a legacy /scomma export to real render output endpoints
         with Type='Device' and Direction='Render'.
         
     .DESCRIPTION
@@ -555,6 +555,403 @@ namespace AutoSwitch
     }
 }
 
+
+function Initialize-CoreAudioBackend {
+    <#
+    .SYNOPSIS
+        Compile the in-process Windows Core Audio COM bridge once.
+    .DESCRIPTION
+        PowerShell 5.1 cannot reliably cast COM RCWs to custom ComImport
+        interfaces, so the COM calls live in embedded C#. Enumeration,
+        endpoint state and default-device reads use documented Core Audio
+        interfaces. Setting the default endpoint reuses the project's
+        existing IPolicyConfig interop for Console, Multimedia and
+        Communications roles.
+    #>
+    [CmdletBinding()]
+    param()
+
+    if ('AutoSwitch.NativeAudio.CoreAudio' -as [type]) {
+        return
+    }
+
+    Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+
+namespace AutoSwitch.NativeAudio
+{
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    public struct PROPERTYKEY
+    {
+        public Guid fmtid;
+        public uint pid;
+    }
+
+    [StructLayout(LayoutKind.Explicit)]
+    public struct PROPVARIANT
+    {
+        [FieldOffset(0)] public ushort vt;
+        [FieldOffset(8)] public IntPtr pointerVal;
+        [FieldOffset(8)] public uint ulVal;
+    }
+
+    [ComImport, Guid("BCDE0395-E52F-467C-8E3D-C4579291692E")]
+    public class MMDeviceEnumeratorComObject { }
+
+    [ComImport, Guid("870af99c-171d-4f9e-af0d-e63df40c2bc9")]
+    public class CPolicyConfigVistaClient { }
+
+    [ComImport, Guid("A95664D2-9614-4F35-A746-DE8DB63617E6"),
+     InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IMMDeviceEnumerator
+    {
+        [PreserveSig] int EnumAudioEndpoints(int dataFlow, uint stateMask, out IMMDeviceCollection devices);
+        [PreserveSig] int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice endpoint);
+        [PreserveSig] int GetDevice([MarshalAs(UnmanagedType.LPWStr)] string id, out IMMDevice device);
+        [PreserveSig] int RegisterEndpointNotificationCallback(IntPtr client);
+        [PreserveSig] int UnregisterEndpointNotificationCallback(IntPtr client);
+    }
+
+    [ComImport, Guid("0BD7A1BE-7A1A-44DB-8397-CC5392387B5E"),
+     InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IMMDeviceCollection
+    {
+        [PreserveSig] int GetCount(out uint count);
+        [PreserveSig] int Item(uint index, out IMMDevice device);
+    }
+
+    [ComImport, Guid("D666063F-1587-4E43-81F1-B948E807363F"),
+     InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IMMDevice
+    {
+        [PreserveSig] int Activate(ref Guid iid, int clsCtx, IntPtr activationParams, out IntPtr instance);
+        [PreserveSig] int OpenPropertyStore(int accessMode, out IPropertyStore properties);
+        [PreserveSig] int GetId([MarshalAs(UnmanagedType.LPWStr)] out string id);
+        [PreserveSig] int GetState(out uint state);
+    }
+
+    [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"),
+     InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IPropertyStore
+    {
+        [PreserveSig] int GetCount(out uint count);
+        [PreserveSig] int GetAt(uint index, out PROPERTYKEY key);
+        [PreserveSig] int GetValue(ref PROPERTYKEY key, out PROPVARIANT value);
+        [PreserveSig] int SetValue(ref PROPERTYKEY key, ref PROPVARIANT value);
+        [PreserveSig] int Commit();
+    }
+
+    [ComImport, Guid("f8679f50-850a-41cf-9c72-430f290290c8"),
+     InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IPolicyConfig
+    {
+        [PreserveSig] int GetMixFormat(string deviceName, out IntPtr format);
+        [PreserveSig] int GetDeviceFormat(string deviceName, bool defaultFormat, out IntPtr format);
+        [PreserveSig] int ResetDeviceFormat(string deviceName);
+        [PreserveSig] int SetDeviceFormat(string deviceName, IntPtr endpointFormat, IntPtr mixFormat);
+        [PreserveSig] int GetProcessingPeriod(string deviceName, bool defaultPeriod, out IntPtr defaultPeriodValue, out IntPtr minimumPeriodValue);
+        [PreserveSig] int SetProcessingPeriod(string deviceName, IntPtr period);
+        [PreserveSig] int GetShareMode(string deviceName, out IntPtr mode);
+        [PreserveSig] int SetShareMode(string deviceName, IntPtr mode);
+        [PreserveSig] int GetPropertyValue(string deviceName, bool fxStore, IntPtr key, IntPtr value);
+        [PreserveSig] int SetPropertyValue(string deviceName, bool fxStore, IntPtr key, IntPtr value);
+        [PreserveSig] int SetDefaultEndpoint([MarshalAs(UnmanagedType.LPWStr)] string deviceName, int role);
+        [PreserveSig] int SetEndpointVisibility([MarshalAs(UnmanagedType.LPWStr)] string deviceName, bool visible);
+    }
+
+    public sealed class EndpointInfo
+    {
+        public string Id { get; set; }
+        public string Name { get; set; }
+        public string DeviceName { get; set; }
+        public string FriendlyName { get; set; }
+        public uint State { get; set; }
+        public string StateName { get; set; }
+    }
+
+    public sealed class DefaultEndpointIds
+    {
+        public string Console { get; set; }
+        public string Multimedia { get; set; }
+        public string Communications { get; set; }
+    }
+
+    public static class CoreAudio
+    {
+        private const int E_RENDER = 0;
+        private const uint DEVICE_STATEMASK_ALL = 0x0000000F;
+        private const int STGM_READ = 0;
+        private const ushort VT_LPWSTR = 31;
+
+        private static readonly Guid FMTID_DEVICE = new Guid("a45c254e-df1c-4efd-8020-67d146a850e0");
+        private static readonly Guid FMTID_DEVICE_INTERFACE = new Guid("026e516e-b814-414b-83cd-856d6fef4822");
+
+        [DllImport("ole32.dll")]
+        private static extern int PropVariantClear(ref PROPVARIANT value);
+
+        private static void ThrowIfFailed(int hr)
+        {
+            if (hr < 0) Marshal.ThrowExceptionForHR(hr);
+        }
+
+        private static void Release(object value)
+        {
+            if (value != null && Marshal.IsComObject(value))
+            {
+                try { Marshal.ReleaseComObject(value); } catch { }
+            }
+        }
+
+        private static string ReadString(IPropertyStore store, Guid fmtid, uint pid)
+        {
+            PROPERTYKEY key = new PROPERTYKEY { fmtid = fmtid, pid = pid };
+            PROPVARIANT value = new PROPVARIANT();
+            int hr = store.GetValue(ref key, out value);
+            if (hr < 0) return null;
+            try
+            {
+                if (value.vt == VT_LPWSTR && value.pointerVal != IntPtr.Zero)
+                {
+                    return Marshal.PtrToStringUni(value.pointerVal);
+                }
+                return null;
+            }
+            finally
+            {
+                PropVariantClear(ref value);
+            }
+        }
+
+        private static string GetId(IMMDevice device)
+        {
+            string id;
+            ThrowIfFailed(device.GetId(out id));
+            return id;
+        }
+
+        private static string StateName(uint state)
+        {
+            switch (state)
+            {
+                case 0x00000001: return "Active";
+                case 0x00000002: return "Disabled";
+                case 0x00000004: return "NotPresent";
+                case 0x00000008: return "Unplugged";
+                default: return "Unknown";
+            }
+        }
+
+        public static EndpointInfo[] GetRenderEndpoints()
+        {
+            object enumeratorObject = null;
+            IMMDeviceEnumerator enumerator = null;
+            IMMDeviceCollection collection = null;
+            var result = new List<EndpointInfo>();
+
+            try
+            {
+                enumeratorObject = new MMDeviceEnumeratorComObject();
+                enumerator = (IMMDeviceEnumerator)enumeratorObject;
+                ThrowIfFailed(enumerator.EnumAudioEndpoints(E_RENDER, DEVICE_STATEMASK_ALL, out collection));
+
+                uint count;
+                ThrowIfFailed(collection.GetCount(out count));
+                for (uint i = 0; i < count; i++)
+                {
+                    IMMDevice device = null;
+                    IPropertyStore store = null;
+                    try
+                    {
+                        ThrowIfFailed(collection.Item(i, out device));
+                        string id = GetId(device);
+                        uint state;
+                        ThrowIfFailed(device.GetState(out state));
+                        ThrowIfFailed(device.OpenPropertyStore(STGM_READ, out store));
+
+                        string name = ReadString(store, FMTID_DEVICE, 2);       // PKEY_Device_DeviceDesc
+                        string adapter = ReadString(store, FMTID_DEVICE_INTERFACE, 2); // PKEY_DeviceInterface_FriendlyName
+                        string friendly = ReadString(store, FMTID_DEVICE, 14); // PKEY_Device_FriendlyName
+
+                        if (String.IsNullOrWhiteSpace(name)) name = friendly;
+                        if (String.IsNullOrWhiteSpace(adapter)) adapter = friendly;
+
+                        result.Add(new EndpointInfo
+                        {
+                            Id = id,
+                            Name = name,
+                            DeviceName = adapter,
+                            FriendlyName = friendly,
+                            State = state,
+                            StateName = StateName(state)
+                        });
+                    }
+                    finally
+                    {
+                        Release(store);
+                        Release(device);
+                    }
+                }
+            }
+            finally
+            {
+                Release(collection);
+                Release(enumerator);
+                Release(enumeratorObject);
+            }
+
+            return result.ToArray();
+        }
+
+        public static string GetDefaultRenderEndpointId(int role)
+        {
+            object enumeratorObject = null;
+            IMMDeviceEnumerator enumerator = null;
+            IMMDevice device = null;
+            try
+            {
+                enumeratorObject = new MMDeviceEnumeratorComObject();
+                enumerator = (IMMDeviceEnumerator)enumeratorObject;
+                ThrowIfFailed(enumerator.GetDefaultAudioEndpoint(E_RENDER, role, out device));
+                return GetId(device);
+            }
+            finally
+            {
+                Release(device);
+                Release(enumerator);
+                Release(enumeratorObject);
+            }
+        }
+
+        public static DefaultEndpointIds GetDefaultRenderEndpointIds()
+        {
+            return new DefaultEndpointIds
+            {
+                Console = GetDefaultRenderEndpointId(0),
+                Multimedia = GetDefaultRenderEndpointId(1),
+                Communications = GetDefaultRenderEndpointId(2)
+            };
+        }
+
+        private static void ValidateEndpoint(string deviceId)
+        {
+            object enumeratorObject = null;
+            IMMDeviceEnumerator enumerator = null;
+            IMMDevice device = null;
+            try
+            {
+                enumeratorObject = new MMDeviceEnumeratorComObject();
+                enumerator = (IMMDeviceEnumerator)enumeratorObject;
+                ThrowIfFailed(enumerator.GetDevice(deviceId, out device));
+            }
+            finally
+            {
+                Release(device);
+                Release(enumerator);
+                Release(enumeratorObject);
+            }
+        }
+
+        public static void SetDefaultEndpointAllRoles(string deviceId)
+        {
+            if (String.IsNullOrWhiteSpace(deviceId))
+                throw new ArgumentException("deviceId must not be empty", "deviceId");
+
+            ValidateEndpoint(deviceId);
+
+            object policyObject = null;
+            IPolicyConfig policy = null;
+            try
+            {
+                policyObject = new CPolicyConfigVistaClient();
+                policy = (IPolicyConfig)policyObject;
+                ThrowIfFailed(policy.SetDefaultEndpoint(deviceId, 0));
+                ThrowIfFailed(policy.SetDefaultEndpoint(deviceId, 1));
+                ThrowIfFailed(policy.SetDefaultEndpoint(deviceId, 2));
+            }
+            finally
+            {
+                Release(policy);
+                Release(policyObject);
+            }
+        }
+    }
+}
+'@ -ErrorAction Stop
+}
+
+function Get-CoreAudioRenderDevices {
+    [CmdletBinding()]
+    param()
+
+    Initialize-CoreAudioBackend
+    $defaultId = $null
+    try { $defaultId = [AutoSwitch.NativeAudio.CoreAudio]::GetDefaultRenderEndpointId(0) } catch { }
+
+    $rows = [System.Collections.Generic.List[object]]::new()
+    foreach ($item in @([AutoSwitch.NativeAudio.CoreAudio]::GetRenderEndpoints())) {
+        $isDefault = $false
+        if ($defaultId) { $isDefault = $item.Id -ieq $defaultId }
+        $rows.Add([pscustomobject][ordered]@{
+            'Name'          = [string]$item.Name
+            'Type'          = 'Device'
+            'Direction'     = 'Render'
+            'Device Name'   = [string]$item.DeviceName
+            'Friendly Name' = [string]$item.FriendlyName
+            'Device State'  = [string]$item.StateName
+            'Item ID'       = [string]$item.Id
+            'Default'       = $(if ($isDefault) { 'Render' } else { '' })
+        })
+    }
+    return $rows.ToArray()
+}
+
+function Get-CoreAudioDefaultRenderDeviceId {
+    [CmdletBinding()]
+    param()
+
+    Initialize-CoreAudioBackend
+    return [string][AutoSwitch.NativeAudio.CoreAudio]::GetDefaultRenderEndpointId(0)
+}
+
+function Get-CoreAudioDefaultRenderDeviceIds {
+    [CmdletBinding()]
+    param()
+
+    Initialize-CoreAudioBackend
+    $ids = [AutoSwitch.NativeAudio.CoreAudio]::GetDefaultRenderEndpointIds()
+    return [pscustomobject]@{
+        Console        = [string]$ids.Console
+        Multimedia     = [string]$ids.Multimedia
+        Communications = [string]$ids.Communications
+    }
+}
+
+function Test-CoreAudioDefaultRenderDevice {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$DeviceId)
+
+    try {
+        $ids = Get-CoreAudioDefaultRenderDeviceIds
+        return ($ids.Console -ieq $DeviceId -and
+                $ids.Multimedia -ieq $DeviceId -and
+                $ids.Communications -ieq $DeviceId)
+    }
+    catch {
+        return $false
+    }
+}
+
+function Set-CoreAudioDefaultRenderDevice {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$DeviceId)
+
+    Initialize-CoreAudioBackend
+    [AutoSwitch.NativeAudio.CoreAudio]::SetDefaultEndpointAllRoles($DeviceId)
+}
+
+
 function Get-ConfigDetectionMode {
     <#
     .SYNOPSIS
@@ -586,4 +983,4 @@ function Get-ConfigDetectionMode {
     return $null
 }
 
-Export-ModuleMember -Function Get-RenderItemIdFromText, Resolve-HeadsetState, Test-ValidAudioConfig, New-GHubTimeoutToken, ConvertFrom-SvclCsv, ConvertFrom-CsvLine, Get-CsvColumn, Resolve-EndpointState, Resolve-DetectedState, Test-SvclExportValid, Get-SvclRenderDevice, Get-SvclDeviceLabel, Find-SvclRenderDeviceByIdentity, Get-EndpointFxState, Get-ConfigDetectionMode
+Export-ModuleMember -Function Get-RenderItemIdFromText, Resolve-HeadsetState, Test-ValidAudioConfig, New-GHubTimeoutToken, ConvertFrom-SvclCsv, ConvertFrom-CsvLine, Get-CsvColumn, Resolve-EndpointState, Resolve-DetectedState, Test-SvclExportValid, Get-SvclRenderDevice, Get-SvclDeviceLabel, Find-SvclRenderDeviceByIdentity, Get-EndpointFxState, Get-ConfigDetectionMode, Initialize-CoreAudioBackend, Get-CoreAudioRenderDevices, Get-CoreAudioDefaultRenderDeviceId, Get-CoreAudioDefaultRenderDeviceIds, Test-CoreAudioDefaultRenderDevice, Set-CoreAudioDefaultRenderDevice
