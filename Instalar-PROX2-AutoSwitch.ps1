@@ -366,6 +366,28 @@ try {
     Write-Host "      Headset:  $headsetName" -ForegroundColor Green
     Write-Host "      Fallback: $speakerName" -ForegroundColor Green
 
+    # --- Atajo: validar ciclo fisico o usar los endpoints tal cual ---
+    # El ciclo ON -> OFF -> ON confirma que Windows refleja el estado fisico
+    # (necesario para detectar ON/OFF en el runtime). Pero si el usuario ya
+    # sabe que los endpoints elegidos son los correctos (p. ej. probado antes),
+    # puede saltarse el ciclo y usar WindowsEndpoint directamente.
+    Write-Host ""
+    Write-Host "How do you want to proceed?" -ForegroundColor Yellow
+    Write-Host "  [1] Validate the ON->OFF->ON cycle (recommended, auto-detects the mode)" -ForegroundColor White
+    Write-Host "  [2] Use the selected endpoints as-is (assumes WindowsEndpoint, skips the cycle)" -ForegroundColor White
+    $cycleChoice = 0
+    do {
+        $cc = Read-Host "Choose 1 or 2"
+        [int]::TryParse($cc, [ref]$cycleChoice) | Out-Null
+    } until ($cycleChoice -eq 1 -or $cycleChoice -eq 2)
+
+    if ($cycleChoice -eq 2) {
+        # Sin ciclo: asumimos WindowsEndpoint. Los endpoints seleccionados ya
+        # son render Active, asi que el runtime vigilara su estado Active/Unplugged.
+        $DetectionMode = "WindowsEndpoint"
+        Write-Host "      Skipping the cycle; using WindowsEndpoint mode with the selected endpoints." -ForegroundColor Green
+    }
+    else {
     # --- Validate the headset ON -> OFF -> ON cycle ---
     # The headset must be ON now. We ask for OFF and then ON, and check that
     # Windows reflects the change on each transition.
@@ -528,6 +550,7 @@ try {
             }
         }
     }
+    }  # fin del else (ciclo ON->OFF->ON) del atajo
 
     if (-not $DetectionMode) {
         throw "Windows cannot detect the physical state of this headset and there is no compatible method (nor a confirmed G HUB). Not installing."
