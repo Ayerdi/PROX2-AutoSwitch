@@ -366,26 +366,80 @@ try {
     Write-Host "      Headset:  $headsetName" -ForegroundColor Green
     Write-Host "      Fallback: $speakerName" -ForegroundColor Green
 
-    # --- Atajo: validar ciclo fisico o usar los endpoints tal cual ---
+    # --- Atajo: como usar el headset elegido ---
     # El ciclo ON -> OFF -> ON confirma que Windows refleja el estado fisico
     # (needed to detect ON/OFF at runtime). But if the user already
     # knows the chosen endpoints are correct (e.g. tested before),
     # they can skip the cycle and use WindowsEndpoint directly.
     Write-Host ""
-    Write-Host "How do you want to proceed?" -ForegroundColor Yellow
-    Write-Host "  [1] Validate the ON->OFF->ON cycle (recommended, auto-detects the mode)" -ForegroundColor White
-    Write-Host "  [2] Use the selected endpoints as-is (assumes WindowsEndpoint, skips the cycle)" -ForegroundColor White
+    Write-Host "Which kind of headset is this?" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  [1] Standard wireless headset (Bluetooth/USB, e.g. Jabra)" -ForegroundColor White
+    Write-Host "      -> Use WindowsEndpoint: Windows detects the endpoint as" -ForegroundColor DarkGray
+    Write-Host "         Active when ON and Unplugged/absent when OFF." -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  [2] Logitech PRO X 2 (LIGHTSPEED dongle stays plugged in)" -ForegroundColor White
+    Write-Host "      -> Use LogitechGHub: Windows keeps the endpoint Active even" -ForegroundColor DarkGray
+    Write-Host "         when OFF, so detection uses the G HUB battery signal." -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  [3] Not sure - validate automatically" -ForegroundColor White
+    Write-Host "      -> Run the ON->OFF->ON cycle and auto-detect the mode" -ForegroundColor DarkGray
+    Write-Host "         (recommended if this is a new headset)." -ForegroundColor DarkGray
     $cycleChoice = 0
     do {
-        $cc = Read-Host "Choose 1 or 2"
+        $cc = Read-Host "Choose 1, 2 or 3"
         [int]::TryParse($cc, [ref]$cycleChoice) | Out-Null
-    } until ($cycleChoice -eq 1 -or $cycleChoice -eq 2)
+    } until ($cycleChoice -ge 1 -and $cycleChoice -le 3)
 
-    if ($cycleChoice -eq 2) {
-        # No cycle: assume WindowsEndpoint. The selected endpoints are already
-        # Active render endpoints, so the runtime will watch their Active/Unplugged state.
+    if ($cycleChoice -eq 1) {
+        # Standard wireless headset: assume WindowsEndpoint. The selected endpoints
+        # are already Active render endpoints, so the runtime will watch their
+        # Active/Unplugged state. No cycle needed.
         $DetectionMode = "WindowsEndpoint"
-        Write-Host "      Skipping the cycle; using WindowsEndpoint mode with the selected endpoints." -ForegroundColor Green
+        Write-Host "      Using WindowsEndpoint mode with the selected endpoints." -ForegroundColor Green
+    }
+    elseif ($cycleChoice -eq 2) {
+        # Logitech PRO X 2: needs G HUB. The endpoint alone cannot tell ON from OFF.
+        Write-Host "      Assuming a Logitech PRO X 2. Looking up the headset in G HUB..." -ForegroundColor Yellow
+        try {
+            Connect-GHub
+            $devices = Invoke-GHubGet -Path "/devices/list"
+            $deviceInfos = @($devices.payload.deviceInfos)
+
+            $ghubCandidates = @($deviceInfos | Where-Object {
+                $_.extendedDisplayName -match 'PRO\s*X\s*2'
+            })
+
+            if ($ghubCandidates.Count -eq 0) {
+                Write-Host "      G HUB reports no PRO X 2. Try option 3 (auto-detect)." -ForegroundColor Red
+            }
+            else {
+                $ghubHeadset = $ghubCandidates[0]
+                if ($ghubCandidates.Count -gt 1) {
+                    Write-Host "PRO X 2 headsets detected by G HUB:" -ForegroundColor Yellow
+                    for ($i = 0; $i -lt $ghubCandidates.Count; $i++) {
+                        Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $ghubCandidates[$i].extendedDisplayName, $ghubCandidates[$i].id)
+                    }
+                    $ghubChoice = 0
+                    do {
+                        $gc = Read-Host "Enter the number of the PRO X 2 that matches '$headsetName'"
+                        $ghubValid = [int]::TryParse($gc, [ref]$ghubChoice) -and
+                                     $ghubChoice -ge 1 -and
+                                     $ghubChoice -le $ghubCandidates.Count
+                    } until ($ghubValid)
+                    $ghubHeadset = $ghubCandidates[$ghubChoice - 1]
+                }
+                $DetectionMode = "LogitechGHub"
+                Write-Host "      G HUB: $($ghubHeadset.extendedDisplayName)" -ForegroundColor Green
+            }
+        }
+        catch {
+            Write-Host "      Could not connect to G HUB. Detail: $($_.Exception.Message)" -ForegroundColor Red
+        }
+
+        if (-not $DetectionMode) {
+            Write-Host "      No G HUB association was set; the config will not be written." -ForegroundColor DarkGray
+        }
     }
     else {
     # --- Validate the headset ON -> OFF -> ON cycle ---
