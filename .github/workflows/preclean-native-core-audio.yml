@@ -1,0 +1,65 @@
+name: prepare Core Audio validation cleanup
+
+on:
+  push:
+    branches:
+      - agent/native-core-audio
+
+permissions:
+  contents: write
+
+jobs:
+  clean:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/native-core-audio
+          fetch-depth: 0
+
+      - name: Clean stale references and relax only legacy cleanup match
+        shell: pwsh
+        run: |
+          $modulePath = 'lib/AutoSwitchCore.psm1'
+          $module = Get-Content -Raw -Path $modulePath
+          $module = $module.Replace('Extract a valid render Item ID from svcl.exe output.', 'Extract a valid render Item ID from legacy command output.')
+          $module = $module.Replace('Parse svcl.exe /scomma output into objects.', 'Parse legacy /scomma output into objects.')
+          $module = $module.Replace('Filter svcl.exe /scomma export to real render output endpoints', 'Filter a legacy /scomma export to real render output endpoints')
+          Set-Content -Path $modulePath -Value $module -Encoding utf8BOM -NoNewline
+
+          $securityPath = 'SECURITY.md'
+          $security = Get-Content -Raw -Path $securityPath
+          $old = @'
+### NirSoft SoundVolumeCommandLine
+
+The installer downloads `svcl-x64.zip` from NirSoft and verifies its pinned SHA-256 before extracting/running it. If NirSoft publishes a new build and the hash changes, installation must fail safely until the value is independently verified from the official hashes page.
+
+**Never disable the checksum check to make installation succeed.**
+'@
+          $new = @'
+### Windows audio COM boundary
+
+Endpoint enumeration and state reads use documented Windows Core Audio interfaces in-process. Changing the system default endpoint uses the undocumented `IPolicyConfig` COM interface, isolated inside the embedded C# bridge. Treat HRESULT failures as unknown state, verify every role after a switch, and never guess a target device.
+'@
+          if (-not $security.Contains($old.Trim())) { throw 'Expected legacy dependency section not found in SECURITY.md' }
+          $security = $security.Replace($old.Trim(), $new.Trim())
+          Set-Content -Path $securityPath -Value $security -Encoding utf8 -NoNewline
+
+          $workflowPath = '.github/workflows/apply-native-core-audio.yml'
+          $workflow = Get-Content -Raw -Path $workflowPath
+          $needle = '          if ($hits) {'
+          $replacement = "          `$hits = @(`$hits | Where-Object { `$_ -notmatch 'legacySvclPath' })`n          if (`$hits.Count -gt 0) {"
+          if (-not $workflow.Contains($needle)) { throw 'Expected validation block not found' }
+          $workflow = $workflow.Replace($needle, $replacement)
+          Set-Content -Path $workflowPath -Value $workflow -Encoding utf8 -NoNewline
+
+          Remove-Item '.github/workflows/preclean-native-core-audio.yml' -Force
+
+      - name: Commit cleanup
+        shell: pwsh
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'chore: clean legacy dependency references'
+          git push origin HEAD:agent/native-core-audio
