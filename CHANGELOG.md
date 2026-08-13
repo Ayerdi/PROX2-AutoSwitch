@@ -1,23 +1,43 @@
 # Changelog
 
-Todas las versiones notables de este proyecto se documentan aquí.
-El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
-Este proyecto se adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+All notable changes to this project are documented here.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
+
+## [1.2.5] - 2026-08-13
+
+### Added
+- Versioned GitHub Wiki source with a complete English edition and a maintained Spanish edition.
+- Canonical English PowerShell entrypoints: `Install-AutoSwitch.ps1`, `Verify-AutoSwitch.ps1`, and `Uninstall-AutoSwitch.ps1`.
+- Repository governance: `CONTRIBUTING.md`, `SUPPORT.md`, `CODE_OF_CONDUCT.md`, issue forms and a pull-request template.
+- Reproducible release tooling with deterministic ZIP creation, SHA-256 files and double-build byte comparison.
+- Gitleaks secret scanning and repository/language quality checks in CI.
+
+### Changed
+- English is now the canonical language for the repository, runtime comments, tests, technical docs, GitHub Pages and release documentation.
+- The Spanish-named PowerShell entrypoints remain in the package for backward compatibility, while new documentation uses the English aliases.
+- GitHub Pages is now English-first; Spanish documentation lives in the Spanish Wiki path.
+- Actions are pinned to immutable commit SHAs and checkout credentials are not persisted in validation jobs.
+- Public project navigation now follows the same README → Website → Wiki → Docs/Support/Security → Releases structure used by the companion Dedicated Server Save Sync project.
+
+### Security
+- Release publication verifies repository quality and secret scanning before producing assets.
+- The release archive is built twice and must be byte-identical before publication.
 
 ## [1.2.4] - 2026-08-13
 
 ### Added
 - Double-click `Install.cmd`, `Verify.cmd`, and `Uninstall.cmd` launchers for users who download the release ZIP.
-- Release packaging now also publishes a stable `Audio-AutoSwitch.zip` + SHA-256 alias in addition to the versioned archive.
+- Release packaging publishes the stable `Audio-AutoSwitch.zip` + SHA-256 alias in addition to the versioned archive.
 
 ### Fixed
-- Clean installation now polls Bluetooth/Core Audio transitions for 15 s / 15 s / 20 s and refreshes a recreated headset Item ID by `Device Name` + `Name`, matching the hardened Reconfigure flow.
+- Clean installation polls Bluetooth/Core Audio transitions for 15 s / 15 s / 20 s and refreshes a recreated headset Item ID by `Device Name` + `Name`, matching the hardened Reconfigure flow.
 - The verifier no longer reports G HUB as a failure for generic `WindowsEndpoint` installations.
-- The one-command bootstrap now uses English/generic Audio AutoSwitch wording.
-- Removed leftover one-shot documentation workflows/scripts from `.github/`.
-- `Reconfigure...` re-resolves a recreated Bluetooth endpoint using the real `svcl` identity columns **`Device Name` + `Name`**, not the combined display label. This fixes the edge case where a headset returns after power-on with a different `Item ID`, while avoiding collisions between multiple render endpoints belonging to the same device. Regression tests cover exact identity matching.
+- The one-command bootstrap uses generic Audio AutoSwitch wording.
+- Leftover one-shot documentation workflows/scripts were removed from `.github/`.
+- `Reconfigure...` re-resolves a recreated Bluetooth endpoint using the real `svcl` identity columns **`Device Name` + `Name`**, not the combined display label. This avoids collisions between multiple render endpoints belonging to the same device and handles a headset returning with a different `Item ID`. Regression tests cover exact identity matching.
 
 ### Changed
 - README, GitHub Pages, maintainer notes, security/source notes and the historical WindowsEndpoint design document were refreshed to match the post-v1.2.3 behavior and hardware findings.
@@ -25,90 +45,89 @@ Este proyecto se adhiere a [Semantic Versioning](https://semver.org/spec/v2.0.0.
 ## [1.2.3] - 2026-08-12
 
 ### Fixed
-- **`Reconfigure...` tolera la latencia real de headsets Bluetooth**: el wizard hace polling cada 500 ms y usa ventanas de hasta 15 s para el primer ON y el OFF, y hasta 20 s para el ON final. Esto evita falsos negativos cuando Windows tarda varios segundos en reflejar `Active`/`Unplugged`.
-- **Los headsets Bluetooth pueden reaparecer con un `Item ID` distinto** tras apagarse y reconectarse. Si el ID original ya no aparece, Reconfigure vuelve a localizar el endpoint por su nombre estable, usa el estado observado y persiste el `Item ID` más reciente en `config.json`. Validado en hardware real con Jabra Evolve 65 (`ON → OFF → ON`, reinicio y nuevo `OFF → ON`).
-- Se añadió diagnóstico detallado cuando un estado no llega a tiempo: el log muestra el estado final y los endpoints/IDs que `svcl` está viendo, para distinguir timing de un endpoint recreado.
-- `Invoke-Reconfigure` envuelve también la apertura/construcción del diálogo en `try/catch`, de modo que los fallos previos a `Detect mode...` quedan registrados en `autoswitch.log`.
+- **`Reconfigure...` now tolerates real Bluetooth headset latency.** The wizard polls every 500 ms and allows up to 15 s for the first ON state, 15 s for OFF and 20 s for the final ON. This prevents false negatives when Windows needs several seconds to expose `Active` or `Unplugged`.
+- **Bluetooth endpoints may return with a different `Item ID` after power cycling.** If the original ID disappears, Reconfigure locates the same endpoint by stable identity, uses the observed state and stores the newest `Item ID`. This was validated on real Jabra Evolve 65 hardware across `ON → OFF → ON`, restart and another `OFF → ON` cycle.
+- Added detailed diagnostics when a state transition does not arrive before the bounded wait: the log records the last state and the endpoints/IDs visible through `svcl`.
+- `Invoke-Reconfigure` also wraps dialog creation/opening in `try/catch`, so failures that occur before mode detection are written to `autoswitch.log`.
 
 ## [1.2.2] - 2026-08-12
 
 ### Fixed
-- **Reconfigure endurecido al cambiar entre `WindowsEndpoint` y `LogitechGHub`**: una config de `WindowsEndpoint` podía no tener `GHubPort`; al reconfigurar a un PRO X 2, `Connect-GHub` usa ahora el puerto seguro por defecto (9010) en vez de fallar por una propiedad ausente.
-- Los campos opcionales de config (`DetectionMode`, `EnhancementsDeviceId`, `GHubDisplayName`, `GHubPort`) se gestionan con `Add-Member -Force` (crea o actualiza) y se **eliminan los campos G HUB obsoletos** al pasar a `WindowsEndpoint`, para no dejar asociaciones fantasma.
-- **Varios PRO X 2 en G HUB**: el wizard ya no adivina cuál corresponde; pregunta al usuario (Sí/No/Cancelar) por cada candidato hasta confirmar uno, o cancela y deja la config intacta.
+- Hardened `Reconfigure...` when switching between `WindowsEndpoint` and `LogitechGHub`: a `WindowsEndpoint` config may not contain `GHubPort`; when reconfiguring to a PRO X 2, `Connect-GHub` now safely defaults to port 9010 instead of failing on a missing property.
+- Optional config fields (`DetectionMode`, `EnhancementsDeviceId`, `GHubDisplayName`, `GHubPort`) are created or updated with `Add-Member -Force`; obsolete G HUB fields are removed when switching to `WindowsEndpoint` so stale associations are not retained.
+- If G HUB exposes multiple PRO X 2 devices, the wizard asks the user to confirm the matching candidate instead of guessing. Cancel leaves the existing configuration untouched.
 
 ## [1.2.1] - 2026-08-12
 
 ### Fixed
-- **`Reconfigure...` del tray ahora ejecuta el wizard completo de detección** en vez de solo intercambiar `HeadsetId`/`SpeakerId`. La versión anterior dejaba el `DetectionMode` y la asociación G HUB antiguos, lo que producía dos estados rotos: un PRO X 2 reconfigurado a Jabra seguía vigilando el PRO X 2, y un Jabra reconfigurado a PRO X 2 seguía en `WindowsEndpoint` (Windows siempre reporta el endpoint del PRO X 2 `Active`, así que el apagado nunca se detectaba). Ahora valida el ciclo `ON → OFF → ON`, determina `WindowsEndpoint` o `LogitechGHub` (con confirmación del PRO X 2 vía G HUB), y actualiza `DetectionMode`, `GHubDisplayName` y `EnhancementsDeviceId`. Si no hay método compatible, deja la config intacta.
-- **README dentro del ZIP/tag desfasado**: la v1.2.0 incluyó un README que describía el flujo "G HUB primero" del instalador; el flujo real es universal-first. Corregido en el repo y en esta release.
+- **Tray `Reconfigure...` now runs the complete detection wizard** instead of only replacing `HeadsetId`/`SpeakerId`. The previous implementation could leave an old detection mode or G HUB association behind when switching between a PRO X 2 and a generic headset.
+- Reconfiguration now validates `ON → OFF → ON`, determines `WindowsEndpoint` or `LogitechGHub`, updates the relevant config fields and preserves the old configuration if compatibility cannot be proven.
+- The README included in the v1.2.0 tag/package described an older G-HUB-first installer flow. Documentation was corrected to match the universal-first implementation.
 
 ## [1.2.0] - 2026-08-12
 
 ### Added
-- Modo universal `WindowsEndpoint`: detecta el estado físico del auricular leyendo el estado del endpoint de audio de Windows (`svcl /scomma`, columna `Device State`). Funciona con cualquier auricular inalámbrico cuyo endpoint refleje el estado físico (p. ej. Jabra Evolve 65: `Active` → conectado, `Unplugged`/ausente → desconectado).
-- Campo `DetectionMode` en config (`WindowsEndpoint` | `LogitechGHub`). Compatibilidad hacia atrás: una config sin `DetectionMode` se interpreta como `LogitechGHub` y se migra a v1.2.0 automáticamente en el primer arranque.
-- Icono de bandeja (tray) en el runtime con icono propio (`assets/icon.ico`): activar/desactivar AutoSwitch, deshabilitar/habilitar Audio Enhancements del headset configurado y salir. El menú de enhancements se refresca cada 5 s para reflejar el estado real (`SysFx`).
-- Menú de bandeja con **líneas de información** (Headset / Fallback / Next switch, refrescadas cada 5 s) y opción **Reconfigure...** que abre un diálogo para elegir un nuevo auricular/fallback de los dispositivos actuales de Windows sin reinstalar; guarda `config.json` y el worker recarga la config en el siguiente ciclo (flag `control/reload.flag`).
-- Arquitectura de runtime a dos procesos: el polling corre en un **proceso worker separado** (`AUTOSWITCH_WORKER=1`, mismo script re-ejecutado, con guard anti-polls-concurrentes) para que el message pump de WinForms (`Application.Run()` sobre un `Form` invisible) y la bandeja nunca se bloqueen. La comunicación es por flags de control (`control/enabled.flag`, `control/stop.flag`).
-- `Toggle-AudioEnhancements.ps1`: helper elevado (UAC puntual) que escribe `PKEY_AudioEndpoint_Disable_SysFx` en el endpoint del headset vía `IPolicyConfig`, verifica el resultado y actualiza el menú solo si el cambio se confirmó. El runtime nunca se ejecuta elevado.
-- Instalador universal: selecciona headset y fallback desde la lista de dispositivos de Windows y auto-detecta el modo (si Windows refleja `Active ↔ Unplugged` → `WindowsEndpoint`; si no y es Logitech con G HUB → `LogitechGHub`; si no hay método compatible, aborta). G HUB filtra solo candidatos `PRO X 2` (evita seleccionar un ratón/teclado por accidente). El instalador ya **no vuelve a descargar `svcl.exe`** si ya está instalado.
-- `DisableEnhancementsOnStart` y `EnhancementsDeviceId` opcionales en config; el instalador ofrece deshabilitar enhancements del headset tras instalar.
-- Toda la interop COM (crear objetos, castear a interfaces, leer/escribir el FxStore) vive ahora en **C# compilado con `Add-Type`**, donde el cast a las interfaces `[ComImport]` (`IPolicyConfig`, `IMMDeviceEnumerator`, `IMMDevice`, `IPropertyStore`) es nativo — en PowerShell 5.1 el cast de un RCW COM a una interfaz custom falla.
-- Tests Pester nuevos: fixture real de exportación `svcl /scomma` (`tests/fixtures/svcl-export.csv` con `Name`/`Device Name` separados), filtrado `Type=Device` + `Direction=Render`, `Get-SvclDeviceLabel` (`Device Name — Name`), `Test-SvclExportValid` (exige `Item ID` + `Device State`), y estados `Active→Connected` / `Unplugged→Disconnected` / `Unknown`.
-- Todo el texto visible (instalador, runtime, helper, verificador, desinstalador) ahora está en inglés.
+- Universal `WindowsEndpoint` mode: reads the Windows audio endpoint state from `svcl /scomma` and maps physical state. A Jabra Evolve 65 was validated with `Active → Connected` and `Unplugged`/absence → `Disconnected`.
+- `DetectionMode` config field (`WindowsEndpoint` | `LogitechGHub`). Existing configs without the field remain backward compatible and are interpreted as `LogitechGHub` before migration.
+- System tray runtime with its own icon: enable/disable AutoSwitch, toggle Audio Enhancements for the configured headset and exit.
+- Tray information lines for Headset / Fallback / Next switch and a **Reconfigure...** action that chooses current Windows endpoints without requiring a reinstall.
+- Two-process runtime architecture: the polling loop runs in a separate worker process (`AUTOSWITCH_WORKER=1`) while WinForms owns the responsive tray/message pump. Control flags under `control/` coordinate enable, reload and stop operations.
+- `Toggle-AudioEnhancements.ps1`: temporary elevated helper that writes `PKEY_AudioEndpoint_Disable_SysFx` through `IPolicyConfig`, verifies the change and exits. The runtime itself remains non-elevated.
+- Universal installer flow: choose headset + fallback, auto-detect `WindowsEndpoint` when Windows exposes the physical state, otherwise offer the PRO X 2 G HUB fallback, and abort safely if no compatible method can be proven.
+- Optional `DisableEnhancementsOnStart` and `EnhancementsDeviceId` configuration.
+- COM interop implemented in C# via `Add-Type` so PowerShell 5.1 can reliably use the required `[ComImport]` interfaces.
+- Pester coverage for real `svcl /scomma` parsing, render-device filtering, endpoint labels, export validation and endpoint-state mapping.
+- User-visible installer, runtime, helper, verifier and uninstaller text moved to English.
 
 ### Changed
-- Config v1.2.0 con `DetectionMode` (el runtime conserva el comportamiento G HUB para instalaciones existentes).
-- `Runtime-PROX2-AutoSwitch.ps1`: lanza el worker con `$PSCommandPath` (no `$MyInvocation.MyCommand.Path`, que podía quedar vacío dentro de funciones en PS 5.1).
-- El runtime espera `Toggle-AudioEnhancements.ps1` y `icon.ico` en el directorio de instalación; el instalador los copia.
-- Verificador muestra `DetectionMode`, estado del endpoint del headset y estado de enhancements.
-- En el modo `LogitechGHub`, la conexión a G HUB es **persistente**: se conecta una vez, resuelve el `deviceId` una vez, y solo reconecta (re-resolviendo el `deviceId`, que puede cambiar tras una reconexión) ante un fallo.
-- Los scripts con caracteres no-ASCII llevan **BOM UTF-8** (lo exige PSScriptAnalyzer).
+- Config v1.2.0 records `DetectionMode`; existing G HUB installations retain their behavior.
+- Runtime starts the worker with `$PSCommandPath` because `$MyInvocation.MyCommand.Path` can be empty inside functions in PowerShell 5.1.
+- Runtime expects `Toggle-AudioEnhancements.ps1` and `icon.ico` in the install directory.
+- Verifier reports detection mode, headset endpoint state and Audio Enhancements state.
+- `LogitechGHub` mode keeps a persistent G HUB connection and resolves the current device ID again after reconnect failures.
+- PowerShell files containing non-ASCII characters use UTF-8 BOM where required by the validation toolchain.
 
 ### Fixed
-- El estado `Unknown` (svcl falla, `Disabled`, valor raro o **export inválido/vacío**) nunca cambia la salida de audio: protege de mandar al fallback por un fallo puntual de svcl. Solo un export válido + fila ausente se considera `Disconnected`.
-- `Get-EndpointFxState` lee ahora `PKEY_AudioEndpoint_Disable_SysFx` del **FxStore** vía `IPolicyConfig::GetPropertyValue(deviceId, bFxStore=true)` — el mismo store donde el helper elevado escribe. Antes lo leía del `IPropertyStore` del endpoint (donde la clave no existe) y el menú del tray siempre ofrecía "Disable" aunque ya estuvieran deshabilitados.
-- `Add-Type` con sentinel correcto (`AutoSwitch.EndpointFx`): el primer intento usaba un nombre que no existía y reintentaba compilar en cada llamada, fallando en la segunda.
-- `Get-SvclRenderDevice` devuelve ahora el array correctamente (un `return ,$array` envolvía el resultado y rompía `.Count` en los tests) y usa `Get-CsvColumn` para acceso fiable a propiedades.
-- Instalador: eliminadas funciones huérfanas que quedaron sin uso tras el rediseño del flujo de selección.
-- El icono de bandeja usa un `.ico` propio en vez de `SystemIcons::Application` (que no era legible/identificable).
+- `Unknown` endpoint state never changes the output. Invalid/empty exports and transient `svcl` failures therefore cannot send audio to the fallback.
+- `Get-EndpointFxState` now reads `PKEY_AudioEndpoint_Disable_SysFx` from the FxStore through `IPolicyConfig::GetPropertyValue(..., bFxStore=true)`, matching the store written by the elevated helper.
+- Corrected the `Add-Type` sentinel so the COM block is not compiled again on every call.
+- `Get-SvclRenderDevice` returns arrays correctly and uses reliable CSV-column access.
+- Removed installer functions that became unused after the universal selection-flow redesign.
+- Replaced the generic system tray icon with the project icon.
 
 ### Security
-- El WebSocket de G HUB (`ws://localhost:9010`) no es una API oficial de Logitech; puede cambiar en futuras versiones. Ver `AGENT.md`/`SOURCES.md`.
+- The G HUB WebSocket at `ws://localhost:9010` is an unofficial local interface and may change in future G HUB releases. Verified sources and constraints are documented in `AGENT.md` and `SOURCES.md`.
 
 ## [1.1.0] - 2026-08-07
 
 ### Added
-- Timeouts acotados en el WebSocket de G HUB: conexión (5 s), espera de respuesta (5 s) y límite global por petición (10 s). Tras un timeout se cierra el socket, se registra en el log y se reintenta; mientras el estado sea desconocido no se cambia la salida de audio.
-- Cierre del WebSocket con límite duro: `CloseAsync` espera como máximo 1 s y, si falla o expira, `Abort()` + `Dispose()` garantizan que la recuperación nunca se quede colgada con un G HUB atascado. Aplicado también a la comprobación de G HUB del instalador.
-- `lib/AutoSwitchCore.psm1`: módulo de lógica pura compartida (extracción de Item ID, debounce OFF, validación de config, token de timeout) usada por instalador, runtime y tests.
-- Tests Pester (`tests/`) ejecutados en CI: extracción de Item ID válido, rechazo de salida inválida, regresión `/Stdout`, debounce OFF tras `OffMissThreshold`, payload único que no dispara OFF, rechazo de IDs idénticos y autocancelación del token de timeout.
-- `install.ps1` verifica SHA-256 del ZIP de la release contra un asset `.sha256` publicado antes de extraer/ejecutar. Selección determinista: exactamente un `PROX2-AutoSwitch-*.zip`, fallo si hay cero o varios. Todo el flujo (descarga, checksum, extracción, ejecución) está dentro de un `try/finally` que limpia `%TEMP%` en cualquier fallo.
-- Workflow de release (`.github/workflows/release.yml`): genera el ZIP + `.sha256` automáticamente en tags `v*`.
-- Desinstalador reporta cada paso (proceso, inicio automático, directorio) y distingue éxito completo, limpieza parcial fallida y "nada que desinstalar". La eliminación programada vía `cmd.exe` se marca solo si se lanza correctamente.
+- Bounded G HUB WebSocket timeouts: connection (5 s), response wait (5 s) and overall request limit (10 s). Timeout recovery closes the socket, logs the event and retries; unknown state never changes the output.
+- Hard-bounded WebSocket close: `CloseAsync` waits at most 1 s, then `Abort()` + `Dispose()` guarantees recovery cannot hang on a stuck G HUB connection.
+- `lib/AutoSwitchCore.psm1` shared pure logic for Item ID extraction, OFF debounce, config validation and request timeout helpers.
+- Pester CI coverage for valid/invalid Item IDs, the `/Stdout` regression, debounce behavior, config validation and timeout cancellation.
+- `install.ps1` verifies the release ZIP SHA-256 before extraction/execution, chooses exactly one versioned project archive and always cleans temporary files in `finally`.
+- Release workflow publishes a versioned ZIP and SHA-256 checksum.
+- Uninstaller reports process, startup and directory cleanup separately and distinguishes complete success from partial cleanup failure.
 
 ### Changed
-- Configuración de instalación ahora incluye `ConnectTimeoutMs`, `ReceiveTimeoutMs`, `RequestTimeoutMs` (config v1.1.0).
-- Instalador de un clic (`install.ps1`): solo instala releases que publiquen checksum `.sha256`; documenta la verificación antes de extraer.
+- Installation config gained `ConnectTimeoutMs`, `ReceiveTimeoutMs` and `RequestTimeoutMs`.
+- One-command install accepts only releases that provide a checksum asset.
 
 ### Fixed
-- `install.ps1`: eliminada la comprobación engañosa de `$LASTEXITCODE` tras invocar el instalador `.ps1`; los errores se propagan por excepción.
-- Desinstalador: frontera de ruta en la detección de "ejecutándose desde InstallDir" (`$InstallDir\*`).
-- Verificador: lee `GHubPort` de config en lugar de hardcodear 9010.
+- Removed misleading `$LASTEXITCODE` checking after launching the PowerShell installer; failures propagate as exceptions.
+- Hardened uninstall path-boundary detection.
+- Verifier reads `GHubPort` from config rather than hardcoding 9010.
 
 ## [1.0.0] - 2026-08-07
 
 ### Added
-- Instalador (`Instalar-PROX2-AutoSwitch.ps1`): descarga de SoundVolumeCommandLine desde NirSoft con verificación SHA-256, calibración de salidas por Item ID real, prueba real de ambos cambios e inicio automático invisible vía `wscript.exe`.
-- Runtime (`Runtime-PROX2-AutoSwitch.ps1`): detecta el estado físico del PRO X 2 vía el WebSocket de G HUB (`ws://localhost:9010`) y cambia la salida de audio de Windows.
-- Desinstalador (`Desinstalar-PROX2-AutoSwitch.ps1`): elimina proceso, inicio automático y archivos.
-- Verificador (`Verificar-PROX2-AutoSwitch.ps1`): diagnóstico rápido.
-- Instalador de un clic (`install.ps1`): bootstrap que descarga la última release de GitHub y ejecuta el instalador completo.
-- Sitio web (GitHub Pages, `site/`) bilingüe ES/EN.
-- Wiki del repositorio completa en ES/EN.
-- CI: validación de sintaxis PowerShell, linting con PSScriptAnalyzer y despliegue del sitio a Pages.
+- Initial installer with verified NirSoft SoundVolumeCommandLine download, real Item ID calibration, bidirectional switch tests and invisible startup through `wscript.exe`.
+- Runtime that detects the physical PRO X 2 state through the local G HUB WebSocket and changes the Windows default output.
+- Uninstaller and verifier.
+- One-command bootstrap that downloads the latest GitHub release and starts the complete installer.
+- GitHub Pages project site.
+- CI for PowerShell syntax and PSScriptAnalyzer validation.
 
 ### Known limitations
-- Solo admite dos salidas (auriculares y alternativa).
-- El WebSocket de G HUB no es una API oficial de Logitech; puede cambiar en futuras versiones.
+- Initial implementation supported only two outputs: headset and fallback.
+- The G HUB WebSocket is not an official Logitech API and may change.

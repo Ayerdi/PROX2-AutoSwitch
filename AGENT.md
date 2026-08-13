@@ -107,7 +107,7 @@ hardened to tolerate a recreated endpoint whose `Item ID` changes.
     "Disable audio enhancements" switch).
 
 12. **COM interop lives in C#**: PowerShell 5.1 cannot cast a COM RCW to a custom `[ComImport]` interface
-    (`New-Object`, `Activator` or `GetTypeFromCLSID` all fail with "No se puede convertir…"). The cast is
+    (`New-Object`, `Activator` or `GetTypeFromCLSID` all fail with "the COM interface cast fails at runtime"). The cast is
     native in C#, so both the helper and `lib/AutoSwitchCore.psm1` compile the whole COM block with
     `Add-Type` and expose a static method (`AutoSwitch.AudioEnhancements.SetSysFx`,
     `AutoSwitch.EndpointFx.ReadSysFx`). Read the SysFx state with `IPolicyConfig::GetPropertyValue` on the

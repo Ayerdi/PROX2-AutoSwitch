@@ -1,13 +1,13 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 <#
     Toggle-AudioEnhancements.ps1 - helper ELEVADO para activar/desactivar
     los audio enhancements de un endpoint de audio concreto.
 
-    Se lanza desde el runtime (o el instalador) con -Verb RunAs. Escribe
+    Launched by the runtime (or installer) with -Verb RunAs. Writes
     PKEY_AudioEndpoint_Disable_SysFx (1da5d803-d492-4edd-8c23-e0c0ffee7f0e, 5)
-    SOLO para el DeviceId indicado, verifica el resultado y sale con codigo:
+    ONLY for the specified DeviceId, verifies the result and exits with code:
       0 = cambio aplicado y verificado
-      1 = no se pudo aplicar o verificar (UAC cancelado, endpoint inexistente, ...)
+      1 = could not apply or verify (UAC cancelled, missing endpoint, ...)
 #>
 [CmdletBinding()]
 param(
@@ -35,10 +35,10 @@ function Write-AutoSwitchLog {
 try {
     $targetValue = if ($Action -eq 'Disable') { 1 } else { 0 }
 
-    # Toda la logica COM vive en C# (donde el cast a IPolicyConfig es nativo y
+    # All COM logic lives in C# (where casting to IPolicyConfig is native and
     # fiable). En PowerShell 5.1 el cast de un RCW COM a una interfaz
-    # [ComImport] custom falla ("No se puede convertir..."), por eso se expone
-    # un unico metodo estatico que hace Set + verifica internamente.
+    # a custom [ComImport] cast is unreliable in PowerShell 5.1), so this exposes
+    # one static method that performs Set + internal verification.
     $source = @'
 using System;
 using System.Runtime.InteropServices;
@@ -111,13 +111,13 @@ namespace AutoSwitch
             int hrGet = policy.GetPropertyValue(deviceId, true, ref pkey, out pvCheck);
             if (hrGet != 0)
             {
-                return -hrGet; // fallo en lectura -> exit 1
+                return -hrGet; // read failure -> exit 1
             }
 
             bool effective = pvCheck.ulVal != 0;
             if (effective != disable)
             {
-                return -2; // el cambio no se aplico (valor leido distinto del objetivo)
+                return -2; // change was not applied (read-back value differs from target)
             }
 
             return 0;
