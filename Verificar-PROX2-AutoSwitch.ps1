@@ -97,21 +97,21 @@ elseif ($mode -eq 'SteelSeriesNova5') {
     }
     Show-Test 'HeadsetControl provider' (Test-Path -LiteralPath $hcPath) $hcPath
 
-    $pid = 0
+    $steelSeriesPid = 0
     $pidOk = $false
     if ($cfg.PSObject.Properties['SteelSeriesProductId']) {
         try {
-            $pid = [int]$cfg.SteelSeriesProductId
-            $pidOk = $pid -in @(0x2232, 0x2253)
+            $steelSeriesPid = [int]$cfg.SteelSeriesProductId
+            $pidOk = $steelSeriesPid -in @(0x2232, 0x2253)
         }
         catch { }
     }
-    Show-Test 'SteelSeries Nova 5/5X PID' $pidOk $(if ($pidOk) { '0x{0:X4}' -f $pid } else { 'Missing or unsupported PID' })
+    Show-Test 'SteelSeries Nova 5/5X PID' $pidOk $(if ($pidOk) { '0x{0:X4}' -f $steelSeriesPid } else { 'Missing or unsupported PID' })
 
     if ((Test-Path -LiteralPath $hcPath) -and $pidOk -and
         (Get-Command Get-SteelSeriesNova5State -ErrorAction SilentlyContinue)) {
         try {
-            $currentState = Get-SteelSeriesNova5State -HeadsetControlPath $hcPath -ProductId $pid
+            $currentState = Get-SteelSeriesNova5State -HeadsetControlPath $hcPath -ProductId $steelSeriesPid
         }
         catch { $currentState = 'Unknown' }
         Show-Test 'SteelSeries physical state' ($currentState -in @('Connected', 'Disconnected')) "State: $currentState"
