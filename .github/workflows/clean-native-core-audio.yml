@@ -1,0 +1,55 @@
+name: prepare Core Audio validation cleanup
+
+on:
+  push:
+    branches:
+      - agent/native-core-audio
+
+permissions:
+  contents: write
+
+jobs:
+  clean:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/native-core-audio
+          fetch-depth: 0
+
+      - name: Clean stale references and validation exception
+        shell: python
+        run: |
+          from pathlib import Path
+          module_path = Path('lib/AutoSwitchCore.psm1')
+          module = module_path.read_text(encoding='utf-8-sig')
+          module = module.replace('Extract a valid render Item ID from svcl.exe output.', 'Extract a valid render Item ID from legacy command output.')
+          module = module.replace('Parse svcl.exe /scomma output into objects.', 'Parse legacy /scomma output into objects.')
+          module = module.replace('Filter svcl.exe /scomma export to real render output endpoints', 'Filter a legacy /scomma export to real render output endpoints')
+          module_path.write_text(module, encoding='utf-8-sig', newline='\n')
+
+          security_path = Path('SECURITY.md')
+          security = security_path.read_text(encoding='utf-8-sig')
+          old = "### NirSoft SoundVolumeCommandLine\n\nThe installer downloads `svcl-x64.zip` from NirSoft and verifies its pinned SHA-256 before extracting/running it. If NirSoft publishes a new build and the hash changes, installation must fail safely until the value is independently verified from the official hashes page.\n\n**Never disable the checksum check to make installation succeed.**"
+          new = "### Windows audio COM boundary\n\nEndpoint enumeration and state reads use documented Windows Core Audio interfaces in-process. Changing the system default endpoint uses the undocumented `IPolicyConfig` COM interface, isolated inside the embedded C# bridge. Treat HRESULT failures as unknown state, verify every role after a switch, and never guess a target device."
+          if old not in security:
+              raise RuntimeError('Expected legacy dependency section not found in SECURITY.md')
+          security_path.write_text(security.replace(old, new, 1), encoding='utf-8', newline='\n')
+
+          workflow_path = Path('.github/workflows/apply-native-core-audio.yml')
+          workflow = workflow_path.read_text(encoding='utf-8')
+          needle = "          if ($hits) {"
+          replacement = "          $hits = @($hits | Where-Object { $_ -notmatch 'legacySvclPath' })\n          if ($hits.Count -gt 0) {"
+          if needle not in workflow:
+              raise RuntimeError('Expected validation block not found in migration workflow')
+          workflow_path.write_text(workflow.replace(needle, replacement, 1), encoding='utf-8', newline='\n')
+          Path('.github/workflows/clean-native-core-audio.yml').unlink()
+
+      - name: Commit cleanup
+        shell: pwsh
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'chore: clean legacy dependency references'
+          git push origin HEAD:agent/native-core-audio
