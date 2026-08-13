@@ -977,8 +977,9 @@ function Get-ConfigDetectionMode {
         return 'LogitechGHub'
     }
 
-    if ($mode -ieq 'WindowsEndpoint') { return 'WindowsEndpoint' }
-    if ($mode -ieq 'LogitechGHub')    { return 'LogitechGHub' }
+    if ($mode -ieq 'WindowsEndpoint')    { return 'WindowsEndpoint' }
+    if ($mode -ieq 'LogitechGHub')       { return 'LogitechGHub' }
+    if ($mode -ieq 'SteelSeriesNova5')   { return 'SteelSeriesNova5' }
 
     return $null
 }

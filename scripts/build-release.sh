@@ -9,7 +9,7 @@ python3 - "$ROOT_DIR" "$ARCHIVE" "$VERSION" <<'PY'
 import pathlib, stat, sys, zipfile
 root=pathlib.Path(sys.argv[1]); archive=pathlib.Path(sys.argv[2]); version=sys.argv[3]
 prefix=f'PROX2-AutoSwitch-v{version}'
-paths=['Install.cmd','Verify.cmd','Uninstall.cmd','Install-AutoSwitch.ps1','Verify-AutoSwitch.ps1','Uninstall-AutoSwitch.ps1','Instalar-PROX2-AutoSwitch.ps1','Verificar-PROX2-AutoSwitch.ps1','Desinstalar-PROX2-AutoSwitch.ps1','Runtime-PROX2-AutoSwitch.ps1','Toggle-AudioEnhancements.ps1','install.ps1','lib/AutoSwitchCore.psm1','assets/icon.ico','README.md','AGENT.md','SOURCES.md','SECURITY.md','SUPPORT.md','CONTRIBUTING.md','CHANGELOG.md','LICENSE']
+paths=['Install.cmd','Verify.cmd','Uninstall.cmd','Install-AutoSwitch.ps1','Verify-AutoSwitch.ps1','Uninstall-AutoSwitch.ps1','Instalar-PROX2-AutoSwitch.ps1','Verificar-PROX2-AutoSwitch.ps1','Desinstalar-PROX2-AutoSwitch.ps1','Runtime-PROX2-AutoSwitch.ps1','Toggle-AudioEnhancements.ps1','install.ps1','lib/AutoSwitchCore.psm1','lib/SteelSeriesNova5.psm1','tools/Test-SteelSeriesNova5Hid.ps1','assets/icon.ico','README.md','AGENT.md','SOURCES.md','SECURITY.md','SUPPORT.md','CONTRIBUTING.md','CHANGELOG.md','LICENSE']
 with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED,compresslevel=9) as zf:
   for rel in sorted(paths,key=str.casefold):
     p=root/rel

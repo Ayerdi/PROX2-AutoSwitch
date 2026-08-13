@@ -7,6 +7,7 @@ $RuntimeSrc   = Join-Path $PackageDir "Runtime-PROX2-AutoSwitch.ps1"
 $UninstallSrc = Join-Path $PackageDir "Desinstalar-PROX2-AutoSwitch.ps1"
 $VerifySrc    = Join-Path $PackageDir "Verificar-PROX2-AutoSwitch.ps1"
 $ModuleSrc    = Join-Path $PackageDir "lib\AutoSwitchCore.psm1"
+$SteelModuleSrc = Join-Path $PackageDir "lib\SteelSeriesNova5.psm1"
 $HelperSrc    = Join-Path $PackageDir "Toggle-AudioEnhancements.ps1"
 $IconSrc      = Join-Path $PackageDir "assets\icon.ico"
 
@@ -20,7 +21,7 @@ $StartupDir   = [Environment]::GetFolderPath("Startup")
 $ShortcutPath = Join-Path $StartupDir "PRO X 2 AutoSwitch.lnk"
 
 
-foreach ($required in @($RuntimeSrc, $UninstallSrc, $VerifySrc, $ModuleSrc, $HelperSrc, $IconSrc)) {
+foreach ($required in @($RuntimeSrc, $UninstallSrc, $VerifySrc, $ModuleSrc, $SteelModuleSrc, $HelperSrc, $IconSrc)) {
     if (-not (Test-Path $required)) {
         throw "A package file is missing: $required. Extract the full ZIP before installing."
     }
@@ -84,6 +85,7 @@ Copy-Item $HelperSrc (Join-Path $InstallDir "Toggle-AudioEnhancements.ps1") -For
 Copy-Item $IconSrc (Join-Path $InstallDir "icon.ico") -Force
 New-Item -ItemType Directory -Path (Join-Path $InstallDir "lib") -Force | Out-Null
 Copy-Item $ModuleSrc (Join-Path $InstallDir "lib\AutoSwitchCore.psm1") -Force
+Copy-Item $SteelModuleSrc (Join-Path $InstallDir "lib\SteelSeriesNova5.psm1") -Force
 
 # --- G HUB functions for the installer ---
 $script:Ws  = $null
@@ -385,11 +387,15 @@ try {
     Write-Host "  [3] Not sure - validate automatically" -ForegroundColor White
     Write-Host "      -> Run the ON->OFF->ON cycle and auto-detect the mode" -ForegroundColor DarkGray
     Write-Host "         (recommended if this is a new headset)." -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  [4] SteelSeries Arctis Nova 5/5X" -ForegroundColor White
+    Write-Host "      -> Use SteelSeriesNova5: reads the headset state over HID" -ForegroundColor DarkGray
+    Write-Host "         (no SteelSeries GG or third-party software needed)." -ForegroundColor DarkGray
     $cycleChoice = 0
     do {
-        $cc = Read-Host "Choose 1, 2 or 3"
+        $cc = Read-Host "Choose 1, 2, 3 or 4"
         [int]::TryParse($cc, [ref]$cycleChoice) | Out-Null
-    } until ($cycleChoice -ge 1 -and $cycleChoice -le 3)
+    } until ($cycleChoice -ge 1 -and $cycleChoice -le 4)
 
     if ($cycleChoice -eq 1) {
         # Standard wireless headset: assume WindowsEndpoint. The selected endpoints
@@ -439,6 +445,28 @@ try {
 
         if (-not $DetectionMode) {
             Write-Host "      No G HUB association was set; the config will not be written." -ForegroundColor DarkGray
+        }
+    }
+    elseif ($cycleChoice -eq 4) {
+        # SteelSeries Arctis Nova 5/5X: HID receiver detection via the module.
+        $steelModule = Join-Path $InstallDir "lib\SteelSeriesNova5.psm1"
+        if (-not (Test-Path $steelModule)) {
+            Write-Host "      SteelSeries module not present in the package; cannot use this mode." -ForegroundColor Red
+        }
+        else {
+            try {
+                Import-Module $steelModule -ErrorAction Stop
+                if (Test-SteelSeriesNova5Receiver) {
+                    $DetectionMode = "SteelSeriesNova5"
+                    Write-Host "      SteelSeries Nova 5/5X receiver detected over HID." -ForegroundColor Green
+                }
+                else {
+                    Write-Host "      No compatible SteelSeries Nova 5/5X receiver found." -ForegroundColor Red
+                }
+            }
+            catch {
+                Write-Host "      SteelSeries check failed: $($_.Exception.Message)" -ForegroundColor Red
+            }
         }
     }
     else {
@@ -640,7 +668,7 @@ try {
     }
 
     $config = [ordered]@{
-        Version                = "1.3.0"
+        Version                = "1.4.0"
         DetectionMode          = $DetectionMode
         HeadsetName            = [string]$headsetOutput.Name
         HeadsetId              = [string]$headsetOutput.ItemId

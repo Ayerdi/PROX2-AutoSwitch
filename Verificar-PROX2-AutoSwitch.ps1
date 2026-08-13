@@ -102,6 +102,28 @@ if ($mode -eq 'LogitechGHub') {
 elseif ($mode -eq 'WindowsEndpoint') {
     Write-Host "[SKIP] G HUB (not used in WindowsEndpoint mode)" -ForegroundColor DarkGray
 }
+elseif ($mode -eq 'SteelSeriesNova5') {
+    Write-Host "[SKIP] G HUB (not used in SteelSeriesNova5 mode)" -ForegroundColor DarkGray
+    # SteelSeries receiver presence over HID.
+    $steelModule = Join-Path $InstallDir "lib\SteelSeriesNova5.psm1"
+    if (Test-Path $steelModule) {
+        try {
+            Import-Module $steelModule -ErrorAction Stop
+            if (Test-SteelSeriesNova5Receiver) {
+                Show-Test "SteelSeries Nova 5/5X receiver" $true "HID receiver found"
+            }
+            else {
+                Show-Test "SteelSeries Nova 5/5X receiver" $false "No compatible HID receiver found"
+            }
+        }
+        catch {
+            Show-Test "SteelSeries Nova 5/5X receiver" $false $_.Exception.Message
+        }
+    }
+    else {
+        Show-Test "SteelSeries Nova 5/5X receiver" $false "Module not installed"
+    }
+}
 else {
     Show-Test "Detection mode" $false "Could not read a valid DetectionMode from config.json"
 }
