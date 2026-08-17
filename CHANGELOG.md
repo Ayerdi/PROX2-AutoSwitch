@@ -12,6 +12,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Runtime worker supports the `SteelSeriesNova5` mode (state read every poll; `Unknown` never switches). Verifier shows the receiver presence for this mode.
 - The release package now bundles the SteelSeries module and the diagnostic tool.
 
+### Fixed
+- **Logitech PRO X Wireless now detected via G HUB**: the G HUB filters hardcoded the `PRO\s*X\s*2` pattern, so any other PRO X headset (PRO X Wireless, PRO X) was skipped. New `Test-LogitechProXDeviceName` (in `AutoSwitchCore`, exported) matches PRO X / PRO X 2 / PRO X Wireless and excludes Logitech mouse names (e.g. G PRO X Superlight); used in the runtime fallback lookup and both installer G HUB filters. Prompts/logs now say "Logitech PRO X".
+
 ## [1.3.0] - 2026-08-13
 
 ### Changed
