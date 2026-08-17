@@ -19,6 +19,20 @@ $ModulePath = Join-Path $InstallDir "lib\AutoSwitchCore.psm1"
 if (-not (Test-Path $ModulePath)) { exit 12 }
 Import-Module $ModulePath -ErrorAction Stop
 
+# SteelSeries Nova 5/5X HID detection (optional provider module).
+$script:SteelSeriesModulePath = Join-Path $InstallDir "lib\SteelSeriesNova5.psm1"
+$script:SteelSeriesAvailable = $false
+if (Test-Path $script:SteelSeriesModulePath) {
+    try {
+        Import-Module $script:SteelSeriesModulePath -ErrorAction Stop
+        $script:SteelSeriesAvailable = $true
+    }
+    catch {
+        Write-AutoSwitchLog ("SteelSeries module present but failed to import: {0}" -f $_.Exception.Message)
+        $script:SteelSeriesAvailable = $false
+    }
+}
+
 # Timeouts de G HUB (ms). Overridables desde config.json.
 $script:ConnectTimeoutMs = 5000
 $script:ReceiveTimeoutMs = 5000
@@ -271,15 +285,15 @@ function Get-ProX2BatteryPath {
 
     if (-not $headset) {
         $headset = $all |
-            Where-Object { $_.extendedDisplayName -match "PRO\s*X\s*2" } |
+            Where-Object { Test-LogitechProXDeviceName -Name $_.extendedDisplayName } |
             Select-Object -First 1
     }
 
     if (-not $headset) {
-        throw "G HUB did not return the PRO X 2 in /devices/list."
+        throw "G HUB did not return a Logitech PRO X headset in /devices/list."
     }
 
-    Write-AutoSwitchLog ("PRO X 2 detected by G HUB: {0} ({1})" -f $headset.extendedDisplayName, $headset.id)
+    Write-AutoSwitchLog ("Logitech PRO X detected by G HUB: {0} ({1})" -f $headset.extendedDisplayName, $headset.id)
     return "/battery/$($headset.id)/state"
 }
 
@@ -1092,6 +1106,29 @@ function Start-WorkerLoop {
                 if (-not $availabilityLogged) {
                     Write-AutoSwitchLog ("WindowsEndpoint unavailable: {0}. It will retry." -f $_.Exception.Message)
                     $availabilityLogged = $true
+                }
+            }
+        }
+        elseif ($script:DetectionMode -eq 'SteelSeriesNova5') {
+            # SteelSeries Arctis Nova 5/5X HID state via the optional module.
+            if (-not $script:SteelSeriesAvailable) {
+                if (-not $availabilityLogged) {
+                    Write-AutoSwitchLog "SteelSeries module not available; not switching."
+                    $availabilityLogged = $true
+                }
+            }
+            else {
+                try {
+                    $steelState = Get-SteelSeriesNova5State -TimeoutMilliseconds 800
+                    if ($steelState -eq 'Connected') { $isOn = $true; $known = $true }
+                    elseif ($steelState -eq 'Disconnected') { $isOn = $false; $known = $true }
+                    # Unknown -> no tocar nada.
+                }
+                catch {
+                    if (-not $availabilityLogged) {
+                        Write-AutoSwitchLog ("SteelSeries unavailable: {0}. It will retry." -f $_.Exception.Message)
+                        $availabilityLogged = $true
+                    }
                 }
             }
         }

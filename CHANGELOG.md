@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project follows [Semantic Versioning](https://semver.org/).
 
+## [1.4.0] - 2026-08-13
+
+### Added
+- **SteelSeries Arctis Nova 5/5X provider** (`SteelSeriesNova5` detection mode): reads the headset physical state directly over HID (P/Invoke to `hid.dll`/`setupapi.dll`, no SteelSeries GG or third-party software). Adds `lib/SteelSeriesNova5.psm1`, Pester tests and a diagnostic tool (`tools/Test-SteelSeriesNova5Hid.ps1`) to watch the receiver state live.
+- Installer offers a "SteelSeries Arctis Nova 5/5X" option when picking the headset type; it verifies the HID receiver is present and writes `DetectionMode = SteelSeriesNova5`.
+- Runtime worker supports the `SteelSeriesNova5` mode (state read every poll; `Unknown` never switches). Verifier shows the receiver presence for this mode.
+- The release package now bundles the SteelSeries module and the diagnostic tool.
+
 ## [1.3.0] - 2026-08-13
 
 ### Changed

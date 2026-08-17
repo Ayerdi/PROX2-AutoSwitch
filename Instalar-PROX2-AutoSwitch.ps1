@@ -7,6 +7,7 @@ $RuntimeSrc   = Join-Path $PackageDir "Runtime-PROX2-AutoSwitch.ps1"
 $UninstallSrc = Join-Path $PackageDir "Desinstalar-PROX2-AutoSwitch.ps1"
 $VerifySrc    = Join-Path $PackageDir "Verificar-PROX2-AutoSwitch.ps1"
 $ModuleSrc    = Join-Path $PackageDir "lib\AutoSwitchCore.psm1"
+$SteelModuleSrc = Join-Path $PackageDir "lib\SteelSeriesNova5.psm1"
 $HelperSrc    = Join-Path $PackageDir "Toggle-AudioEnhancements.ps1"
 $IconSrc      = Join-Path $PackageDir "assets\icon.ico"
 
@@ -20,7 +21,7 @@ $StartupDir   = [Environment]::GetFolderPath("Startup")
 $ShortcutPath = Join-Path $StartupDir "PRO X 2 AutoSwitch.lnk"
 
 
-foreach ($required in @($RuntimeSrc, $UninstallSrc, $VerifySrc, $ModuleSrc, $HelperSrc, $IconSrc)) {
+foreach ($required in @($RuntimeSrc, $UninstallSrc, $VerifySrc, $ModuleSrc, $SteelModuleSrc, $HelperSrc, $IconSrc)) {
     if (-not (Test-Path $required)) {
         throw "A package file is missing: $required. Extract the full ZIP before installing."
     }
@@ -84,6 +85,7 @@ Copy-Item $HelperSrc (Join-Path $InstallDir "Toggle-AudioEnhancements.ps1") -For
 Copy-Item $IconSrc (Join-Path $InstallDir "icon.ico") -Force
 New-Item -ItemType Directory -Path (Join-Path $InstallDir "lib") -Force | Out-Null
 Copy-Item $ModuleSrc (Join-Path $InstallDir "lib\AutoSwitchCore.psm1") -Force
+Copy-Item $SteelModuleSrc (Join-Path $InstallDir "lib\SteelSeriesNova5.psm1") -Force
 
 # --- G HUB functions for the installer ---
 $script:Ws  = $null
@@ -378,18 +380,22 @@ try {
     Write-Host "      -> Use WindowsEndpoint: Windows detects the endpoint as" -ForegroundColor DarkGray
     Write-Host "         Active when ON and Unplugged/absent when OFF." -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "  [2] Logitech PRO X 2 (LIGHTSPEED dongle stays plugged in)" -ForegroundColor White
+    Write-Host "  [2] Logitech PRO X (PRO X 2 / PRO X Wireless)" -ForegroundColor White
     Write-Host "      -> Use LogitechGHub: Windows keeps the endpoint Active even" -ForegroundColor DarkGray
     Write-Host "         when OFF, so detection uses the G HUB battery signal." -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "  [3] Not sure - validate automatically" -ForegroundColor White
     Write-Host "      -> Run the ON->OFF->ON cycle and auto-detect the mode" -ForegroundColor DarkGray
     Write-Host "         (recommended if this is a new headset)." -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  [4] SteelSeries Arctis Nova 5/5X" -ForegroundColor White
+    Write-Host "      -> Use SteelSeriesNova5: reads the headset state over HID" -ForegroundColor DarkGray
+    Write-Host "         (no SteelSeries GG or third-party software needed)." -ForegroundColor DarkGray
     $cycleChoice = 0
     do {
-        $cc = Read-Host "Choose 1, 2 or 3"
+        $cc = Read-Host "Choose 1, 2, 3 or 4"
         [int]::TryParse($cc, [ref]$cycleChoice) | Out-Null
-    } until ($cycleChoice -ge 1 -and $cycleChoice -le 3)
+    } until ($cycleChoice -ge 1 -and $cycleChoice -le 4)
 
     if ($cycleChoice -eq 1) {
         # Standard wireless headset: assume WindowsEndpoint. The selected endpoints
@@ -400,18 +406,18 @@ try {
     }
     elseif ($cycleChoice -eq 2) {
         # Logitech PRO X 2: needs G HUB. The endpoint alone cannot tell ON from OFF.
-        Write-Host "      Assuming a Logitech PRO X 2. Looking up the headset in G HUB..." -ForegroundColor Yellow
+        Write-Host "      Assuming a Logitech PRO X. Looking up the headset in G HUB..." -ForegroundColor Yellow
         try {
             Connect-GHub
             $devices = Invoke-GHubGet -Path "/devices/list"
             $deviceInfos = @($devices.payload.deviceInfos)
 
             $ghubCandidates = @($deviceInfos | Where-Object {
-                $_.extendedDisplayName -match 'PRO\s*X\s*2'
+                Test-LogitechProXDeviceName -Name $_.extendedDisplayName
             })
 
             if ($ghubCandidates.Count -eq 0) {
-                Write-Host "      G HUB reports no PRO X 2. Try option 3 (auto-detect)." -ForegroundColor Red
+                Write-Host "      G HUB reports no Logitech PRO X headset. Try option 3 (auto-detect)." -ForegroundColor Red
             }
             else {
                 $ghubHeadset = $ghubCandidates[0]
@@ -422,7 +428,7 @@ try {
                     }
                     $ghubChoice = 0
                     do {
-                        $gc = Read-Host "Enter the number of the PRO X 2 that matches '$headsetName'"
+                        $gc = Read-Host "Enter the number of the PRO X headset that matches '$headsetName'"
                         $ghubValid = [int]::TryParse($gc, [ref]$ghubChoice) -and
                                      $ghubChoice -ge 1 -and
                                      $ghubChoice -le $ghubCandidates.Count
@@ -439,6 +445,28 @@ try {
 
         if (-not $DetectionMode) {
             Write-Host "      No G HUB association was set; the config will not be written." -ForegroundColor DarkGray
+        }
+    }
+    elseif ($cycleChoice -eq 4) {
+        # SteelSeries Arctis Nova 5/5X: HID receiver detection via the module.
+        $steelModule = Join-Path $InstallDir "lib\SteelSeriesNova5.psm1"
+        if (-not (Test-Path $steelModule)) {
+            Write-Host "      SteelSeries module not present in the package; cannot use this mode." -ForegroundColor Red
+        }
+        else {
+            try {
+                Import-Module $steelModule -ErrorAction Stop
+                if (Test-SteelSeriesNova5Receiver) {
+                    $DetectionMode = "SteelSeriesNova5"
+                    Write-Host "      SteelSeries Nova 5/5X receiver detected over HID." -ForegroundColor Green
+                }
+                else {
+                    Write-Host "      No compatible SteelSeries Nova 5/5X receiver found." -ForegroundColor Red
+                }
+            }
+            catch {
+                Write-Host "      SteelSeries check failed: $($_.Exception.Message)" -ForegroundColor Red
+            }
         }
     }
     else {
@@ -563,7 +591,7 @@ try {
         # G HUB fallback: ONLY if the user confirms that the chosen headset is
         # a Logitech PRO X 2 listed by G HUB. Never associate $logi[0].
         Write-Host ""
-        $conf = Read-Host "Is this headset a Logitech PRO X 2 detected by G HUB? (y/N)"
+        $conf = Read-Host "Is this headset a Logitech PRO X (PRO X 2 / PRO X Wireless) detected by G HUB? (y/N)"
         if ($conf -match '^(s|si|sí|y|yes)$') {
             try {
                 Connect-GHub
@@ -571,24 +599,24 @@ try {
                 $deviceInfos = @($devices.payload.deviceInfos)
 
                 Write-Host ""
-                # Filter to ONLY PRO X 2 candidates: prevents accidentally
+                # Filter to ONLY Logitech PRO X candidates: prevents accidentally
                 # picking a Logitech mouse/keyboard and watching its battery.
                 $ghubCandidates = @($deviceInfos | Where-Object {
-                    $_.extendedDisplayName -match 'PRO\s*X\s*2'
+                    Test-LogitechProXDeviceName -Name $_.extendedDisplayName
                 })
 
                 if ($ghubCandidates.Count -eq 0) {
-                    Write-Host "      G HUB reports no PRO X 2." -ForegroundColor Red
+                    Write-Host "      G HUB reports no Logitech PRO X headset." -ForegroundColor Red
                 }
                 else {
-                    Write-Host "PRO X 2 headsets detected by G HUB:" -ForegroundColor Yellow
+                    Write-Host "Logitech PRO X headsets detected by G HUB:" -ForegroundColor Yellow
                     for ($i = 0; $i -lt $ghubCandidates.Count; $i++) {
                         Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $ghubCandidates[$i].extendedDisplayName, $ghubCandidates[$i].id)
                     }
 
                     $ghubChoice = 0
                     do {
-                        $gc = Read-Host "Enter the number of the PRO X 2 that matches '$headsetName'"
+                        $gc = Read-Host "Enter the number of the PRO X headset that matches '$headsetName'"
                         $ghubValid = [int]::TryParse($gc, [ref]$ghubChoice) -and
                                      $ghubChoice -ge 1 -and
                                      $ghubChoice -le $ghubCandidates.Count
@@ -640,7 +668,7 @@ try {
     }
 
     $config = [ordered]@{
-        Version                = "1.3.0"
+        Version                = "1.4.0"
         DetectionMode          = $DetectionMode
         HeadsetName            = [string]$headsetOutput.Name
         HeadsetId              = [string]$headsetOutput.ItemId
