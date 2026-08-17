@@ -330,6 +330,26 @@ Describe 'Test-LogitechHeadsetDevice' {
         Test-LogitechHeadsetDevice -Device $keyboard | Should -Be $false
         Test-LogitechHeadsetDevice -Device $receiver | Should -Be $false
     }
+
+    It 'rejects a headset-typed device without battery capability' {
+        # LogitechGHub mode needs the battery signal to tell ON from OFF.
+        $dev = [pscustomobject]@{
+            extendedDisplayName = 'G733 Wireless Gaming Headset'
+            deviceType          = 'headset'
+            capabilities        = [pscustomobject]@{ hasBatteryStatus = $false }
+        }
+        Test-LogitechHeadsetDevice -Device $dev | Should -Be $false
+    }
+
+    It 'accepts a device whose type is not headset but has battery' {
+        # Some G HUB responses only expose the battery capability.
+        $dev = [pscustomobject]@{
+            extendedDisplayName = 'Some Wireless Audio Device'
+            deviceType          = 'unknown'
+            capabilities        = [pscustomobject]@{ hasBatteryStatus = $true }
+        }
+        Test-LogitechHeadsetDevice -Device $dev | Should -Be $true
+    }
 }
 
 

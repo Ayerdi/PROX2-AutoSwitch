@@ -1028,23 +1028,30 @@ function Test-LogitechHeadsetDevice {
         return $false
     }
 
+    # Battery capability is what the LogitechGHub runtime actually polls, so it
+    # is the deciding signal when the structured fields are present.
+    $hasBattery = $false
+    $capsProp = $Device.PSObject.Properties['capabilities']
+    if ($null -ne $capsProp -and $null -ne $capsProp.Value) {
+        $bProp = $capsProp.Value.PSObject.Properties['hasBatteryStatus']
+        if ($null -ne $bProp) { $hasBattery = [bool]$bProp.Value }
+    }
+
     # Prefer the structured G HUB fields when present.
     $typeProp = $Device.PSObject.Properties['deviceType']
     if ($null -ne $typeProp -and -not [string]::IsNullOrWhiteSpace([string]$typeProp.Value)) {
         $type = [string]$typeProp.Value
-        if ($type -match '(?i)headset|headphone|audio') { return $true }
         if ($type -match '(?i)mouse|keyboard|receiver|dongle') { return $false }
+        if ($type -match '(?i)headset|headphone|audio') {
+            # A headset is only usable in LogitechGHub mode if it exposes a
+            # battery signal; otherwise the runtime cannot tell ON from OFF.
+            return $hasBattery
+        }
     }
 
-    $capsProp = $Device.PSObject.Properties['capabilities']
-    if ($null -ne $capsProp -and $null -ne $capsProp.Value) {
-        $hasBattery = $false
-        $bProp = $capsProp.Value.PSObject.Properties['hasBatteryStatus']
-        if ($null -ne $bProp) { $hasBattery = [bool]$bProp.Value }
-        if ($hasBattery) { return $true }
-    }
+    if ($hasBattery) { return $true }
 
-    # Fallback: name heuristic.
+    # Fallback: name heuristic (older G HUB responses without fields).
     return ($name -match '(?i)\bheadset\b|\bheadphone\b|PRO\s*X|G733|G533|G435|G335|G935|G933|Astro')
 }
 
