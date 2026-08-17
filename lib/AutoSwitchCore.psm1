@@ -1005,4 +1005,47 @@ function Test-LogitechProXDeviceName {
     return ($Name -match '\bPRO\s*X(?:\s*2|\s*Wireless)?\b')
 }
 
-Export-ModuleMember -Function Get-RenderItemIdFromText, Resolve-HeadsetState, Test-ValidAudioConfig, New-GHubTimeoutToken, ConvertFrom-SvclCsv, ConvertFrom-CsvLine, Get-CsvColumn, Resolve-EndpointState, Resolve-DetectedState, Test-SvclExportValid, Get-SvclRenderDevice, Get-SvclDeviceLabel, Find-SvclRenderDeviceByIdentity, Get-EndpointFxState, Get-ConfigDetectionMode, Test-LogitechProXDeviceName, Initialize-CoreAudioBackend, Get-CoreAudioRenderDevices, Get-CoreAudioDefaultRenderDeviceId, Get-CoreAudioDefaultRenderDeviceIds, Test-CoreAudioDefaultRenderDevice, Set-CoreAudioDefaultRenderDevice
+function Test-LogitechHeadsetDevice {
+    <#
+    .SYNOPSIS
+        True if a G HUB deviceInfo is a Logitech headset (any model).
+    .DESCRIPTION
+        Uses the G HUB fields when available: deviceType should indicate a
+        headset and capabilities.hasBatteryStatus should be true (that is the
+        signal the runtime polls). Falls back to the extendedDisplayName for
+        older G HUB responses. Excludes obvious non-headsets (mouse, keyboard,
+        receiver, dongle, superlight).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][object]$Device
+    )
+
+    $name = [string]$Device.extendedDisplayName
+
+    # Strong negative hints first.
+    if ($name -match '(?i)superlight|mouse|keyboard|receiver|dongle|adapter|hub\b') {
+        return $false
+    }
+
+    # Prefer the structured G HUB fields when present.
+    $typeProp = $Device.PSObject.Properties['deviceType']
+    if ($null -ne $typeProp -and -not [string]::IsNullOrWhiteSpace([string]$typeProp.Value)) {
+        $type = [string]$typeProp.Value
+        if ($type -match '(?i)headset|headphone|audio') { return $true }
+        if ($type -match '(?i)mouse|keyboard|receiver|dongle') { return $false }
+    }
+
+    $capsProp = $Device.PSObject.Properties['capabilities']
+    if ($null -ne $capsProp -and $null -ne $capsProp.Value) {
+        $hasBattery = $false
+        $bProp = $capsProp.Value.PSObject.Properties['hasBatteryStatus']
+        if ($null -ne $bProp) { $hasBattery = [bool]$bProp.Value }
+        if ($hasBattery) { return $true }
+    }
+
+    # Fallback: name heuristic.
+    return ($name -match '(?i)\bheadset\b|\bheadphone\b|PRO\s*X|G733|G533|G435|G335|G935|G933|Astro')
+}
+
+Export-ModuleMember -Function Get-RenderItemIdFromText, Resolve-HeadsetState, Test-ValidAudioConfig, New-GHubTimeoutToken, ConvertFrom-SvclCsv, ConvertFrom-CsvLine, Get-CsvColumn, Resolve-EndpointState, Resolve-DetectedState, Test-SvclExportValid, Get-SvclRenderDevice, Get-SvclDeviceLabel, Find-SvclRenderDeviceByIdentity, Get-EndpointFxState, Get-ConfigDetectionMode, Test-LogitechProXDeviceName, Test-LogitechHeadsetDevice, Initialize-CoreAudioBackend, Get-CoreAudioRenderDevices, Get-CoreAudioDefaultRenderDeviceId, Get-CoreAudioDefaultRenderDeviceIds, Test-CoreAudioDefaultRenderDevice, Set-CoreAudioDefaultRenderDevice

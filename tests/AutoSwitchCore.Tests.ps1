@@ -304,6 +304,34 @@ Describe 'Test-LogitechProXDeviceName' {
     }
 }
 
+Describe 'Test-LogitechHeadsetDevice' {
+    It 'accepts a G HUB deviceInfo with headset type + battery capability' {
+        $dev = [pscustomobject]@{
+            extendedDisplayName = 'G733 Wireless Gaming Headset'
+            deviceType          = 'headset'
+            capabilities        = [pscustomobject]@{ hasBatteryStatus = $true }
+        }
+        Test-LogitechHeadsetDevice -Device $dev | Should -Be $true
+    }
+
+    It 'accepts PRO X 2 and PRO X Wireless by name' {
+        $d1 = [pscustomobject]@{ extendedDisplayName = 'PRO X 2 Lightspeed Gaming Headset' }
+        Test-LogitechHeadsetDevice -Device $d1 | Should -Be $true
+
+        $d2 = [pscustomobject]@{ extendedDisplayName = 'PRO X Wireless Gaming Headset' }
+        Test-LogitechHeadsetDevice -Device $d2 | Should -Be $true
+    }
+
+    It 'rejects mice, keyboards, receivers and dongles' {
+        $mouse    = [pscustomobject]@{ extendedDisplayName = 'G PRO X Superlight Mouse'; deviceType = 'mouse' }
+        $keyboard = [pscustomobject]@{ extendedDisplayName = 'G915 Keyboard';           deviceType = 'keyboard' }
+        $receiver = [pscustomobject]@{ extendedDisplayName = 'Lightspeed Receiver';     deviceType = 'receiver' }
+        Test-LogitechHeadsetDevice -Device $mouse    | Should -Be $false
+        Test-LogitechHeadsetDevice -Device $keyboard | Should -Be $false
+        Test-LogitechHeadsetDevice -Device $receiver | Should -Be $false
+    }
+}
+
 
 Describe 'Native Core Audio bridge' {
     It 'exports the native Core Audio commands' {
