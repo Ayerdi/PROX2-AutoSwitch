@@ -4,6 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/Ayerdi/PROX2-AutoSwitch)](https://github.com/Ayerdi/PROX2-AutoSwitch/releases/latest)
 [![Pages](https://github.com/Ayerdi/PROX2-AutoSwitch/actions/workflows/pages.yml/badge.svg)](https://github.com/Ayerdi/PROX2-AutoSwitch/actions/workflows/pages.yml)
+[![Vibe coding](https://img.shields.io/badge/vibe%20coding-purple)](https://github.com/Ayerdi/PROX2-AutoSwitch)
 
 Automatically switch the Windows default audio output when a compatible wireless headset turns on or off.
 
