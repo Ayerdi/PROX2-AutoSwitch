@@ -28,7 +28,7 @@ Project hardware tests on a Jabra Evolve 65:
 
 - 2026-08-10: Windows exposed the render endpoint as `Active` while connected and `Unplugged` while powered off; returning ON restored `Active`. This validates the generic `WindowsEndpoint` path for that device.
 - 2026-08-12: `Reconfigure...` was exercised from a PRO X 2 (`LogitechGHub`) configuration to the Jabra (`WindowsEndpoint`), followed by OFF → ON, process restart, and another OFF → ON. The runtime switched correctly and reloaded the new config.
-- Bluetooth/Core Audio may take several seconds to report the final ON state. A diagnostic run timed out immediately before the next `svcl` read reported `Active`, which motivated bounded polling windows rather than fixed 500/800 ms sleeps.
+- Bluetooth/Core Audio may take several seconds to report the final ON state. A diagnostic run timed out immediately before the next state read reported `Active`, which motivated bounded polling windows rather than fixed 500/800 ms sleeps.
 - An `Item ID` observed in one cycle is **not a portable/stable identity guarantee**. The reconfigure path treats `Device Name` + `Name` as fallback identity only when the captured ID disappears, then persists the latest observed ID.
 
 These are empirical project observations, not vendor guarantees for all Jabra/Bluetooth headsets.

@@ -1,33 +1,10 @@
 ﻿#requires -Version 5.1
-# Pester tests para lib/AutoSwitchCore.psm1
+# Pester tests for lib/AutoSwitchCore.psm1
 
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot '..\lib\AutoSwitchCore.psm1') -Force
-    $script:FixtureCsv = Get-Content -Raw (Join-Path $PSScriptRoot 'fixtures\svcl-export.csv')
 }
 
-Describe 'Get-RenderItemIdFromText' {
-    It 'extracts a valid render Item ID' {
-        $text = 'Realtek Audio - Default Render Device' + [char]10 + '{0.0.0.00000000}.{1A2B3C4D-5E6F-7890-ABCD-EF1234567890}'
-        $id = Get-RenderItemIdFromText -Text $text
-        $id | Should -Be '{0.0.0.00000000}.{1a2b3c4d-5e6f-7890-abcd-ef1234567890}'
-    }
-
-    It 'rejects output without a valid render Item ID' {
-        Get-RenderItemIdFromText -Text 'No items found' | Should -BeNullOrEmpty
-    }
-
-    It 'rejects an Item ID that is not a render device (different device class)' {
-        # Render device class must be {0.0.0.00000000}; other classes are not render endpoints.
-        Get-RenderItemIdFromText -Text '{1.0.0.00000000}.{1A2B3C4D-5E6F-7890-ABCD-EF1234567890}' | Should -BeNullOrEmpty
-    }
-
-    It 'extracts only the Item ID even with /Stdout-style contamination' {
-        # Regression: /Stdout /GetColumnValue prefija info extra del item.
-        $contaminated = '1 item found:' + [char]10 + 'Device name' + [char]10 + '{0.0.0.00000000}.{1A2B3C4D-5E6F-7890-ABCD-EF1234567890}'
-        Get-RenderItemIdFromText -Text $contaminated | Should -Be '{0.0.0.00000000}.{1a2b3c4d-5e6f-7890-abcd-ef1234567890}'
-    }
-}
 
 Describe 'Resolve-HeadsetState' {
     It 'switches OFF only after OffMissThreshold consecutive empty responses' {
@@ -90,94 +67,32 @@ Describe 'New-GHubTimeoutToken' {
     }
 }
 
-Describe 'ConvertFrom-SvclCsv' {
-    It 'parses a real svcl export (Name and Device Name are separate)' {
-        $rows = ConvertFrom-SvclCsv -Text $script:FixtureCsv
-        $rows.Count | Should -Be 5
-        $rows[0].Name | Should -Be 'Headphones'
-        $rows[0].'Device Name' | Should -Be '2- Jabra Evolve 65'
-        $rows[0].Type | Should -Be 'Device'
-        $rows[0].Direction | Should -Be 'Render'
-        $rows[0].'Device State' | Should -Be 'Active'
-        $rows[0].'Item ID' | Should -Be '{0.0.0.00000000}.{ed043b5e-65dc-4ba6-a847-310517ac1849}'
-    }
 
-    It 'returns empty for header-only or empty input' {
-        ConvertFrom-SvclCsv -Text "Name,Type,Direction" | Should -BeNullOrEmpty
-        ConvertFrom-SvclCsv -Text "" | Should -BeNullOrEmpty
-    }
-}
 
-Describe 'Get-SvclRenderDevice' {
-    It 'filters to Device + Direction=Render only' {
-        $devices = Get-SvclRenderDevice -CsvText $script:FixtureCsv
-        $devices.Count | Should -Be 3
-        # Must exclude the microphone (Capture) and application rows.
-        ($devices | Where-Object { $_.Name -match 'Microphone' }).Count | Should -Be 0
-        ($devices | Where-Object { $_.Name -match 'Application' }).Count | Should -Be 0
-    }
 
-    It 'keeps the real column names' {
-        $devices = Get-SvclRenderDevice -CsvText $script:FixtureCsv
-        $devices[0].PSObject.Properties.Name -contains 'Device State' | Should -Be $true
-        $devices[0].PSObject.Properties.Name -contains 'Item ID' | Should -Be $true
-        $devices[0].PSObject.Properties.Name -contains 'Type' | Should -Be $true
-        $devices[0].PSObject.Properties.Name -contains 'Direction' | Should -Be $true
-        $devices[0].PSObject.Properties.Name -contains 'Device Name' | Should -Be $true
-    }
-
-    It 'returns empty for empty input' {
-        Get-SvclRenderDevice -CsvText "" | Should -BeNullOrEmpty
-    }
-}
-
-Describe 'Test-SvclExportValid' {
-    It 'accepts a real svcl export' {
-        Test-SvclExportValid -CsvText $script:FixtureCsv | Should -Be $true
-    }
-
-    It 'rejects empty or whitespace-only output' {
-        Test-SvclExportValid -CsvText "" | Should -Be $false
-        Test-SvclExportValid -CsvText "   " | Should -Be $false
-    }
-
-    It 'rejects garbage that is not a svcl export' {
-        Test-SvclExportValid -CsvText "No items found" | Should -Be $false
-        Test-SvclExportValid -CsvText "ERROR: something went wrong" | Should -Be $false
-    }
-
-    It 'rejects a header-only export (no data rows)' {
-        Test-SvclExportValid -CsvText "Name,Type,Direction" | Should -Be $false
-    }
-
-    It 'rejects an export missing Item ID or Device State' {
-        # Header/data rows without the columns required by the runtime.
-        Test-SvclExportValid -CsvText "Name,Volume`nSpeakers,50" | Should -Be $false
-        Test-SvclExportValid -CsvText "Name,Item ID`nSpeakers,{0.0.0.00000000}.{GUID}" | Should -Be $false
-    }
-}
-
-Describe 'Get-SvclDeviceLabel' {
+Describe 'Get-DeviceLabel' {
     It 'combines Device Name and Name when both exist' {
         $row = [pscustomobject]@{ Name = 'Headphones'; 'Device Name' = '2- Jabra Evolve 65' }
-        Get-SvclDeviceLabel -Row $row | Should -Be '2- Jabra Evolve 65 — Headphones'
+        Get-DeviceLabel -Row $row | Should -Be '2- Jabra Evolve 65 — Headphones'
     }
 
     It 'falls back to Name when Device Name is missing' {
         $row = [pscustomobject]@{ Name = 'Speakers' }
-        Get-SvclDeviceLabel -Row $row | Should -Be 'Speakers'
+        Get-DeviceLabel -Row $row | Should -Be 'Speakers'
     }
 
     It 'falls back to Device Name when Name is missing or identical' {
         $row = [pscustomobject]@{ Name = 'Speakers (Application)'; 'Device Name' = 'Speakers (Application)' }
-        Get-SvclDeviceLabel -Row $row | Should -Be 'Speakers (Application)'
+        Get-DeviceLabel -Row $row | Should -Be 'Speakers (Application)'
     }
 }
 
-Describe 'Find-SvclRenderDeviceByIdentity' {
+Describe 'Find-RenderDeviceByIdentity' {
     It 'matches the Jabra render endpoint by Device Name + Name' {
-        $rows = @(ConvertFrom-SvclCsv -Text $script:FixtureCsv)
-        $row = Find-SvclRenderDeviceByIdentity -Rows $rows -DeviceName '2- Jabra Evolve 65' -Name 'Headphones'
+        $rows = @(
+            [pscustomobject]@{ Type='Device'; Direction='Render'; 'Device Name'='2- Jabra Evolve 65'; Name='Headphones'; 'Item ID'='{0.0.0.00000000}.{ed043b5e-65dc-4ba6-a847-310517ac1849}' }
+        )
+        $row = Find-RenderDeviceByIdentity -Rows $rows -DeviceName '2- Jabra Evolve 65' -Name 'Headphones'
         $row | Should -Not -BeNullOrEmpty
         $row.'Item ID' | Should -Be '{0.0.0.00000000}.{ed043b5e-65dc-4ba6-a847-310517ac1849}'
     }
@@ -187,19 +102,21 @@ Describe 'Find-SvclRenderDeviceByIdentity' {
             [pscustomobject]@{ Type='Device'; Direction='Render'; 'Device Name'='BT Headset'; Name='Stereo'; 'Item ID'='stereo' },
             [pscustomobject]@{ Type='Device'; Direction='Render'; 'Device Name'='BT Headset'; Name='Hands-Free'; 'Item ID'='handsfree' }
         )
-        $row = Find-SvclRenderDeviceByIdentity -Rows $rows -DeviceName 'BT Headset' -Name 'Hands-Free'
+        $row = Find-RenderDeviceByIdentity -Rows $rows -DeviceName 'BT Headset' -Name 'Hands-Free'
         $row.'Item ID' | Should -Be 'handsfree'
     }
 
     It 'can match by Name alone when Device Name is unavailable' {
         $rows = @([pscustomobject]@{ Type='Device'; Direction='Render'; Name='USB Headphones'; 'Item ID'='usb' })
-        $row = Find-SvclRenderDeviceByIdentity -Rows $rows -Name 'USB Headphones'
+        $row = Find-RenderDeviceByIdentity -Rows $rows -Name 'USB Headphones'
         $row.'Item ID' | Should -Be 'usb'
     }
 
     It 'returns null when no stable identity was supplied' {
-        $rows = @(ConvertFrom-SvclCsv -Text $script:FixtureCsv)
-        Find-SvclRenderDeviceByIdentity -Rows $rows | Should -BeNullOrEmpty
+        $rows = @(
+            [pscustomobject]@{ Type='Device'; Direction='Render'; 'Device Name'='2- Jabra Evolve 65'; Name='Headphones'; 'Item ID'='x' }
+        )
+        Find-RenderDeviceByIdentity -Rows $rows | Should -BeNullOrEmpty
     }
 }
 
@@ -224,37 +141,21 @@ Describe 'Resolve-EndpointState' {
     }
 }
 
-Describe 'Resolve-DetectedState' {
-    It 'applies debounce exactly like Resolve-HeadsetState' {
-        $s1 = Resolve-DetectedState -PayloadPresent $false -Misses 0 -OffMissThreshold 2
-        $s1.IsOn | Should -Be $false
-        $s1.Decision | Should -Be $false
-        $s1.Misses | Should -Be 1
 
-        $s2 = Resolve-DetectedState -PayloadPresent $false -Misses 1 -OffMissThreshold 2
-        $s2.Decision | Should -Be $true
-        $s2.Misses | Should -Be 2
-
-        $s3 = Resolve-DetectedState -PayloadPresent $true -Misses 5 -OffMissThreshold 2
-        $s3.IsOn | Should -Be $true
-        $s3.Misses | Should -Be 0
-    }
-}
-
-Describe 'Get-CsvColumn' {
+Describe 'Get-DeviceColumn' {
     It 'finds a column by exact name' {
         $row = [pscustomobject]@{ Name = 'X'; State = 'Active' }
-        Get-CsvColumn -Row $row -Names @('State') | Should -Be 'Active'
+        Get-DeviceColumn -Row $row -Names @('State') | Should -Be 'Active'
     }
 
     It 'falls back to alias names (State vs DeviceState)' {
         $row = [pscustomobject]@{ Name = 'X'; DeviceState = 'Unplugged' }
-        Get-CsvColumn -Row $row -Names @('State', 'DeviceState') | Should -Be 'Unplugged'
+        Get-DeviceColumn -Row $row -Names @('State', 'DeviceState') | Should -Be 'Unplugged'
     }
 
     It 'returns null when no column matches' {
         $row = [pscustomobject]@{ Name = 'X' }
-        Get-CsvColumn -Row $row -Names @('State', 'DeviceState') | Should -BeNullOrEmpty
+        Get-DeviceColumn -Row $row -Names @('State', 'DeviceState') | Should -BeNullOrEmpty
     }
 }
 
@@ -301,6 +202,54 @@ Describe 'Test-LogitechProXDeviceName' {
     It 'rejects non-PRO-X devices' {
         Test-LogitechProXDeviceName -Name 'G PRO X Superlight Mouse' | Should -Be $false
         Test-LogitechProXDeviceName -Name 'G733 Gaming Headset' | Should -Be $false
+    }
+}
+
+Describe 'Test-LogitechHeadsetDevice' {
+    It 'accepts a G HUB deviceInfo with headset type + battery capability' {
+        $dev = [pscustomobject]@{
+            extendedDisplayName = 'G733 Wireless Gaming Headset'
+            deviceType          = 'headset'
+            capabilities        = [pscustomobject]@{ hasBatteryStatus = $true }
+        }
+        Test-LogitechHeadsetDevice -Device $dev | Should -Be $true
+    }
+
+    It 'accepts PRO X 2 and PRO X Wireless by name' {
+        $d1 = [pscustomobject]@{ extendedDisplayName = 'PRO X 2 Lightspeed Gaming Headset' }
+        Test-LogitechHeadsetDevice -Device $d1 | Should -Be $true
+
+        $d2 = [pscustomobject]@{ extendedDisplayName = 'PRO X Wireless Gaming Headset' }
+        Test-LogitechHeadsetDevice -Device $d2 | Should -Be $true
+    }
+
+    It 'rejects mice, keyboards, receivers and dongles' {
+        $mouse    = [pscustomobject]@{ extendedDisplayName = 'G PRO X Superlight Mouse'; deviceType = 'mouse' }
+        $keyboard = [pscustomobject]@{ extendedDisplayName = 'G915 Keyboard';           deviceType = 'keyboard' }
+        $receiver = [pscustomobject]@{ extendedDisplayName = 'Lightspeed Receiver';     deviceType = 'receiver' }
+        Test-LogitechHeadsetDevice -Device $mouse    | Should -Be $false
+        Test-LogitechHeadsetDevice -Device $keyboard | Should -Be $false
+        Test-LogitechHeadsetDevice -Device $receiver | Should -Be $false
+    }
+
+    It 'rejects a headset-typed device without battery capability' {
+        # LogitechGHub mode needs the battery signal to tell ON from OFF.
+        $dev = [pscustomobject]@{
+            extendedDisplayName = 'G733 Wireless Gaming Headset'
+            deviceType          = 'headset'
+            capabilities        = [pscustomobject]@{ hasBatteryStatus = $false }
+        }
+        Test-LogitechHeadsetDevice -Device $dev | Should -Be $false
+    }
+
+    It 'accepts a device whose type is not headset but has battery' {
+        # Some G HUB responses only expose the battery capability.
+        $dev = [pscustomobject]@{
+            extendedDisplayName = 'Some Wireless Audio Device'
+            deviceType          = 'unknown'
+            capabilities        = [pscustomobject]@{ hasBatteryStatus = $true }
+        }
+        Test-LogitechHeadsetDevice -Device $dev | Should -Be $true
     }
 }
 

@@ -1,12 +1,12 @@
 ﻿#requires -Version 5.1
 <#
-    Toggle-AudioEnhancements.ps1 - helper ELEVADO para activar/desactivar
-    los audio enhancements de un endpoint de audio concreto.
+    Toggle-AudioEnhancements.ps1 - elevated helper to disable/enable the
+    audio enhancements of a specific audio endpoint.
 
     Launched by the runtime (or installer) with -Verb RunAs. Writes
     PKEY_AudioEndpoint_Disable_SysFx (1da5d803-d492-4edd-8c23-e0c0ffee7f0e, 5)
     ONLY for the specified DeviceId, verifies the result and exits with code:
-      0 = cambio aplicado y verificado
+      0 = change applied and verified
       1 = could not apply or verify (UAC cancelled, missing endpoint, ...)
 #>
 [CmdletBinding()]
@@ -36,9 +36,9 @@ try {
     $targetValue = if ($Action -eq 'Disable') { 1 } else { 0 }
 
     # All COM logic lives in C# (where casting to IPolicyConfig is native and
-    # fiable). En PowerShell 5.1 el cast de un RCW COM a una interfaz
-    # a custom [ComImport] cast is unreliable in PowerShell 5.1), so this exposes
-    # one static method that performs Set + internal verification.
+    # reliable). Casting a COM RCW to a custom [ComImport] interface is
+    # unreliable in PowerShell 5.1, so this exposes one static method that
+    # performs Set + internal verification.
     $source = @'
 using System;
 using System.Runtime.InteropServices;
