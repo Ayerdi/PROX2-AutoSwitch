@@ -278,6 +278,30 @@ Describe 'Get-ConfigDetectionMode' {
         $cfg = [pscustomobject]@{ DetectionMode = 'Foo'; HeadsetId = 'x' }
         Get-ConfigDetectionMode -Config $cfg | Should -BeNullOrEmpty
     }
+
+    It 'returns SteelSeriesNova5 when set' {
+        $cfg = [pscustomobject]@{ DetectionMode = 'SteelSeriesNova5'; HeadsetId = 'x' }
+        Get-ConfigDetectionMode -Config $cfg | Should -Be 'SteelSeriesNova5'
+    }
+}
+
+Describe 'Test-LogitechProXDeviceName' {
+    It 'matches PRO X 2' {
+        Test-LogitechProXDeviceName -Name 'PRO X 2 Lightspeed Gaming Headset' | Should -Be $true
+    }
+
+    It 'matches PRO X Wireless' {
+        Test-LogitechProXDeviceName -Name 'PRO X Wireless Gaming Headset' | Should -Be $true
+    }
+
+    It 'matches plain PRO X' {
+        Test-LogitechProXDeviceName -Name 'PRO X Gaming Headset' | Should -Be $true
+    }
+
+    It 'rejects non-PRO-X devices' {
+        Test-LogitechProXDeviceName -Name 'G PRO X Superlight Mouse' | Should -Be $false
+        Test-LogitechProXDeviceName -Name 'G733 Gaming Headset' | Should -Be $false
+    }
 }
 
 

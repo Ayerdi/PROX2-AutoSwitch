@@ -285,15 +285,15 @@ function Get-ProX2BatteryPath {
 
     if (-not $headset) {
         $headset = $all |
-            Where-Object { $_.extendedDisplayName -match "PRO\s*X\s*2" } |
+            Where-Object { Test-LogitechProXDeviceName -Name $_.extendedDisplayName } |
             Select-Object -First 1
     }
 
     if (-not $headset) {
-        throw "G HUB did not return the PRO X 2 in /devices/list."
+        throw "G HUB did not return a Logitech PRO X headset in /devices/list."
     }
 
-    Write-AutoSwitchLog ("PRO X 2 detected by G HUB: {0} ({1})" -f $headset.extendedDisplayName, $headset.id)
+    Write-AutoSwitchLog ("Logitech PRO X detected by G HUB: {0} ({1})" -f $headset.extendedDisplayName, $headset.id)
     return "/battery/$($headset.id)/state"
 }
 

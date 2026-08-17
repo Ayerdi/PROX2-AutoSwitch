@@ -984,4 +984,25 @@ function Get-ConfigDetectionMode {
     return $null
 }
 
-Export-ModuleMember -Function Get-RenderItemIdFromText, Resolve-HeadsetState, Test-ValidAudioConfig, New-GHubTimeoutToken, ConvertFrom-SvclCsv, ConvertFrom-CsvLine, Get-CsvColumn, Resolve-EndpointState, Resolve-DetectedState, Test-SvclExportValid, Get-SvclRenderDevice, Get-SvclDeviceLabel, Find-SvclRenderDeviceByIdentity, Get-EndpointFxState, Get-ConfigDetectionMode, Initialize-CoreAudioBackend, Get-CoreAudioRenderDevices, Get-CoreAudioDefaultRenderDeviceId, Get-CoreAudioDefaultRenderDeviceIds, Test-CoreAudioDefaultRenderDevice, Set-CoreAudioDefaultRenderDevice
+function Test-LogitechProXDeviceName {
+    <#
+    .SYNOPSIS
+        True if a G HUB extendedDisplayName matches a Logitech PRO X headset
+        (PRO X 2, PRO X Wireless, PRO X, etc.). PRO X 2 and PRO X Wireless
+        both expose a LIGHTSPEED endpoint that stays Active when off, so the
+        G HUB battery signal is the ON/OFF source for all of them.
+    .DESCRIPTION
+        Logitech mice are named "G PRO X Superlight" etc.; "PRO X" alone is a
+        headset family, so require the "PRO X" token and exclude mouse names.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    if ($Name -match '(?i)superlight|mouse') { return $false }
+
+    return ($Name -match '\bPRO\s*X(?:\s*2|\s*Wireless)?\b')
+}
+
+Export-ModuleMember -Function Get-RenderItemIdFromText, Resolve-HeadsetState, Test-ValidAudioConfig, New-GHubTimeoutToken, ConvertFrom-SvclCsv, ConvertFrom-CsvLine, Get-CsvColumn, Resolve-EndpointState, Resolve-DetectedState, Test-SvclExportValid, Get-SvclRenderDevice, Get-SvclDeviceLabel, Find-SvclRenderDeviceByIdentity, Get-EndpointFxState, Get-ConfigDetectionMode, Test-LogitechProXDeviceName, Initialize-CoreAudioBackend, Get-CoreAudioRenderDevices, Get-CoreAudioDefaultRenderDeviceId, Get-CoreAudioDefaultRenderDeviceIds, Test-CoreAudioDefaultRenderDevice, Set-CoreAudioDefaultRenderDevice

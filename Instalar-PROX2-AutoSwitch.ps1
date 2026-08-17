@@ -380,7 +380,7 @@ try {
     Write-Host "      -> Use WindowsEndpoint: Windows detects the endpoint as" -ForegroundColor DarkGray
     Write-Host "         Active when ON and Unplugged/absent when OFF." -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "  [2] Logitech PRO X 2 (LIGHTSPEED dongle stays plugged in)" -ForegroundColor White
+    Write-Host "  [2] Logitech PRO X (PRO X 2 / PRO X Wireless)" -ForegroundColor White
     Write-Host "      -> Use LogitechGHub: Windows keeps the endpoint Active even" -ForegroundColor DarkGray
     Write-Host "         when OFF, so detection uses the G HUB battery signal." -ForegroundColor DarkGray
     Write-Host ""
@@ -406,18 +406,18 @@ try {
     }
     elseif ($cycleChoice -eq 2) {
         # Logitech PRO X 2: needs G HUB. The endpoint alone cannot tell ON from OFF.
-        Write-Host "      Assuming a Logitech PRO X 2. Looking up the headset in G HUB..." -ForegroundColor Yellow
+        Write-Host "      Assuming a Logitech PRO X. Looking up the headset in G HUB..." -ForegroundColor Yellow
         try {
             Connect-GHub
             $devices = Invoke-GHubGet -Path "/devices/list"
             $deviceInfos = @($devices.payload.deviceInfos)
 
             $ghubCandidates = @($deviceInfos | Where-Object {
-                $_.extendedDisplayName -match 'PRO\s*X\s*2'
+                Test-LogitechProXDeviceName -Name $_.extendedDisplayName
             })
 
             if ($ghubCandidates.Count -eq 0) {
-                Write-Host "      G HUB reports no PRO X 2. Try option 3 (auto-detect)." -ForegroundColor Red
+                Write-Host "      G HUB reports no Logitech PRO X headset. Try option 3 (auto-detect)." -ForegroundColor Red
             }
             else {
                 $ghubHeadset = $ghubCandidates[0]
@@ -428,7 +428,7 @@ try {
                     }
                     $ghubChoice = 0
                     do {
-                        $gc = Read-Host "Enter the number of the PRO X 2 that matches '$headsetName'"
+                        $gc = Read-Host "Enter the number of the PRO X headset that matches '$headsetName'"
                         $ghubValid = [int]::TryParse($gc, [ref]$ghubChoice) -and
                                      $ghubChoice -ge 1 -and
                                      $ghubChoice -le $ghubCandidates.Count
@@ -591,7 +591,7 @@ try {
         # G HUB fallback: ONLY if the user confirms that the chosen headset is
         # a Logitech PRO X 2 listed by G HUB. Never associate $logi[0].
         Write-Host ""
-        $conf = Read-Host "Is this headset a Logitech PRO X 2 detected by G HUB? (y/N)"
+        $conf = Read-Host "Is this headset a Logitech PRO X (PRO X 2 / PRO X Wireless) detected by G HUB? (y/N)"
         if ($conf -match '^(s|si|sí|y|yes)$') {
             try {
                 Connect-GHub
@@ -599,24 +599,24 @@ try {
                 $deviceInfos = @($devices.payload.deviceInfos)
 
                 Write-Host ""
-                # Filter to ONLY PRO X 2 candidates: prevents accidentally
+                # Filter to ONLY Logitech PRO X candidates: prevents accidentally
                 # picking a Logitech mouse/keyboard and watching its battery.
                 $ghubCandidates = @($deviceInfos | Where-Object {
-                    $_.extendedDisplayName -match 'PRO\s*X\s*2'
+                    Test-LogitechProXDeviceName -Name $_.extendedDisplayName
                 })
 
                 if ($ghubCandidates.Count -eq 0) {
-                    Write-Host "      G HUB reports no PRO X 2." -ForegroundColor Red
+                    Write-Host "      G HUB reports no Logitech PRO X headset." -ForegroundColor Red
                 }
                 else {
-                    Write-Host "PRO X 2 headsets detected by G HUB:" -ForegroundColor Yellow
+                    Write-Host "Logitech PRO X headsets detected by G HUB:" -ForegroundColor Yellow
                     for ($i = 0; $i -lt $ghubCandidates.Count; $i++) {
                         Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $ghubCandidates[$i].extendedDisplayName, $ghubCandidates[$i].id)
                     }
 
                     $ghubChoice = 0
                     do {
-                        $gc = Read-Host "Enter the number of the PRO X 2 that matches '$headsetName'"
+                        $gc = Read-Host "Enter the number of the PRO X headset that matches '$headsetName'"
                         $ghubValid = [int]::TryParse($gc, [ref]$ghubChoice) -and
                                      $ghubChoice -ge 1 -and
                                      $ghubChoice -le $ghubCandidates.Count
