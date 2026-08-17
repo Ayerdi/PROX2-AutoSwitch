@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 # AutoSwitchCore.psm1 - pure, testable logic for Audio AutoSwitch.
 # No G HUB or third-party audio utility is required for Pester tests.
 
