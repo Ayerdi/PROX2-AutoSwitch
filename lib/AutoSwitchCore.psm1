@@ -1,34 +1,9 @@
-﻿#requires -Version 5.1
+#requires -Version 5.1
 # AutoSwitchCore.psm1 - pure, testable logic for Audio AutoSwitch.
 # No G HUB or third-party audio utility is required for Pester tests.
 
 Set-StrictMode -Version Latest
 
-function Get-RenderItemIdFromText {
-    <#
-    .SYNOPSIS
-        Extract a valid render Item ID from legacy command output.
-    .DESCRIPTION
-        Use /GetColumnValue (NEVER /Stdout /GetColumnValue, which contaminates the output).
-        Return $null when no valid render Item ID is present.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Text
-    )
-
-    $m = [regex]::Match(
-        $Text,
-        '\{0\.0\.0\.00000000\}\.\{[0-9A-Fa-f-]+\}'
-    )
-
-    if (-not $m.Success) {
-        return $null
-    }
-
-    return $m.Value.ToLowerInvariant()
-}
 
 function Resolve-HeadsetState {
     <#
@@ -70,102 +45,14 @@ function Resolve-HeadsetState {
     }
 }
 
-function ConvertFrom-SvclCsv {
-    <#
-    .SYNOPSIS
-        Parse legacy /scomma output into objects.
-    .DESCRIPTION
-        The first export line contains the column headers.
-        Supports double-quoted fields and embedded commas.
-        Returns [pscustomobject[]] with one property per column.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [AllowEmptyString()]
-        [string]$Text
-    )
 
-    $lines = @(
-        $Text -split "(`r`n|`n|`r)" |
-            ForEach-Object { $_.Trim() } |
-            Where-Object { $_ -ne "" }
-    )
 
-    if ($lines.Count -lt 2) {
-        return @()
-    }
-
-    # Native PowerShell ConvertFrom-Csv handles quotes, headers with
-    # spaces and fields containing commas reliably.
-    try {
-        $csv = $lines -join [Environment]::NewLine
-        $objects = @($csv | ConvertFrom-Csv)
-        if ($objects.Count -eq 0) {
-            return @()
-        }
-        return $objects
-    }
-    catch {
-        return @()
-    }
-}
-
-function ConvertFrom-CsvLine {
-    <#
-    .SYNOPSIS
-        Split a simple CSV line into fields while respecting double quotes.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)][string]$Line
-    )
-
-    $fields = [System.Collections.Generic.List[string]]::new()
-    $current = [System.Text.StringBuilder]::new()
-    $inQuotes = $false
-
-    for ($i = 0; $i -lt $Line.Length; $i++) {
-        $ch = $Line[$i]
-
-        if ($inQuotes) {
-            if ($ch -eq '"') {
-                if (($i + 1) -lt $Line.Length -and $Line[$i + 1] -eq '"') {
-                    [void]$current.Append('"')
-                    $i++
-                }
-                else {
-                    $inQuotes = $false
-                }
-            }
-            else {
-                [void]$current.Append($ch)
-            }
-        }
-        else {
-            if ($ch -eq '"') {
-                $inQuotes = $true
-            }
-            elseif ($ch -eq ',') {
-                $fields.Add($current.ToString())
-                [void]$current.Clear()
-            }
-            else {
-                [void]$current.Append($ch)
-            }
-        }
-    }
-
-    $fields.Add($current.ToString())
-    return $fields.ToArray()
-}
-
-function Get-CsvColumn {
+function Get-DeviceColumn {
     <#
     .SYNOPSIS
         Return the value from the first column whose name matches one of
-        $Names case-insensitively. Aliases are supported because
-        svcl uses 'State' in some versions and 'DeviceState' in others.
+        $Names case-insensitively. Aliases are supported because some
+        render rows name the state column 'State' and others 'Device State'.
         Return $null when none exists.
     #>
     [CmdletBinding()]
@@ -213,24 +100,6 @@ function Resolve-EndpointState {
     }
 }
 
-function Resolve-DetectedState {
-    <#
-    .SYNOPSIS
-        Debounce detected state (Windows endpoint or G HUB payload).
-    .DESCRIPTION
-        Same as Resolve-HeadsetState without assuming G HUB:
-        PayloadPresent true -> Connected; false -> Disconnected after
-        OffMissThreshold misses. Returns the same IsOn/Decision/Misses object.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)][bool]$PayloadPresent,
-        [Parameter(Mandatory = $true)][int]$Misses,
-        [Parameter(Mandatory = $true)][int]$OffMissThreshold
-    )
-
-    return Resolve-HeadsetState -PayloadPresent $PayloadPresent -Misses $Misses -OffMissThreshold $OffMissThreshold
-}
 
 function Test-ValidAudioConfig {
     <#
@@ -264,84 +133,14 @@ function New-GHubTimeoutToken {
     return $cts
 }
 
-function Test-SvclExportValid {
+
+
+function Get-DeviceLabel {
     <#
     .SYNOPSIS
-        True when the text is a valid svcl /scomma export.
+        Build the display label for a render device row.
     .DESCRIPTION
-        A valid export must contain at least one data row and headers exposing
-        the columns required by the runtime: 'Item ID' and
-        'Device State'. Empty, garbage or incomplete-header text is not
-        a valid export -> the caller must treat it as 'Unknown' (not
-        'Disconnected').
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [AllowEmptyString()]
-        [string]$CsvText
-    )
-
-    if ([string]::IsNullOrWhiteSpace($CsvText)) {
-        return $false
-    }
-
-    $rows = @(ConvertFrom-SvclCsv -Text $CsvText)
-    if ($rows.Count -eq 0) {
-        return $false
-    }
-
-    # The first row must expose the minimum headers required by the runtime.
-    $first = $rows[0]
-    $hasItemId    = $null -ne $first.PSObject.Properties['Item ID']
-    $hasDeviceState = $null -ne $first.PSObject.Properties['Device State']
-
-    return ($hasItemId -and $hasDeviceState)
-}
-
-function Get-SvclRenderDevice {
-    <#
-    .SYNOPSIS
-        Filter a legacy /scomma export to real render output endpoints
-        with Type='Device' and Direction='Render'.
-        
-    .DESCRIPTION
-        Returns [pscustomobject[]] with filtered rows. Each row keeps
-        the real svcl columns: Name, Type, Direction, Device State, Item ID.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [AllowEmptyString()]
-        [string]$CsvText
-    )
-
-    $rows = @(ConvertFrom-SvclCsv -Text $CsvText)
-    if ($rows.Count -eq 0) {
-        return @()
-    }
-
-    # Explicit loop filter (without Where-Object/$_) for predictable behavior.
-    $render = [System.Collections.Generic.List[object]]::new()
-
-    foreach ($row in $rows) {
-        $typeVal = Get-CsvColumn -Row $row -Names @('Type')
-        $dirVal  = Get-CsvColumn -Row $row -Names @('Direction')
-
-        if ($typeVal -ieq 'Device' -and $dirVal -ieq 'Render') {
-            $render.Add($row)
-        }
-    }
-
-    return $render.ToArray()
-}
-
-function Get-SvclDeviceLabel {
-    <#
-    .SYNOPSIS
-        Build the display label for an svcl row.
-    .DESCRIPTION
-        svcl separates Name (for example 'Headphones') from Device Name
+        A row separates Name (for example 'Headphones') from Device Name
         (for example '2- Jabra Evolve 65'). When Device Name exists, display
         'Device Name — Name'; otherwise display Name only.
     #>
@@ -350,8 +149,8 @@ function Get-SvclDeviceLabel {
         [Parameter(Mandatory = $true)][object]$Row
     )
 
-    $name = Get-CsvColumn -Row $Row -Names @('Name')
-    $deviceName = Get-CsvColumn -Row $Row -Names @('Device Name')
+    $name = Get-DeviceColumn -Row $Row -Names @('Name')
+    $deviceName = Get-DeviceColumn -Row $Row -Names @('Device Name')
 
     if ([string]::IsNullOrWhiteSpace($deviceName)) {
         return $name
@@ -364,10 +163,10 @@ function Get-SvclDeviceLabel {
     return "$deviceName — $name"
 }
 
-function Find-SvclRenderDeviceByIdentity {
+function Find-RenderDeviceByIdentity {
     <#
     .SYNOPSIS
-        Find a Render endpoint by stable svcl identity.
+        Find a Render endpoint by stable device identity.
     .DESCRIPTION
         Bluetooth may recreate an endpoint and change its Item ID. To
         re-resolve it without confusing two outputs from the same device,
@@ -387,12 +186,12 @@ function Find-SvclRenderDeviceByIdentity {
     }
 
     foreach ($row in $Rows) {
-        $typeVal = Get-CsvColumn -Row $row -Names @('Type')
-        $dirVal  = Get-CsvColumn -Row $row -Names @('Direction')
+        $typeVal = Get-DeviceColumn -Row $row -Names @('Type')
+        $dirVal  = Get-DeviceColumn -Row $row -Names @('Direction')
         if ($typeVal -ine 'Device' -or $dirVal -ine 'Render') { continue }
 
-        $rowDeviceName = Get-CsvColumn -Row $row -Names @('Device Name')
-        $rowName       = Get-CsvColumn -Row $row -Names @('Name')
+        $rowDeviceName = Get-DeviceColumn -Row $row -Names @('Device Name')
+        $rowName       = Get-DeviceColumn -Row $row -Names @('Name')
 
         $deviceMatches = [string]::IsNullOrWhiteSpace($DeviceName) -or
             ($null -ne $rowDeviceName -and $rowDeviceName.Trim() -ieq $DeviceName.Trim())
@@ -1055,4 +854,4 @@ function Test-LogitechHeadsetDevice {
     return ($name -match '(?i)\bheadset\b|\bheadphone\b|PRO\s*X|G733|G533|G435|G335|G935|G933|Astro')
 }
 
-Export-ModuleMember -Function Get-RenderItemIdFromText, Resolve-HeadsetState, Test-ValidAudioConfig, New-GHubTimeoutToken, ConvertFrom-SvclCsv, ConvertFrom-CsvLine, Get-CsvColumn, Resolve-EndpointState, Resolve-DetectedState, Test-SvclExportValid, Get-SvclRenderDevice, Get-SvclDeviceLabel, Find-SvclRenderDeviceByIdentity, Get-EndpointFxState, Get-ConfigDetectionMode, Test-LogitechProXDeviceName, Test-LogitechHeadsetDevice, Initialize-CoreAudioBackend, Get-CoreAudioRenderDevices, Get-CoreAudioDefaultRenderDeviceId, Get-CoreAudioDefaultRenderDeviceIds, Test-CoreAudioDefaultRenderDevice, Set-CoreAudioDefaultRenderDevice
+Export-ModuleMember -Function Resolve-HeadsetState, Test-ValidAudioConfig, New-GHubTimeoutToken, Get-DeviceColumn, Resolve-EndpointState, Get-DeviceLabel, Find-RenderDeviceByIdentity, Get-EndpointFxState, Get-ConfigDetectionMode, Test-LogitechProXDeviceName, Test-LogitechHeadsetDevice, Initialize-CoreAudioBackend, Get-CoreAudioRenderDevices, Get-CoreAudioDefaultRenderDeviceId, Get-CoreAudioDefaultRenderDeviceIds, Test-CoreAudioDefaultRenderDevice, Set-CoreAudioDefaultRenderDevice

@@ -187,7 +187,7 @@ payload absent  → OFF</code></pre>
         <li>Two consecutive OFF observations are required before switching to the fallback.</li>
         <li>Bluetooth endpoint recreation is handled by stable <code>Device Name + Name</code> identity before persisting a new Item ID.</li>
         <li>The installer validates real switching in both directions.</li>
-        <li>The NirSoft download is SHA-256 verified before execution.</li>
+        <li>The native Core Audio backend replaces the legacy third-party download; releases are SHA-256 verified.</li>
         <li>Normal runtime is non-elevated; only the Audio Enhancements helper requests UAC.</li>
       </ul>
     </div>

@@ -319,7 +319,7 @@ try {
     # Show only Active endpoints (usable right now). If there is none,
     # show all with a notice so the install is not blocked.
     $activeRows = @($renderRows | Where-Object {
-        (Get-CsvColumn -Row $_ -Names @('Device State')) -ieq 'Active'
+        (Get-DeviceColumn -Row $_ -Names @('Device State')) -ieq 'Active'
     })
     $pickable = if ($activeRows.Count -gt 0) { $activeRows } else { $renderRows }
 
@@ -329,8 +329,8 @@ try {
         Write-Host "  (no Active endpoints found; showing all states)" -ForegroundColor DarkGray
     }
     for ($i = 0; $i -lt $pickable.Count; $i++) {
-        $label = Get-SvclDeviceLabel -Row $pickable[$i]
-        $state = Get-CsvColumn -Row $pickable[$i] -Names @('Device State')
+        $label = Get-DeviceLabel -Row $pickable[$i]
+        $state = Get-DeviceColumn -Row $pickable[$i] -Names @('Device State')
         Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $label, $state)
     }
 
@@ -354,12 +354,12 @@ try {
     } until ($valid)
     $chosenSpeaker = $pickable[$parsed - 1]
 
-    $headsetId           = Get-CsvColumn -Row $chosenHeadset -Names @('Item ID')
-    $speakerId           = Get-CsvColumn -Row $chosenSpeaker -Names @('Item ID')
-    $headsetName         = Get-SvclDeviceLabel -Row $chosenHeadset
-    $speakerName         = Get-SvclDeviceLabel -Row $chosenSpeaker
-    $headsetDeviceName   = Get-CsvColumn -Row $chosenHeadset -Names @('Device Name')
-    $headsetEndpointName = Get-CsvColumn -Row $chosenHeadset -Names @('Name')
+    $headsetId           = Get-DeviceColumn -Row $chosenHeadset -Names @('Item ID')
+    $speakerId           = Get-DeviceColumn -Row $chosenSpeaker -Names @('Item ID')
+    $headsetName         = Get-DeviceLabel -Row $chosenHeadset
+    $speakerName         = Get-DeviceLabel -Row $chosenSpeaker
+    $headsetDeviceName   = Get-DeviceColumn -Row $chosenHeadset -Names @('Device Name')
+    $headsetEndpointName = Get-DeviceColumn -Row $chosenHeadset -Names @('Name')
 
     if (-not (Test-ValidAudioConfig -HeadsetId $headsetId -SpeakerId $speakerId)) {
         throw "You chose the same device for headset and fallback. Run the installer again."
@@ -491,7 +491,7 @@ try {
             return [pscustomobject]@{ State = 'Unknown'; FoundId = $null }
         }
         $row = $rows | Where-Object {
-            $id = Get-CsvColumn -Row $_ -Names @('Item ID')
+            $id = Get-DeviceColumn -Row $_ -Names @('Item ID')
             $null -ne $id -and $id.Trim() -ieq $ItemId.Trim()
         } | Select-Object -First 1
 
@@ -501,15 +501,15 @@ try {
         if (-not $row -and
             (-not [string]::IsNullOrWhiteSpace($DeviceName) -or
              -not [string]::IsNullOrWhiteSpace($EndpointName))) {
-            $row = Find-SvclRenderDeviceByIdentity -Rows $rows -DeviceName $DeviceName -Name $EndpointName
+            $row = Find-RenderDeviceByIdentity -Rows $rows -DeviceName $DeviceName -Name $EndpointName
         }
 
         if (-not $row) {
             return [pscustomobject]@{ State = 'Disconnected'; FoundId = $null }
         }
 
-        $state = Get-CsvColumn -Row $row -Names @('Device State', 'State')
-        $foundId = Get-CsvColumn -Row $row -Names @('Item ID')
+        $state = Get-DeviceColumn -Row $row -Names @('Device State', 'State')
+        $foundId = Get-DeviceColumn -Row $row -Names @('Item ID')
         if ([string]::IsNullOrWhiteSpace($state)) {
             return [pscustomobject]@{ State = 'Unknown'; FoundId = $foundId }
         }

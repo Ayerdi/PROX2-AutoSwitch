@@ -152,11 +152,11 @@ if (Test-Path $ConfigPath) {
             try {
                 $rows = @(Get-CoreAudioRenderDevices)
                 $row = $rows | Where-Object {
-                    $id = Get-CsvColumn -Row $_ -Names @('Item ID')
+                    $id = Get-DeviceColumn -Row $_ -Names @('Item ID')
                     $null -ne $id -and $id.Trim().ToLowerInvariant() -eq [string]$cfg.HeadsetId
                 } | Select-Object -First 1
                 if ($row) {
-                    $st = Get-CsvColumn -Row $row -Names @('Device State', 'State')
+                    $st = Get-DeviceColumn -Row $row -Names @('Device State', 'State')
                     Write-Host "  Headset state:  $st"
                 }
                 else {
