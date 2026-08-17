@@ -7,3 +7,4 @@ test-output/
 # System
 Thumbs.db
 Desktop.ini
+dist/
