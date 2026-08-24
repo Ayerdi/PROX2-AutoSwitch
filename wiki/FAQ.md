@@ -4,9 +4,13 @@
 
 No project can guarantee that. The general `WindowsEndpoint` mode works when Windows exposes a useful physical connection state. AutoSwitch fails closed when it cannot observe a safe signal.
 
-## Why is PRO X 2 special?
+## Why is the Logitech PRO X family special?
 
-Its endpoint can remain `Active` while the headset is physically off, so endpoint state alone cannot distinguish ON/OFF. The project therefore has a G HUB-specific fallback.
+Its endpoint can remain `Active` while the headset is physically off, so endpoint state alone cannot distinguish ON/OFF. The project therefore has a G HUB-specific fallback for PRO X, PRO X 2 and PRO X Wireless.
+
+## Does the SteelSeries Arctis Nova 5/5X need its software?
+
+No. AutoSwitch reads the receiver's physical state over HID, so no SteelSeries GG is required.
 
 ## Does AutoSwitch run as administrator?
 

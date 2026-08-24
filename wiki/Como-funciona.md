@@ -16,6 +16,8 @@ Para SteelSeries Arctis Nova 5/5X, AutoSwitch lee el estado del auricular direct
 
 ## Cambio de salida
 
-Los Item ID de Windows se establecen mediante la interfaz COM nativa de Core Audio (roles Console, Multimedia y Communications, cada uno verificado). Son locales a cada equipo y pueden cambiar tras drivers o recreación del endpoint. `Reconfigure...` puede resolver el nuevo ID.
+Los Item ID de Windows se establecen mediante la interfaz COM nativa de Core Audio (roles Console, Multimedia y Communications, cada uno verificado). Son locales a cada equipo y pueden cambiar tras actualizaciones de controladores o la recreación del endpoint. `Reconfigure...` puede resolver y persistir el nuevo ID.
+
+El debounce de apagado exige varias lecturas consecutivas de desconexión antes de pasar a la salida alternativa.
 
 [[How-It-Works|Read in English]]
