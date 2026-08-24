@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_VERSION = "1.2.5"
+CURRENT_VERSION = "1.4.0"
 
 REQUIRED_FILES = (
     "README.md",
