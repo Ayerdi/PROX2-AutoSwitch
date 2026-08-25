@@ -2,7 +2,7 @@
 
 ## It never switches when the headset powers off
 
-Run `Verify-AutoSwitch.ps1` and check the configured `DetectionMode`. A generic headset requires Windows to expose a useful endpoint state. A PRO X 2 requires G HUB to be running and recognizing the device.
+Run `Verify-AutoSwitch.ps1` and check the configured `DetectionMode`. A generic headset requires Windows to expose a useful endpoint state. A Logitech PRO X family headset (PRO X, PRO X 2, PRO X Wireless) requires G HUB to be running and recognizing the device.
 
 ## Bluetooth reconnects but reconfiguration times out
 

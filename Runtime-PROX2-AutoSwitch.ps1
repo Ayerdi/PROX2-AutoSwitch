@@ -285,15 +285,15 @@ function Get-ProX2BatteryPath {
 
     if (-not $headset) {
         $headset = $all |
-            Where-Object { Test-LogitechProXDeviceName -Name $_.extendedDisplayName } |
+            Where-Object { Test-LogitechHeadsetDevice -Device $_ } |
             Select-Object -First 1
     }
 
     if (-not $headset) {
-        throw "G HUB did not return a Logitech PRO X headset in /devices/list."
+        throw "G HUB did not return a Logitech headset in /devices/list."
     }
 
-    Write-AutoSwitchLog ("Logitech PRO X detected by G HUB: {0} ({1})" -f $headset.extendedDisplayName, $headset.id)
+    Write-AutoSwitchLog ("Logitech headset detected by G HUB: {0} ({1})" -f $headset.extendedDisplayName, $headset.id)
     return "/battery/$($headset.id)/state"
 }
 
@@ -358,7 +358,7 @@ function Get-HeadsetEndpointState {
 
     $row = $rows |
         Where-Object {
-            $id = Get-CsvColumn -Row $_ -Names @('Item ID')
+            $id = Get-DeviceColumn -Row $_ -Names @('Item ID')
             $null -ne $id -and $id.Trim().ToLowerInvariant() -eq [string]$Config.HeadsetId
         } |
         Select-Object -First 1
@@ -367,7 +367,7 @@ function Get-HeadsetEndpointState {
         return 'Disconnected'
     }
 
-    $state = Get-CsvColumn -Row $row -Names @('Device State', 'State')
+    $state = Get-DeviceColumn -Row $row -Names @('Device State', 'State')
     if ($null -eq $state) {
         return 'Unknown'
     }
@@ -469,7 +469,7 @@ function Get-RenderDevices {
     try {
         $all = @(Get-CoreAudioRenderDevices)
         $active = @($all | Where-Object {
-            (Get-CsvColumn -Row $_ -Names @('Device State')) -ieq 'Active'
+            (Get-DeviceColumn -Row $_ -Names @('Device State')) -ieq 'Active'
         })
         if ($active.Count -gt 0) { return $active }
         return $all
@@ -546,7 +546,7 @@ function Get-HeadsetStateForId {
     }
     $row = $rows |
         Where-Object {
-            $id = Get-CsvColumn -Row $_ -Names @('Item ID')
+            $id = Get-DeviceColumn -Row $_ -Names @('Item ID')
             $null -ne $id -and $id.Trim().ToLowerInvariant() -eq $ItemId.Trim().ToLowerInvariant()
         } |
         Select-Object -First 1
@@ -558,14 +558,14 @@ function Get-HeadsetStateForId {
     if (-not $row -and
         (-not [string]::IsNullOrWhiteSpace($DeviceName) -or
          -not [string]::IsNullOrWhiteSpace($EndpointName))) {
-        $row = Find-SvclRenderDeviceByIdentity -Rows $rows -DeviceName $DeviceName -Name $EndpointName
+        $row = Find-RenderDeviceByIdentity -Rows $rows -DeviceName $DeviceName -Name $EndpointName
         if ($row) {
-            $id = Get-CsvColumn -Row $row -Names @('Item ID')
+            $id = Get-DeviceColumn -Row $row -Names @('Item ID')
             if ($Diagnose) {
                 Write-AutoSwitchLog ("Get-HeadsetStateForId: {0} was not found by Item ID; identity DeviceName='{1}' Name='{2}' -> new Item ID {3}" -f $ItemId, $DeviceName, $EndpointName, $id)
             }
             return [pscustomobject]@{
-                State   = (Resolve-EndpointState -State (Get-CsvColumn -Row $row -Names @('Device State', 'State')))
+                State   = (Resolve-EndpointState -State (Get-DeviceColumn -Row $row -Names @('Device State', 'State')))
                 FoundId = $id
             }
         }
@@ -576,11 +576,11 @@ function Get-HeadsetStateForId {
             # What is currently in Core Audio? Render devices with their states and IDs.
             $lines = @()
             foreach ($r in $rows) {
-                $name  = Get-CsvColumn -Row $r -Names @('Device Name', 'Name')
-                $id    = Get-CsvColumn -Row $r -Names @('Item ID')
-                $st    = Get-CsvColumn -Row $r -Names @('Device State', 'State')
-                $type  = Get-CsvColumn -Row $r -Names @('Type')
-                $dir   = Get-CsvColumn -Row $r -Names @('Direction')
+                $name  = Get-DeviceColumn -Row $r -Names @('Device Name', 'Name')
+                $id    = Get-DeviceColumn -Row $r -Names @('Item ID')
+                $st    = Get-DeviceColumn -Row $r -Names @('Device State', 'State')
+                $type  = Get-DeviceColumn -Row $r -Names @('Type')
+                $dir   = Get-DeviceColumn -Row $r -Names @('Direction')
                 $lines += "[$type/$dir] '$name' id='$id' state='$st'"
             }
             Write-AutoSwitchLog ("Get-HeadsetStateForId: was NOT found {0} in Core Audio. Available endpoint(s):`n{1}" -f $ItemId, ($lines -join "`n"))
@@ -588,7 +588,7 @@ function Get-HeadsetStateForId {
         return 'Disconnected'
     }
 
-    $state = Get-CsvColumn -Row $row -Names @('Device State', 'State')
+    $state = Get-DeviceColumn -Row $row -Names @('Device State', 'State')
     if ($null -eq $state) {
         if ($Diagnose) { Write-AutoSwitchLog ("Get-HeadsetStateForId: row for {0} has no state column" -f $ItemId) }
         return 'Unknown'
@@ -719,7 +719,7 @@ function Show-ReconfigureDialog {
     $comboHeadset.Location = New-Object System.Drawing.Point(150, 20)
     $comboHeadset.Width = 280
     foreach ($d in $devices) {
-        $label = Get-SvclDeviceLabel -Row $d
+        $label = Get-DeviceLabel -Row $d
         [void]$comboHeadset.Items.Add($label)
     }
 
@@ -733,13 +733,13 @@ function Show-ReconfigureDialog {
     $comboFallback.Location = New-Object System.Drawing.Point(150, 60)
     $comboFallback.Width = 280
     foreach ($d in $devices) {
-        $label = Get-SvclDeviceLabel -Row $d
+        $label = Get-DeviceLabel -Row $d
         [void]$comboFallback.Items.Add($label)
     }
 
     # Preselect the current values.
     for ($i = 0; $i -lt $devices.Count; $i++) {
-        $id = Get-CsvColumn -Row $devices[$i] -Names @('Item ID')
+        $id = Get-DeviceColumn -Row $devices[$i] -Names @('Item ID')
         if ($id -ieq [string]$Config.HeadsetId) { $comboHeadset.SelectedIndex = $i }
         if ($id -ieq [string]$Config.SpeakerId) { $comboFallback.SelectedIndex = $i }
     }
@@ -775,8 +775,8 @@ function Show-ReconfigureDialog {
                 return
             }
 
-            $newHeadsetId = Get-CsvColumn -Row $devices[$comboHeadset.SelectedIndex] -Names @('Item ID')
-            $newFallbackId = Get-CsvColumn -Row $devices[$comboFallback.SelectedIndex] -Names @('Item ID')
+            $newHeadsetId = Get-DeviceColumn -Row $devices[$comboHeadset.SelectedIndex] -Names @('Item ID')
+            $newFallbackId = Get-DeviceColumn -Row $devices[$comboFallback.SelectedIndex] -Names @('Item ID')
             if (-not (Test-ValidAudioConfig -HeadsetId $newHeadsetId -SpeakerId $newFallbackId)) {
                 [System.Windows.Forms.MessageBox]::Show(
                     "The headset and the fallback must be different devices.",
@@ -788,10 +788,10 @@ function Show-ReconfigureDialog {
             }
 
             $selectedHeadsetRow = $devices[$comboHeadset.SelectedIndex]
-            $newHeadsetName = Get-SvclDeviceLabel -Row $selectedHeadsetRow
-            $newHeadsetDeviceName = Get-CsvColumn -Row $selectedHeadsetRow -Names @('Device Name')
-            $newHeadsetEndpointName = Get-CsvColumn -Row $selectedHeadsetRow -Names @('Name')
-            $newSpeakerName = Get-SvclDeviceLabel -Row $devices[$comboFallback.SelectedIndex]
+            $newHeadsetName = Get-DeviceLabel -Row $selectedHeadsetRow
+            $newHeadsetDeviceName = Get-DeviceColumn -Row $selectedHeadsetRow -Names @('Device Name')
+            $newHeadsetEndpointName = Get-DeviceColumn -Row $selectedHeadsetRow -Names @('Name')
+            $newSpeakerName = Get-DeviceLabel -Row $devices[$comboFallback.SelectedIndex]
 
             # --- Ciclo ON -> OFF -> ON del headset seleccionado ---
             # El wizard hace polling porque Bluetooth/Core Audio puede tardar
@@ -987,14 +987,14 @@ function Stop-Runtime {
     [System.Windows.Forms.Application]::Exit()
 }
 
-# --- Worker: proceso separado que hace el polling ---
-# El polling (svcl/G HUB, Set-AudioOutput) corre en un proceso PowerShell
-# (AUTOSWITCH_WORKER=1) so it does not block the WinForms tray thread.
+# --- Worker: separate process that does the polling ---
+# Polling (Core Audio / G HUB / Set-AudioOutput) runs in a separate PowerShell
+# process (AUTOSWITCH_WORKER=1) so it does not block the WinForms tray thread.
 # Communication with the main process uses control files:
-#   $ControlDir\enabled.flag   - el tray lo crea/borra (AutoSwitch ON/OFF)
-#   $ControlDir\stop.flag      - el tray lo crea al salir
+#   $ControlDir\enabled.flag   - created/removed by the tray (AutoSwitch ON/OFF)
+#   $ControlDir\stop.flag      - created by the tray on exit
 # The worker itself prevents concurrent polls: if one read
-# (p. ej. un /SetDefault lento o G HUB en timeout) se pasa del intervalo,
+# (e.g. a slow SetDefault or a G HUB timeout) runs past the interval,
 # no new poll starts until it completes.
 
 $script:ControlDir = Join-Path $InstallDir "control"

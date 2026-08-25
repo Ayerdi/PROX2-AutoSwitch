@@ -102,12 +102,12 @@
 
   <header>
     <div class="badges">
-      <span class="badge"><strong>v1.2.5</strong> stable</span>
+      <span class="badge"><strong>v1.4.0</strong> stable</span>
       <span class="badge">Windows 10/11 x64</span>
       <span class="badge">MIT</span>
     </div>
     <h1>Audio <span>AutoSwitch</span></h1>
-    <p class="tagline">Automatically switch the Windows default audio output when a compatible wireless headset turns on or off — with a generic Windows endpoint mode and a Logitech PRO X 2 fallback through G HUB.</p>
+    <p class="tagline">Automatically switch the Windows default audio output when a compatible wireless headset turns on or off — with a generic Windows endpoint mode, a Logitech PRO X family fallback through G HUB, and SteelSeries Arctis Nova 5/5X over HID.</p>
     <div class="actions">
       <a class="button primary" href="https://github.com/Ayerdi/PROX2-AutoSwitch/releases/latest">Download latest release</a>
       <a class="button" href="https://github.com/Ayerdi/PROX2-AutoSwitch/wiki/Installation">Installation guide</a>
@@ -187,7 +187,7 @@ payload absent  → OFF</code></pre>
         <li>Two consecutive OFF observations are required before switching to the fallback.</li>
         <li>Bluetooth endpoint recreation is handled by stable <code>Device Name + Name</code> identity before persisting a new Item ID.</li>
         <li>The installer validates real switching in both directions.</li>
-        <li>The NirSoft download is SHA-256 verified before execution.</li>
+        <li>The native Core Audio backend replaces the legacy third-party download; releases are SHA-256 verified.</li>
         <li>Normal runtime is non-elevated; only the Audio Enhancements helper requests UAC.</li>
       </ul>
     </div>

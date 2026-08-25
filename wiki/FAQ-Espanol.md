@@ -2,15 +2,19 @@
 
 ## ¿Funciona con cualquier auricular inalámbrico?
 
-No se puede garantizar. `WindowsEndpoint` funciona cuando Windows expone un estado físico útil. Si no existe una señal segura, AutoSwitch no debe adivinar.
+No se puede garantizar. `WindowsEndpoint` funciona cuando Windows expone un estado físico útil. Si no puede observar una señal segura, AutoSwitch no cambia la salida (comportamiento *fail closed*).
 
-## ¿Por qué PRO X 2 necesita otro método?
+## ¿Por qué la familia Logitech PRO X necesita otro método?
 
-Su endpoint puede seguir `Active` con el casco apagado. Por eso existe el fallback de G HUB.
+Su endpoint puede seguir `Active` con el auricular apagado, así que el estado del endpoint por sí solo no distingue ON/OFF. Por eso existe la salida alternativa de G HUB para PRO X, PRO X 2 y PRO X Wireless.
+
+## ¿El Arctis Nova 5/5X de SteelSeries necesita su software?
+
+No. AutoSwitch lee el estado físico del receptor por HID, así que no se requiere SteelSeries GG.
 
 ## ¿AutoSwitch se ejecuta como administrador?
 
-No durante el uso normal. Solo el helper de Audio Enhancements solicita UAC cuando hace falta.
+No durante el uso normal. Solo el asistente elevado de alcance limitado de Audio Enhancements solicita UAC cuando hace falta.
 
 ## ¿Puedo copiar config.json a otro PC?
 

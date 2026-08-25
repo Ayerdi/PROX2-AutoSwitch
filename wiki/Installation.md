@@ -21,6 +21,6 @@ powershell.exe -ExecutionPolicy Bypass -File .\Install-AutoSwitch.ps1
 
 The older `Instalar-PROX2-AutoSwitch.ps1` filename remains as a compatibility entrypoint.
 
-The wizard lists output devices, lets you choose headset/fallback, observes a real OFF/ON cycle, chooses `WindowsEndpoint` when Windows provides a usable signal and falls back to G HUB only for a confirmed PRO X 2.
+The wizard lists output devices, lets you choose headset/fallback, observes a real OFF/ON cycle and picks the detection mode: `WindowsEndpoint` when Windows provides a usable signal, `LogitechGHub` for a confirmed Logitech PRO X family device, or `SteelSeriesNova5` for an Arctis Nova 5/5X receiver.
 
 [[Instalacion|Leer en español]]
