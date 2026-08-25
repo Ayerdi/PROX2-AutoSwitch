@@ -135,7 +135,7 @@
       </div>
       <div>
         <img class="demo" src="assets/tray-menu.png" alt="Audio AutoSwitch tray menu" loading="lazy">
-        <p class="caption">Real tray menu with a Logitech PRO X 2 configured.</p>
+        <p class="caption">Real tray menu with a Logitech PRO X headset configured.</p>
       </div>
     </div>
   </section>
@@ -147,7 +147,7 @@
         <li>Open the <a href="https://github.com/Ayerdi/PROX2-AutoSwitch/releases/latest">latest release</a>.</li>
         <li>Download <code>Audio-AutoSwitch.zip</code> and extract it.</li>
         <li>Double-click <code>Install.cmd</code>.</li>
-        <li>Select the headset and fallback output.</li>
+        <li>Select the detection mode, headset and fallback output.</li>
         <li>Follow the real <code>ON → OFF → ON</code> validation cycle.</li>
       </ol>
       <p class="note">The release also includes <code>Verify.cmd</code> and <code>Uninstall.cmd</code>. Release ZIPs are published with SHA-256 checksums.</p>
@@ -161,7 +161,7 @@
   </section>
 
   <section>
-    <h2>Two detection modes</h2>
+    <h2>Three detection modes</h2>
     <div class="grid">
       <div class="card">
         <h3>WindowsEndpoint</h3>
@@ -172,9 +172,14 @@ Unknown      → no switch</code></pre>
       </div>
       <div class="card">
         <h3>LogitechGHub</h3>
-        <p class="muted">Fallback for Logitech PRO X 2, whose Windows endpoint can remain <code>Active</code> while the physical headset is off. G HUB's local WebSocket supplies the physical-state signal.</p>
+        <p class="muted">Fallback for the Logitech PRO X family (PRO X, PRO X 2, PRO X Wireless), whose Windows endpoint can remain <code>Active</code> while the physical headset is off. G HUB's local WebSocket supplies the physical-state signal.</p>
         <pre><code>payload present → ON
 payload absent  → OFF</code></pre>
+      </div>
+      <div class="card">
+        <h3>SteelSeriesNova5</h3>
+        <p class="muted">Reads the physical state of an Arctis Nova 5/5X directly over HID, with no SteelSeries GG or third-party software.</p>
+        <pre><code>status request → ON / OFF / Unknown</code></pre>
       </div>
     </div>
   </section>
@@ -200,7 +205,7 @@ payload absent  → OFF</code></pre>
         <li>Windows 10/11 x64.</li>
         <li>PowerShell 5.1 or newer.</li>
         <li>Internet access during installation.</li>
-        <li>Logitech G HUB only when the selected headset requires <code>LogitechGHub</code> mode.</li>
+        <li>Logitech G HUB when the selected headset is a Logitech PRO X family device (<code>LogitechGHub</code> mode).</li>
       </ul>
     </div>
   </section>
