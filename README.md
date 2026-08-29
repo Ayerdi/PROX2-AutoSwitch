@@ -131,6 +131,8 @@ payload absent  → OFF
 Windows Core Audio / IPolicyConfig → all default roles
 ```
 
+The G HUB transport and candidate resolution are implemented once in `lib/LogitechGHub.psm1` and shared by both installer and runtime, so timeout/reconnect behavior cannot drift between the two paths.
+
 The G HUB interface is unofficial and may change in a future G HUB release. Support is therefore capability-based rather than a guarantee for every Logitech model. See [`SOURCES.md`](SOURCES.md) and [`AGENT.md`](AGENT.md) for the verified design notes.
 
 ### SteelSeriesNova5
@@ -272,6 +274,7 @@ Instalar-* / Verificar-* / Desinstalar-*.ps1   legacy compatible entrypoints
 Runtime-PROX2-AutoSwitch.ps1                   tray UI + worker runtime
 Toggle-AudioEnhancements.ps1                   elevated enhancement helper
 lib/AutoSwitchCore.psm1                        shared logic + Core Audio COM interop
+lib/LogitechGHub.psm1                          shared bounded G HUB provider
 lib/SteelSeriesNova5.psm1                      HID provider for Arctis Nova 5/5X
 install.ps1                                    checksum-verifying bootstrap
 tests/                                         Pester regression coverage
