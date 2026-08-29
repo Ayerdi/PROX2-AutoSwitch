@@ -29,7 +29,7 @@ python3 scripts/check-repository.py
 python3 scripts/check-language.py
 
 gh api --method PATCH "repos/${REPOSITORY}" \
-  -f description='Automatic Windows audio output switching for compatible wireless headsets, with a Logitech PRO X 2 fallback.' \
+  -f description='Automatic Windows audio switching for compatible wireless headsets via Core Audio, Logitech G HUB or SteelSeries HID.' \
   -f homepage='https://ayerdi.github.io/PROX2-AutoSwitch/' \
   -F has_issues=true \
   -F has_discussions=true \
@@ -41,13 +41,18 @@ gh api --method PUT "repos/${REPOSITORY}/topics" \
   -f 'names[]=audio' \
   -f 'names[]=headset' \
   -f 'names[]=powershell' \
+  -f 'names[]=core-audio' \
+  -f 'names[]=g-hub' \
   -f 'names[]=logitech' \
+  -f 'names[]=steelseries' \
   -f 'names[]=automation' \
   -f 'names[]=open-source' >/dev/null
 
 gh api --method PUT "repos/${REPOSITORY}/vulnerability-alerts" >/dev/null || true
 gh api --method PUT "repos/${REPOSITORY}/private-vulnerability-reporting" >/dev/null || true
 
+# Classic branch protection is intentionally kept here rather than duplicating
+# the same policy as a ruleset. These contexts are the three jobs in validate.yml.
 gh api --method PUT "repos/${REPOSITORY}/branches/main/protection" \
   -H 'Accept: application/vnd.github+json' \
   -f required_status_checks[strict]=true \
