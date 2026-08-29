@@ -7,6 +7,7 @@ $RuntimeSrc   = Join-Path $PackageDir "Runtime-PROX2-AutoSwitch.ps1"
 $UninstallSrc = Join-Path $PackageDir "Desinstalar-PROX2-AutoSwitch.ps1"
 $VerifySrc    = Join-Path $PackageDir "Verificar-PROX2-AutoSwitch.ps1"
 $ModuleSrc    = Join-Path $PackageDir "lib\AutoSwitchCore.psm1"
+$GHubModuleSrc = Join-Path $PackageDir "lib\LogitechGHub.psm1"
 $SteelModuleSrc = Join-Path $PackageDir "lib\SteelSeriesNova5.psm1"
 $HelperSrc    = Join-Path $PackageDir "Toggle-AudioEnhancements.ps1"
 $IconSrc      = Join-Path $PackageDir "assets\icon.ico"
@@ -21,14 +22,15 @@ $HelperPath   = Join-Path $InstallDir "Toggle-AudioEnhancements.ps1"
 $StartupDir   = [Environment]::GetFolderPath("Startup")
 $ShortcutPath = Join-Path $StartupDir "PRO X 2 AutoSwitch.lnk"
 
-foreach ($required in @($RuntimeSrc, $UninstallSrc, $VerifySrc, $ModuleSrc, $SteelModuleSrc, $HelperSrc, $IconSrc, $VersionSrc)) {
+foreach ($required in @($RuntimeSrc, $UninstallSrc, $VerifySrc, $ModuleSrc, $GHubModuleSrc, $SteelModuleSrc, $HelperSrc, $IconSrc, $VersionSrc)) {
     if (-not (Test-Path $required)) {
         throw "A package file is missing: $required. Extract the full ZIP before installing."
     }
 }
 
-# Shared logic (Core Audio, config persistence, device matching, debounce).
+# Shared logic and provider modules.
 Import-Module $ModuleSrc -ErrorAction Stop
+Import-Module $GHubModuleSrc -ErrorAction Stop
 
 $PackageVersion = (Get-Content -Raw -Path $VersionSrc).Trim()
 if ($PackageVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
@@ -90,164 +92,8 @@ Copy-Item $HelperSrc (Join-Path $InstallDir "Toggle-AudioEnhancements.ps1") -For
 Copy-Item $IconSrc (Join-Path $InstallDir "icon.ico") -Force
 New-Item -ItemType Directory -Path (Join-Path $InstallDir "lib") -Force | Out-Null
 Copy-Item $ModuleSrc (Join-Path $InstallDir "lib\AutoSwitchCore.psm1") -Force
+Copy-Item $GHubModuleSrc (Join-Path $InstallDir "lib\LogitechGHub.psm1") -Force
 Copy-Item $SteelModuleSrc (Join-Path $InstallDir "lib\SteelSeriesNova5.psm1") -Force
-
-# --- G HUB functions for the installer ---
-$script:Ws  = $null
-
-$script:ConnectTimeoutMs = 5000
-$script:ReceiveTimeoutMs = 5000
-$script:RequestTimeoutMs = 10000
-
-function Close-GHubConnection {
-    if ($null -ne $script:Ws -and
-        $script:Ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
-        $closeCts = New-Object System.Threading.CancellationTokenSource
-        $closeCts.CancelAfter(1000)
-        try {
-            $script:Ws.CloseAsync(
-                [System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure,
-                "fin",
-                $closeCts.Token
-            ).GetAwaiter().GetResult() | Out-Null
-        }
-        catch {
-            try { $script:Ws.Abort() } catch {}
-        }
-        finally {
-            $closeCts.Dispose()
-        }
-    }
-
-    try { if ($null -ne $script:Ws)  { $script:Ws.Dispose() } } catch {}
-    $script:Ws  = $null
-}
-
-function Connect-GHub {
-    Close-GHubConnection
-    $script:Ws  = New-Object System.Net.WebSockets.ClientWebSocket
-
-    $script:Ws.Options.UseDefaultCredentials = $false
-    $script:Ws.Options.SetRequestHeader("Origin", "file://")
-    $script:Ws.Options.SetRequestHeader("Pragma", "no-cache")
-    $script:Ws.Options.SetRequestHeader("Cache-Control", "no-cache")
-    $script:Ws.Options.SetRequestHeader(
-        "Sec-WebSocket-Extensions",
-        "permessage-deflate; client_max_window_bits"
-    )
-    $script:Ws.Options.SetRequestHeader("Sec-WebSocket-Protocol", "json")
-    $script:Ws.Options.AddSubProtocol("json")
-
-    $uri = New-Object System.Uri("ws://localhost:9010")
-    $timeout = New-GHubTimeoutToken -Milliseconds $script:ConnectTimeoutMs
-    try {
-        $script:Ws.ConnectAsync($uri, $timeout.Token).GetAwaiter().GetResult() | Out-Null
-    }
-    catch [System.OperationCanceledException] {
-        throw "Timeout connecting to G HUB ($($script:ConnectTimeoutMs) ms)."
-    }
-    finally {
-        $timeout.Dispose()
-    }
-
-    if ($script:Ws.State -ne [System.Net.WebSockets.WebSocketState]::Open) {
-        throw "Could not open ws://localhost:9010."
-    }
-}
-
-function Send-GHubJson {
-    param([Parameter(Mandatory=$true)][object]$Object)
-
-    $json = $Object | ConvertTo-Json -Compress -Depth 20
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
-    $segment = New-Object 'System.ArraySegment[byte]' -ArgumentList (,$bytes)
-
-    $timeout = New-GHubTimeoutToken -Milliseconds $script:ReceiveTimeoutMs
-    try {
-        $script:Ws.SendAsync(
-            $segment,
-            [System.Net.WebSockets.WebSocketMessageType]::Text,
-            $true,
-            $timeout.Token
-        ).GetAwaiter().GetResult() | Out-Null
-    }
-    catch [System.OperationCanceledException] {
-        throw "Timeout sending request to G HUB ($($script:ReceiveTimeoutMs) ms)."
-    }
-    finally {
-        $timeout.Dispose()
-    }
-}
-
-function Receive-GHubText {
-    param([Parameter(Mandatory=$true)][datetime]$Deadline)
-
-    $buffer = New-Object byte[] 16384
-    $stream = New-Object System.IO.MemoryStream
-
-    try {
-        do {
-            $remainingMs = [int](($Deadline - (Get-Date)).TotalMilliseconds)
-            if ($remainingMs -le 0) {
-                throw "G HUB request timeout ($($script:RequestTimeoutMs) ms)."
-            }
-            $fragmentMs = [Math]::Min($script:ReceiveTimeoutMs, $remainingMs)
-            $segment = New-Object 'System.ArraySegment[byte]' -ArgumentList (,$buffer)
-
-            $timeout = New-GHubTimeoutToken -Milliseconds $fragmentMs
-            try {
-                $result = $script:Ws.ReceiveAsync(
-                    $segment,
-                    $timeout.Token
-                ).GetAwaiter().GetResult()
-            }
-            catch [System.OperationCanceledException] {
-                throw "Timeout waiting for a G HUB response ($($fragmentMs) ms)."
-            }
-            finally {
-                $timeout.Dispose()
-            }
-
-            if ($result.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) {
-                throw "G HUB closed the WebSocket."
-            }
-
-            if ($result.Count -gt 0) {
-                $stream.Write($buffer, 0, $result.Count)
-            }
-        } while (-not $result.EndOfMessage)
-
-        return [System.Text.Encoding]::UTF8.GetString($stream.ToArray())
-    }
-    finally {
-        $stream.Dispose()
-    }
-}
-
-function Invoke-GHubGet {
-    param([Parameter(Mandatory=$true)][string]$Path)
-
-    $msgId = [guid]::NewGuid().ToString()
-    Send-GHubJson @{
-        msgId = $msgId
-        verb  = "GET"
-        path  = $Path
-    }
-
-    $deadline = (Get-Date).AddMilliseconds($script:RequestTimeoutMs)
-    while ($true) {
-        if ((Get-Date) -gt $deadline) {
-            throw "G HUB request timeout ($($script:RequestTimeoutMs) ms): $Path"
-        }
-
-        $raw = Receive-GHubText -Deadline $deadline
-        try { $message = $raw | ConvertFrom-Json } catch { continue }
-
-        if (($message.msgId -eq $msgId) -or ($message.path -eq $Path)) {
-            return $message
-        }
-    }
-}
 
 function Get-DefaultRenderItemId {
     return Get-CoreAudioDefaultRenderDeviceId
@@ -280,6 +126,40 @@ function Test-SetDefault {
     try { $actual = Get-CoreAudioDefaultRenderDeviceIds } catch { }
     Write-Host ("      TEST FAILED. Actual roles: {0}" -f ($actual | ConvertTo-Json -Compress)) -ForegroundColor Red
     return $false
+}
+
+function Select-InstallerLogitechHeadset {
+    <#
+    .SYNOPSIS
+        Return a compatible G HUB headset, asking only when more than one exists.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$WindowsHeadsetName)
+
+    Open-LogitechGHubConnection
+    $candidates = @(Get-LogitechGHubHeadsets)
+
+    if ($candidates.Count -eq 0) {
+        return $null
+    }
+    if ($candidates.Count -eq 1) {
+        return $candidates[0]
+    }
+
+    Write-Host "Logitech headsets detected by G HUB:" -ForegroundColor Yellow
+    for ($i = 0; $i -lt $candidates.Count; $i++) {
+        Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $candidates[$i].extendedDisplayName, $candidates[$i].id)
+    }
+
+    $ghubChoice = 0
+    do {
+        $gc = Read-Host "Enter the number of the Logitech headset that matches '$WindowsHeadsetName'"
+        $valid = [int]::TryParse($gc, [ref]$ghubChoice) -and
+                 $ghubChoice -ge 1 -and
+                 $ghubChoice -le $candidates.Count
+    } until ($valid)
+
+    return $candidates[$ghubChoice - 1]
 }
 
 try {
@@ -379,36 +259,20 @@ try {
     elseif ($cycleChoice -eq 2) {
         Write-Host "      Assuming a Logitech headset. Looking it up in G HUB..." -ForegroundColor Yellow
         try {
-            Connect-GHub
-            $devices = Invoke-GHubGet -Path "/devices/list"
-            $deviceInfos = @($devices.payload.deviceInfos)
-            $ghubCandidates = @(Get-LogitechHeadsetCandidates -DeviceInfos $deviceInfos)
-
-            if ($ghubCandidates.Count -eq 0) {
-                Write-Host "      G HUB reports no Logitech headset. Try option 3 (auto-detect)." -ForegroundColor Red
-            }
-            else {
-                $ghubHeadset = $ghubCandidates[0]
-                if ($ghubCandidates.Count -gt 1) {
-                    Write-Host "Logitech headsets detected by G HUB:" -ForegroundColor Yellow
-                    for ($i = 0; $i -lt $ghubCandidates.Count; $i++) {
-                        Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $ghubCandidates[$i].extendedDisplayName, $ghubCandidates[$i].id)
-                    }
-                    $ghubChoice = 0
-                    do {
-                        $gc = Read-Host "Enter the number of the Logitech headset that matches '$headsetName'"
-                        $ghubValid = [int]::TryParse($gc, [ref]$ghubChoice) -and
-                                     $ghubChoice -ge 1 -and
-                                     $ghubChoice -le $ghubCandidates.Count
-                    } until ($ghubValid)
-                    $ghubHeadset = $ghubCandidates[$ghubChoice - 1]
-                }
+            $ghubHeadset = Select-InstallerLogitechHeadset -WindowsHeadsetName $headsetName
+            if ($ghubHeadset) {
                 $DetectionMode = "LogitechGHub"
                 Write-Host "      G HUB: $($ghubHeadset.extendedDisplayName)" -ForegroundColor Green
+            }
+            else {
+                Write-Host "      G HUB reports no compatible Logitech headset. Try option 3 (auto-detect)." -ForegroundColor Red
             }
         }
         catch {
             Write-Host "      Could not connect to G HUB. Detail: $($_.Exception.Message)" -ForegroundColor Red
+        }
+        finally {
+            Close-LogitechGHubConnection
         }
 
         if (-not $DetectionMode) {
@@ -552,35 +416,20 @@ try {
             $conf = Read-Host "Is this headset a Logitech headset detected by G HUB? (y/N)"
             if ($conf -match '^(s|si|sí|y|yes)$') {
                 try {
-                    Connect-GHub
-                    $devices = Invoke-GHubGet -Path "/devices/list"
-                    $deviceInfos = @($devices.payload.deviceInfos)
-                    $ghubCandidates = @(Get-LogitechHeadsetCandidates -DeviceInfos $deviceInfos)
-
-                    if ($ghubCandidates.Count -eq 0) {
-                        Write-Host "      G HUB reports no Logitech headset." -ForegroundColor Red
-                    }
-                    else {
-                        Write-Host "Logitech headsets detected by G HUB:" -ForegroundColor Yellow
-                        for ($i = 0; $i -lt $ghubCandidates.Count; $i++) {
-                            Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $ghubCandidates[$i].extendedDisplayName, $ghubCandidates[$i].id)
-                        }
-
-                        $ghubChoice = 0
-                        do {
-                            $gc = Read-Host "Enter the number of the Logitech headset that matches '$headsetName'"
-                            $ghubValid = [int]::TryParse($gc, [ref]$ghubChoice) -and
-                                         $ghubChoice -ge 1 -and
-                                         $ghubChoice -le $ghubCandidates.Count
-                        } until ($ghubValid)
-
-                        $ghubHeadset = $ghubCandidates[$ghubChoice - 1]
+                    $ghubHeadset = Select-InstallerLogitechHeadset -WindowsHeadsetName $headsetName
+                    if ($ghubHeadset) {
                         $DetectionMode = "LogitechGHub"
                         Write-Host "      G HUB: $($ghubHeadset.extendedDisplayName)" -ForegroundColor Green
+                    }
+                    else {
+                        Write-Host "      G HUB reports no compatible Logitech headset." -ForegroundColor Red
                     }
                 }
                 catch {
                     Write-Host "      Could not connect to G HUB. Detail: $($_.Exception.Message)" -ForegroundColor Red
+                }
+                finally {
+                    Close-LogitechGHubConnection
                 }
             }
         }
@@ -693,7 +542,7 @@ Set shell = Nothing
     $Shortcut.Arguments = "`"$LauncherVbs`""
     $Shortcut.WorkingDirectory = $InstallDir
     $Shortcut.IconLocation = "$env:SystemRoot\System32\SndVol.exe,0"
-    $Shortcut.Description = "PRO X 2 AutoSwitch - invisible startup"
+    $Shortcut.Description = "Audio AutoSwitch - invisible startup"
     $Shortcut.Save()
 
     Start-Process -FilePath $WScriptExe -ArgumentList "`"$LauncherVbs`"" -WindowStyle Hidden
@@ -725,5 +574,5 @@ Set shell = Nothing
     Write-Host "Now try turning the headset on and off." -ForegroundColor Cyan
 }
 finally {
-    Close-GHubConnection
+    Close-LogitechGHubConnection
 }
