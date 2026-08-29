@@ -7,9 +7,11 @@ $RuntimeSrc   = Join-Path $PackageDir "Runtime-PROX2-AutoSwitch.ps1"
 $UninstallSrc = Join-Path $PackageDir "Desinstalar-PROX2-AutoSwitch.ps1"
 $VerifySrc    = Join-Path $PackageDir "Verificar-PROX2-AutoSwitch.ps1"
 $ModuleSrc    = Join-Path $PackageDir "lib\AutoSwitchCore.psm1"
+$GHubModuleSrc = Join-Path $PackageDir "lib\LogitechGHub.psm1"
 $SteelModuleSrc = Join-Path $PackageDir "lib\SteelSeriesNova5.psm1"
 $HelperSrc    = Join-Path $PackageDir "Toggle-AudioEnhancements.ps1"
 $IconSrc      = Join-Path $PackageDir "assets\icon.ico"
+$VersionSrc   = Join-Path $PackageDir "VERSION"
 
 $MainScript   = Join-Path $InstallDir "PROX2AutoSwitch.ps1"
 $ConfigPath   = Join-Path $InstallDir "config.json"
@@ -20,15 +22,20 @@ $HelperPath   = Join-Path $InstallDir "Toggle-AudioEnhancements.ps1"
 $StartupDir   = [Environment]::GetFolderPath("Startup")
 $ShortcutPath = Join-Path $StartupDir "PRO X 2 AutoSwitch.lnk"
 
-
-foreach ($required in @($RuntimeSrc, $UninstallSrc, $VerifySrc, $ModuleSrc, $SteelModuleSrc, $HelperSrc, $IconSrc)) {
+foreach ($required in @($RuntimeSrc, $UninstallSrc, $VerifySrc, $ModuleSrc, $GHubModuleSrc, $SteelModuleSrc, $HelperSrc, $IconSrc, $VersionSrc)) {
     if (-not (Test-Path $required)) {
         throw "A package file is missing: $required. Extract the full ZIP before installing."
     }
 }
 
-# Shared logic (Item ID extraction, config validation, debounce).
+# Shared logic and provider modules.
 Import-Module $ModuleSrc -ErrorAction Stop
+Import-Module $GHubModuleSrc -ErrorAction Stop
+
+$PackageVersion = (Get-Content -Raw -Path $VersionSrc).Trim()
+if ($PackageVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
+    throw "VERSION is invalid: '$PackageVersion'."
+}
 
 if (-not [Environment]::Is64BitOperatingSystem) {
     throw "This package is built for Windows x64."
@@ -85,185 +92,9 @@ Copy-Item $HelperSrc (Join-Path $InstallDir "Toggle-AudioEnhancements.ps1") -For
 Copy-Item $IconSrc (Join-Path $InstallDir "icon.ico") -Force
 New-Item -ItemType Directory -Path (Join-Path $InstallDir "lib") -Force | Out-Null
 Copy-Item $ModuleSrc (Join-Path $InstallDir "lib\AutoSwitchCore.psm1") -Force
+Copy-Item $GHubModuleSrc (Join-Path $InstallDir "lib\LogitechGHub.psm1") -Force
 Copy-Item $SteelModuleSrc (Join-Path $InstallDir "lib\SteelSeriesNova5.psm1") -Force
 
-# --- G HUB functions for the installer ---
-$script:Ws  = $null
-
-# G HUB timeouts (ms): the assistant's G HUB check must not hang if G HUB
-# accepts the connection and then stops responding.
-$script:ConnectTimeoutMs = 5000
-$script:ReceiveTimeoutMs = 5000
-$script:RequestTimeoutMs = 10000
-
-# G HUB timeout token: defined in lib\AutoSwitchCore.psm1 (imported above).
-
-function Close-GHubConnection {
-    # Closing must not hang the assistant: if CloseAsync does not finish in
-    # 1 s (or fails), Abort() + Dispose() guarantee exit.
-    if ($null -ne $script:Ws -and
-        $script:Ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
-        $closeCts = New-Object System.Threading.CancellationTokenSource
-        $closeCts.CancelAfter(1000)
-        try {
-            $script:Ws.CloseAsync(
-                [System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure,
-                "fin",
-                $closeCts.Token
-            ).GetAwaiter().GetResult() | Out-Null
-        }
-        catch {
-            try { $script:Ws.Abort() } catch {}
-        }
-        finally {
-            $closeCts.Dispose()
-        }
-    }
-
-    try { if ($null -ne $script:Ws)  { $script:Ws.Dispose() } } catch {}
-
-    $script:Ws  = $null
-}
-
-function Connect-GHub {
-    Close-GHubConnection
-
-    $script:Ws  = New-Object System.Net.WebSockets.ClientWebSocket
-
-    $script:Ws.Options.UseDefaultCredentials = $false
-    $script:Ws.Options.SetRequestHeader("Origin", "file://")
-    $script:Ws.Options.SetRequestHeader("Pragma", "no-cache")
-    $script:Ws.Options.SetRequestHeader("Cache-Control", "no-cache")
-    $script:Ws.Options.SetRequestHeader(
-        "Sec-WebSocket-Extensions",
-        "permessage-deflate; client_max_window_bits"
-    )
-    $script:Ws.Options.SetRequestHeader("Sec-WebSocket-Protocol", "json")
-    $script:Ws.Options.AddSubProtocol("json")
-
-    $uri = New-Object System.Uri("ws://localhost:9010")
-
-    $timeout = New-GHubTimeoutToken -Milliseconds $script:ConnectTimeoutMs
-    try {
-        $script:Ws.ConnectAsync($uri, $timeout.Token).GetAwaiter().GetResult() | Out-Null
-    }
-    catch [System.OperationCanceledException] {
-        throw "Timeout connecting to G HUB ($($script:ConnectTimeoutMs) ms)."
-    }
-    finally {
-        $timeout.Dispose()
-    }
-
-    if ($script:Ws.State -ne [System.Net.WebSockets.WebSocketState]::Open) {
-        throw "Could not open ws://localhost:9010."
-    }
-}
-
-function Send-GHubJson {
-    param([Parameter(Mandatory=$true)][object]$Object)
-
-    $json = $Object | ConvertTo-Json -Compress -Depth 20
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
-    $segment = New-Object 'System.ArraySegment[byte]' -ArgumentList (,$bytes)
-
-    $timeout = New-GHubTimeoutToken -Milliseconds $script:ReceiveTimeoutMs
-    try {
-        $script:Ws.SendAsync(
-            $segment,
-            [System.Net.WebSockets.WebSocketMessageType]::Text,
-            $true,
-            $timeout.Token
-        ).GetAwaiter().GetResult() | Out-Null
-    }
-    catch [System.OperationCanceledException] {
-        throw "Timeout sending request to G HUB ($($script:ReceiveTimeoutMs) ms)."
-    }
-    finally {
-        $timeout.Dispose()
-    }
-}
-
-function Receive-GHubText {
-    param(
-        # Hard deadline for the request: no fragment may cross this point.
-        [Parameter(Mandatory=$true)][datetime]$Deadline
-    )
-
-    $buffer = New-Object byte[] 16384
-    $stream = New-Object System.IO.MemoryStream
-
-    try {
-        do {
-            $remainingMs = [int](($Deadline - (Get-Date)).TotalMilliseconds)
-            if ($remainingMs -le 0) {
-                throw "G HUB request timeout ($($script:RequestTimeoutMs) ms)."
-            }
-            # Each fragment waits at most ReceiveTimeoutMs, never past the
-            # global request deadline.
-            $fragmentMs = [Math]::Min($script:ReceiveTimeoutMs, $remainingMs)
-
-            $segment = New-Object 'System.ArraySegment[byte]' -ArgumentList (,$buffer)
-
-            $timeout = New-GHubTimeoutToken -Milliseconds $fragmentMs
-            try {
-                $result = $script:Ws.ReceiveAsync(
-                    $segment,
-                    $timeout.Token
-                ).GetAwaiter().GetResult()
-            }
-            catch [System.OperationCanceledException] {
-                throw "Timeout waiting for a G HUB response ($($fragmentMs) ms)."
-            }
-            finally {
-                $timeout.Dispose()
-            }
-
-            if ($result.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) {
-                throw "G HUB closed the WebSocket."
-            }
-
-            if ($result.Count -gt 0) {
-                $stream.Write($buffer, 0, $result.Count)
-            }
-        } while (-not $result.EndOfMessage)
-
-        return [System.Text.Encoding]::UTF8.GetString($stream.ToArray())
-    }
-    finally {
-        $stream.Dispose()
-    }
-}
-
-function Invoke-GHubGet {
-    param([Parameter(Mandatory=$true)][string]$Path)
-
-    $msgId = [guid]::NewGuid().ToString()
-
-    Send-GHubJson @{
-        msgId = $msgId
-        verb  = "GET"
-        path  = $Path
-    }
-
-    # Global per-request limit: even if G HUB interleaves events, the expected
-    # response must arrive before the deadline.
-    $deadline = (Get-Date).AddMilliseconds($script:RequestTimeoutMs)
-
-    while ($true) {
-        if ((Get-Date) -gt $deadline) {
-            throw "G HUB request timeout ($($script:RequestTimeoutMs) ms): $Path"
-        }
-
-        $raw = Receive-GHubText -Deadline $deadline
-        try { $message = $raw | ConvertFrom-Json } catch { continue }
-
-        if (($message.msgId -eq $msgId) -or ($message.path -eq $Path)) {
-            return $message
-        }
-    }
-}
-
-# --- Audio functions ---
 function Get-DefaultRenderItemId {
     return Get-CoreAudioDefaultRenderDeviceId
 }
@@ -297,10 +128,41 @@ function Test-SetDefault {
     return $false
 }
 
+function Select-InstallerLogitechHeadset {
+    <#
+    .SYNOPSIS
+        Return a compatible G HUB headset, asking only when more than one exists.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)][string]$WindowsHeadsetName)
+
+    Open-LogitechGHubConnection
+    $candidates = @(Get-LogitechGHubHeadsets)
+
+    if ($candidates.Count -eq 0) {
+        return $null
+    }
+    if ($candidates.Count -eq 1) {
+        return $candidates[0]
+    }
+
+    Write-Host "Logitech headsets detected by G HUB:" -ForegroundColor Yellow
+    for ($i = 0; $i -lt $candidates.Count; $i++) {
+        Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $candidates[$i].extendedDisplayName, $candidates[$i].id)
+    }
+
+    $ghubChoice = 0
+    do {
+        $gc = Read-Host "Enter the number of the Logitech headset that matches '$WindowsHeadsetName'"
+        $valid = [int]::TryParse($gc, [ref]$ghubChoice) -and
+                 $ghubChoice -ge 1 -and
+                 $ghubChoice -le $candidates.Count
+    } until ($valid)
+
+    return $candidates[$ghubChoice - 1]
+}
+
 try {
-    # --- Step 3: pick headset and fallback FIRST ---
-    # DetectionMode is not decided until the device has been chosen and we
-    # have validated that Windows (or G HUB) can observe its physical state.
     $DetectionMode = $null
     $ghubHeadset = $null
 
@@ -316,8 +178,6 @@ try {
         throw "No render (output) devices found in the Windows list."
     }
 
-    # Show only Active endpoints (usable right now). If there is none,
-    # show all with a notice so the install is not blocked.
     $activeRows = @($renderRows | Where-Object {
         (Get-DeviceColumn -Row $_ -Names @('Device State')) -ieq 'Active'
     })
@@ -368,11 +228,6 @@ try {
     Write-Host "      Headset:  $headsetName" -ForegroundColor Green
     Write-Host "      Fallback: $speakerName" -ForegroundColor Green
 
-    # --- Atajo: como usar el headset elegido ---
-    # El ciclo ON -> OFF -> ON confirma que Windows refleja el estado fisico
-    # (needed to detect ON/OFF at runtime). But if the user already
-    # knows the chosen endpoints are correct (e.g. tested before),
-    # they can skip the cycle and use WindowsEndpoint directly.
     Write-Host ""
     Write-Host "Which kind of headset is this?" -ForegroundColor Yellow
     Write-Host ""
@@ -398,49 +253,26 @@ try {
     } until ($cycleChoice -ge 1 -and $cycleChoice -le 4)
 
     if ($cycleChoice -eq 1) {
-        # Standard wireless headset: assume WindowsEndpoint. The selected endpoints
-        # are already Active render endpoints, so the runtime will watch their
-        # Active/Unplugged state. No cycle needed.
         $DetectionMode = "WindowsEndpoint"
         Write-Host "      Using WindowsEndpoint mode with the selected endpoints." -ForegroundColor Green
     }
     elseif ($cycleChoice -eq 2) {
-        # Logitech headset: needs G HUB. The endpoint alone cannot tell ON from OFF.
         Write-Host "      Assuming a Logitech headset. Looking it up in G HUB..." -ForegroundColor Yellow
         try {
-            Connect-GHub
-            $devices = Invoke-GHubGet -Path "/devices/list"
-            $deviceInfos = @($devices.payload.deviceInfos)
-
-            $ghubCandidates = @($deviceInfos | Where-Object {
-                Test-LogitechHeadsetDevice -Device $_
-            })
-
-            if ($ghubCandidates.Count -eq 0) {
-                Write-Host "      G HUB reports no Logitech headset. Try option 3 (auto-detect)." -ForegroundColor Red
-            }
-            else {
-                $ghubHeadset = $ghubCandidates[0]
-                if ($ghubCandidates.Count -gt 1) {
-                    Write-Host "PRO X 2 headsets detected by G HUB:" -ForegroundColor Yellow
-                    for ($i = 0; $i -lt $ghubCandidates.Count; $i++) {
-                        Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $ghubCandidates[$i].extendedDisplayName, $ghubCandidates[$i].id)
-                    }
-                    $ghubChoice = 0
-                    do {
-                        $gc = Read-Host "Enter the number of the Logitech headset that matches '$headsetName'"
-                        $ghubValid = [int]::TryParse($gc, [ref]$ghubChoice) -and
-                                     $ghubChoice -ge 1 -and
-                                     $ghubChoice -le $ghubCandidates.Count
-                    } until ($ghubValid)
-                    $ghubHeadset = $ghubCandidates[$ghubChoice - 1]
-                }
+            $ghubHeadset = Select-InstallerLogitechHeadset -WindowsHeadsetName $headsetName
+            if ($ghubHeadset) {
                 $DetectionMode = "LogitechGHub"
                 Write-Host "      G HUB: $($ghubHeadset.extendedDisplayName)" -ForegroundColor Green
+            }
+            else {
+                Write-Host "      G HUB reports no compatible Logitech headset. Try option 3 (auto-detect)." -ForegroundColor Red
             }
         }
         catch {
             Write-Host "      Could not connect to G HUB. Detail: $($_.Exception.Message)" -ForegroundColor Red
+        }
+        finally {
+            Close-LogitechGHubConnection
         }
 
         if (-not $DetectionMode) {
@@ -448,7 +280,6 @@ try {
         }
     }
     elseif ($cycleChoice -eq 4) {
-        # SteelSeries Arctis Nova 5/5X: HID receiver detection via the module.
         $steelModule = Join-Path $InstallDir "lib\SteelSeriesNova5.psm1"
         if (-not (Test-Path $steelModule)) {
             Write-Host "      SteelSeries module not present in the package; cannot use this mode." -ForegroundColor Red
@@ -470,169 +301,139 @@ try {
         }
     }
     else {
-    # --- Validate the headset ON -> OFF -> ON cycle ---
-    # The headset must be ON now. We ask for OFF and then ON, and check that
-    # Windows reflects the change on each transition.
-    Write-Host ""
-    Write-Host "Checking that Windows reflects the physical state of the headset..." -ForegroundColor Cyan
-    Write-Host "      The headset must be ON now. Checking..." -ForegroundColor DarkGray
-
-    function Get-HeadsetInstallState {
-        param(
-            [Parameter(Mandatory = $true)][string]$ItemId,
-            [string]$DeviceName,
-            [string]$EndpointName
-        )
-
-        try {
-            $rows = @(Get-CoreAudioRenderDevices)
-        }
-        catch {
-            return [pscustomobject]@{ State = 'Unknown'; FoundId = $null }
-        }
-        $row = $rows | Where-Object {
-            $id = Get-DeviceColumn -Row $_ -Names @('Item ID')
-            $null -ne $id -and $id.Trim() -ieq $ItemId.Trim()
-        } | Select-Object -First 1
-
-        # Bluetooth can recreate an endpoint with a new Item ID after reconnect.
-        # Resolve the same Render endpoint by its native Core Audio identity rather than
-        # treating the user-facing "Device Name — Name" label as one column.
-        if (-not $row -and
-            (-not [string]::IsNullOrWhiteSpace($DeviceName) -or
-             -not [string]::IsNullOrWhiteSpace($EndpointName))) {
-            $row = Find-RenderDeviceByIdentity -Rows $rows -DeviceName $DeviceName -Name $EndpointName
-        }
-
-        if (-not $row) {
-            return [pscustomobject]@{ State = 'Disconnected'; FoundId = $null }
-        }
-
-        $state = Get-DeviceColumn -Row $row -Names @('Device State', 'State')
-        $foundId = Get-DeviceColumn -Row $row -Names @('Item ID')
-        if ([string]::IsNullOrWhiteSpace($state)) {
-            return [pscustomobject]@{ State = 'Unknown'; FoundId = $foundId }
-        }
-
-        return [pscustomobject]@{
-            State   = (Resolve-EndpointState -State $state)
-            FoundId = $foundId
-        }
-    }
-
-    function Wait-ForHeadsetInstallState {
-        param(
-            [Parameter(Mandatory = $true)][string]$ItemId,
-            [Parameter(Mandatory = $true)][string]$Expected,
-            [string]$DeviceName,
-            [string]$EndpointName,
-            [int]$TimeoutSeconds,
-            [int]$PollIntervalMs = 500
-        )
-
-        $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-        $currentId = $ItemId
-        $lastState = 'Unknown'
-        $lastFoundId = $null
-
-        do {
-            $res = Get-HeadsetInstallState -ItemId $currentId -DeviceName $DeviceName -EndpointName $EndpointName
-            $lastState = $res.State
-            if (-not [string]::IsNullOrWhiteSpace([string]$res.FoundId)) {
-                $lastFoundId = [string]$res.FoundId
-                $currentId = $lastFoundId
-            }
-
-            if ($lastState -eq $Expected) {
-                return [pscustomobject]@{ State = $lastState; FoundId = $lastFoundId }
-            }
-
-            Start-Sleep -Milliseconds $PollIntervalMs
-        } while ((Get-Date) -lt $deadline)
-
-        return [pscustomobject]@{ State = $lastState; FoundId = $lastFoundId }
-    }
-
-    Write-Host "      Waiting for Windows to report the headset as connected (up to 15 s)..." -ForegroundColor DarkGray
-    $rOn1 = Wait-ForHeadsetInstallState -ItemId $headsetId -Expected 'Connected' -DeviceName $headsetDeviceName -EndpointName $headsetEndpointName -TimeoutSeconds 15
-    $sOn1 = $rOn1.State
-    if ($rOn1.FoundId) { $headsetId = [string]$rOn1.FoundId }
-
-    Write-Host ""
-    Write-Host "Turn the headset OFF and press ENTER..." -ForegroundColor Cyan
-    [void](Read-Host)
-    Write-Host "      Waiting for Windows to report the headset as disconnected (up to 15 s)..." -ForegroundColor DarkGray
-    $rOff = Wait-ForHeadsetInstallState -ItemId $headsetId -Expected 'Disconnected' -DeviceName $headsetDeviceName -EndpointName $headsetEndpointName -TimeoutSeconds 15
-    $sOff = $rOff.State
-    if ($rOff.FoundId) { $headsetId = [string]$rOff.FoundId }
-
-    Write-Host "Turn the headset back ON and press ENTER..." -ForegroundColor Cyan
-    [void](Read-Host)
-    Write-Host "      Waiting for Windows to report the headset as connected (up to 20 s)..." -ForegroundColor DarkGray
-    $rOn2 = Wait-ForHeadsetInstallState -ItemId $headsetId -Expected 'Connected' -DeviceName $headsetDeviceName -EndpointName $headsetEndpointName -TimeoutSeconds 20
-    $sOn2 = $rOn2.State
-    if ($rOn2.FoundId -and ([string]$rOn2.FoundId -ine $headsetId)) {
-        Write-Host "      Bluetooth endpoint was recreated; refreshed its Windows Item ID." -ForegroundColor DarkGray
-        $headsetId = [string]$rOn2.FoundId
-    }
-
-    Write-Host ""
-    Write-Host ("      State ON (initial):  {0}" -f $sOn1) -ForegroundColor DarkGray
-    Write-Host ("      State OFF:           {0}" -f $sOff) -ForegroundColor DarkGray
-    Write-Host ("      State ON (final):    {0}" -f $sOn2) -ForegroundColor DarkGray
-
-    if ($sOn1 -eq 'Connected' -and $sOff -eq 'Disconnected' -and $sOn2 -eq 'Connected') {
-        $DetectionMode = "WindowsEndpoint"
-        Write-Host "      Windows reflects the ON->OFF->ON cycle: universal mode." -ForegroundColor Green
-    }
-    else {
-        Write-Host "      Windows does NOT reflect the physical cycle of this headset." -ForegroundColor DarkGray
-
-        # G HUB fallback: ONLY if the user confirms that the chosen headset is
-        # a Logitech headset listed by G HUB. Never associate $logi[0].
         Write-Host ""
-        $conf = Read-Host "Is this headset a Logitech headset detected by G HUB? (y/N)"
-        if ($conf -match '^(s|si|sí|y|yes)$') {
+        Write-Host "Checking that Windows reflects the physical state of the headset..." -ForegroundColor Cyan
+        Write-Host "      The headset must be ON now. Checking..." -ForegroundColor DarkGray
+
+        function Get-HeadsetInstallState {
+            param(
+                [Parameter(Mandatory = $true)][string]$ItemId,
+                [string]$DeviceName,
+                [string]$EndpointName
+            )
+
             try {
-                Connect-GHub
-                $devices = Invoke-GHubGet -Path "/devices/list"
-                $deviceInfos = @($devices.payload.deviceInfos)
-
-                Write-Host ""
-                # Filter to ONLY Logitech headset candidates: prevents accidentally
-                # picking a Logitech mouse/keyboard and watching its battery.
-                $ghubCandidates = @($deviceInfos | Where-Object {
-                    Test-LogitechHeadsetDevice -Device $_
-                })
-
-                if ($ghubCandidates.Count -eq 0) {
-                    Write-Host "      G HUB reports no Logitech headset." -ForegroundColor Red
-                }
-                else {
-                    Write-Host "Logitech headsets detected by G HUB:" -ForegroundColor Yellow
-                    for ($i = 0; $i -lt $ghubCandidates.Count; $i++) {
-                        Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $ghubCandidates[$i].extendedDisplayName, $ghubCandidates[$i].id)
-                    }
-
-                    $ghubChoice = 0
-                    do {
-                        $gc = Read-Host "Enter the number of the Logitech headset that matches '$headsetName'"
-                        $ghubValid = [int]::TryParse($gc, [ref]$ghubChoice) -and
-                                     $ghubChoice -ge 1 -and
-                                     $ghubChoice -le $ghubCandidates.Count
-                    } until ($ghubValid)
-
-                    $ghubHeadset = $ghubCandidates[$ghubChoice - 1]
-                    $DetectionMode = "LogitechGHub"
-                    Write-Host "      G HUB: $($ghubHeadset.extendedDisplayName)" -ForegroundColor Green
-                }
+                $rows = @(Get-CoreAudioRenderDevices)
             }
             catch {
-                Write-Host "      Could not connect to G HUB. Detail: $($_.Exception.Message)" -ForegroundColor Red
+                return [pscustomobject]@{ State = 'Unknown'; FoundId = $null }
+            }
+            $row = $rows | Where-Object {
+                $id = Get-DeviceColumn -Row $_ -Names @('Item ID')
+                $null -ne $id -and $id.Trim() -ieq $ItemId.Trim()
+            } | Select-Object -First 1
+
+            if (-not $row -and
+                (-not [string]::IsNullOrWhiteSpace($DeviceName) -or
+                 -not [string]::IsNullOrWhiteSpace($EndpointName))) {
+                $row = Find-RenderDeviceByIdentity -Rows $rows -DeviceName $DeviceName -Name $EndpointName
+            }
+
+            if (-not $row) {
+                return [pscustomobject]@{ State = 'Disconnected'; FoundId = $null }
+            }
+
+            $state = Get-DeviceColumn -Row $row -Names @('Device State', 'State')
+            $foundId = Get-DeviceColumn -Row $row -Names @('Item ID')
+            if ([string]::IsNullOrWhiteSpace($state)) {
+                return [pscustomobject]@{ State = 'Unknown'; FoundId = $foundId }
+            }
+
+            return [pscustomobject]@{
+                State   = (Resolve-EndpointState -State $state)
+                FoundId = $foundId
+            }
+        }
+
+        function Wait-ForHeadsetInstallState {
+            param(
+                [Parameter(Mandatory = $true)][string]$ItemId,
+                [Parameter(Mandatory = $true)][string]$Expected,
+                [string]$DeviceName,
+                [string]$EndpointName,
+                [int]$TimeoutSeconds,
+                [int]$PollIntervalMs = 500
+            )
+
+            $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+            $currentId = $ItemId
+            $lastState = 'Unknown'
+            $lastFoundId = $null
+
+            do {
+                $res = Get-HeadsetInstallState -ItemId $currentId -DeviceName $DeviceName -EndpointName $EndpointName
+                $lastState = $res.State
+                if (-not [string]::IsNullOrWhiteSpace([string]$res.FoundId)) {
+                    $lastFoundId = [string]$res.FoundId
+                    $currentId = $lastFoundId
+                }
+
+                if ($lastState -eq $Expected) {
+                    return [pscustomobject]@{ State = $lastState; FoundId = $lastFoundId }
+                }
+
+                Start-Sleep -Milliseconds $PollIntervalMs
+            } while ((Get-Date) -lt $deadline)
+
+            return [pscustomobject]@{ State = $lastState; FoundId = $lastFoundId }
+        }
+
+        Write-Host "      Waiting for Windows to report the headset as connected (up to 15 s)..." -ForegroundColor DarkGray
+        $rOn1 = Wait-ForHeadsetInstallState -ItemId $headsetId -Expected 'Connected' -DeviceName $headsetDeviceName -EndpointName $headsetEndpointName -TimeoutSeconds 15
+        $sOn1 = $rOn1.State
+        if ($rOn1.FoundId) { $headsetId = [string]$rOn1.FoundId }
+
+        Write-Host ""
+        Write-Host "Turn the headset OFF and press ENTER..." -ForegroundColor Cyan
+        [void](Read-Host)
+        Write-Host "      Waiting for Windows to report the headset as disconnected (up to 15 s)..." -ForegroundColor DarkGray
+        $rOff = Wait-ForHeadsetInstallState -ItemId $headsetId -Expected 'Disconnected' -DeviceName $headsetDeviceName -EndpointName $headsetEndpointName -TimeoutSeconds 15
+        $sOff = $rOff.State
+        if ($rOff.FoundId) { $headsetId = [string]$rOff.FoundId }
+
+        Write-Host "Turn the headset back ON and press ENTER..." -ForegroundColor Cyan
+        [void](Read-Host)
+        Write-Host "      Waiting for Windows to report the headset as connected (up to 20 s)..." -ForegroundColor DarkGray
+        $rOn2 = Wait-ForHeadsetInstallState -ItemId $headsetId -Expected 'Connected' -DeviceName $headsetDeviceName -EndpointName $headsetEndpointName -TimeoutSeconds 20
+        $sOn2 = $rOn2.State
+        if ($rOn2.FoundId -and ([string]$rOn2.FoundId -ine $headsetId)) {
+            Write-Host "      Bluetooth endpoint was recreated; refreshed its Windows Item ID." -ForegroundColor DarkGray
+            $headsetId = [string]$rOn2.FoundId
+        }
+
+        Write-Host ""
+        Write-Host ("      State ON (initial):  {0}" -f $sOn1) -ForegroundColor DarkGray
+        Write-Host ("      State OFF:           {0}" -f $sOff) -ForegroundColor DarkGray
+        Write-Host ("      State ON (final):    {0}" -f $sOn2) -ForegroundColor DarkGray
+
+        if ($sOn1 -eq 'Connected' -and $sOff -eq 'Disconnected' -and $sOn2 -eq 'Connected') {
+            $DetectionMode = "WindowsEndpoint"
+            Write-Host "      Windows reflects the ON->OFF->ON cycle: universal mode." -ForegroundColor Green
+        }
+        else {
+            Write-Host "      Windows does NOT reflect the physical cycle of this headset." -ForegroundColor DarkGray
+            Write-Host ""
+            $conf = Read-Host "Is this headset a Logitech headset detected by G HUB? (y/N)"
+            if ($conf -match '^(s|si|sí|y|yes)$') {
+                try {
+                    $ghubHeadset = Select-InstallerLogitechHeadset -WindowsHeadsetName $headsetName
+                    if ($ghubHeadset) {
+                        $DetectionMode = "LogitechGHub"
+                        Write-Host "      G HUB: $($ghubHeadset.extendedDisplayName)" -ForegroundColor Green
+                    }
+                    else {
+                        Write-Host "      G HUB reports no compatible Logitech headset." -ForegroundColor Red
+                    }
+                }
+                catch {
+                    Write-Host "      Could not connect to G HUB. Detail: $($_.Exception.Message)" -ForegroundColor Red
+                }
+                finally {
+                    Close-LogitechGHubConnection
+                }
             }
         }
     }
-    }  # end of the shortcut cycle (ON->OFF->ON) else block
 
     if (-not $DetectionMode) {
         throw "Windows cannot detect the physical state of this headset and there is no compatible method (nor a confirmed G HUB). Not installing."
@@ -642,7 +443,6 @@ try {
     Write-Host "[3/6] Calibrating Windows outputs..." -ForegroundColor Yellow
     Write-Host "No old IDs are kept: the current Windows ones are captured." -ForegroundColor DarkGray
 
-    # In both modes we already have the IDs captured from the Windows list.
     $headsetOutput = [pscustomobject]@{
         Name   = $headsetName
         ItemId = $headsetId
@@ -668,7 +468,7 @@ try {
     }
 
     $config = [ordered]@{
-        Version                = "1.4.0"
+        Version                = $PackageVersion
         DetectionMode          = $DetectionMode
         HeadsetName            = [string]$headsetOutput.Name
         HeadsetId              = [string]$headsetOutput.ItemId
@@ -683,14 +483,11 @@ try {
         InstalledAt            = (Get-Date).ToString("o")
     }
 
-    # G HUB mode specific fields.
     if ($DetectionMode -eq 'LogitechGHub' -and $ghubHeadset) {
         $config['GHubDisplayName'] = [string]$ghubHeadset.extendedDisplayName
         $config['GHubPort']        = 9010
     }
 
-    # Ask whether to disable the headset's audio enhancements now (requires a
-    # one-off elevation via UAC).
     Write-Host ""
     Write-Host "Windows Audio Enhancements:" -ForegroundColor Yellow
     $enhChoice = Read-Host "Do you want to disable the headset's audio enhancements? (y/N)"
@@ -700,8 +497,7 @@ try {
         Write-Host "      They will be disabled (a UAC window may appear)..." -ForegroundColor DarkGray
     }
 
-    $config | ConvertTo-Json -Depth 10 |
-        Set-Content -Path $ConfigPath -Encoding UTF8
+    Write-AutoSwitchJsonAtomically -InputObject $config -Path $ConfigPath
 
     if ($config['DisableEnhancementsOnStart']) {
         try {
@@ -740,18 +536,15 @@ Set shell = Nothing
 
     Set-Content -Path $LauncherVbs -Value $vbs -Encoding ASCII
 
-    # The shortcut launches wscript.exe, not PowerShell directly, so no
-    # console window remains visible at login.
     $WshShell = New-Object -ComObject WScript.Shell
     $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
     $Shortcut.TargetPath = $WScriptExe
     $Shortcut.Arguments = "`"$LauncherVbs`""
     $Shortcut.WorkingDirectory = $InstallDir
     $Shortcut.IconLocation = "$env:SystemRoot\System32\SndVol.exe,0"
-    $Shortcut.Description = "PRO X 2 AutoSwitch - invisible startup"
+    $Shortcut.Description = "Audio AutoSwitch - invisible startup"
     $Shortcut.Save()
 
-    # Start now, hidden.
     Start-Process -FilePath $WScriptExe -ArgumentList "`"$LauncherVbs`"" -WindowStyle Hidden
     Start-Sleep -Seconds 2
 
@@ -781,5 +574,5 @@ Set shell = Nothing
     Write-Host "Now try turning the headset on and off." -ForegroundColor Cyan
 }
 finally {
-    Close-GHubConnection
+    Close-LogitechGHubConnection
 }

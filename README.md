@@ -12,7 +12,7 @@ Automatically switch the Windows default audio output when your wireless headset
 
 - Headset on / connected → use the headset.
 - Headset off / disconnected → return to the configured fallback output.
-- Three detection modes: generic `WindowsEndpoint`, `LogitechGHub` (PRO X / PRO X 2 / PRO X Wireless), `SteelSeriesNova5` (Arctis Nova 5 / 5X).
+- Three detection modes: generic `WindowsEndpoint`, `LogitechGHub` (compatible Logitech headsets exposed by G HUB), `SteelSeriesNova5` (Arctis Nova 5 / 5X).
 - Tray controls for AutoSwitch, reconfiguration and Windows Audio Enhancements.
 - Invisible startup: no PowerShell window at login.
 
@@ -85,12 +85,14 @@ The bootstrap downloads the latest versioned release ZIP and checksum, verifies 
 powershell.exe -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/Ayerdi/PROX2-AutoSwitch/main/install.ps1 | iex"
 ```
 
+For the strongest release-integrity path, prefer the release ZIP above: tag releases produced by the release workflow are reproducible, checksum-published and provenance-attested. The one-command bootstrap itself is fetched from the mutable `main` branch before it can perform those release checks.
+
 ## Supported headsets
 
 | Headset | Detection mode | Extra software | Notes |
 |---|---|---|---|
 | Any headset whose Windows endpoint exposes connection state | `WindowsEndpoint` | None | Validated with a Jabra Evolve 65. |
-| Logitech PRO X, PRO X 2, PRO X Wireless | `LogitechGHub` | Logitech G HUB (installed and running) | Used when Windows keeps the endpoint `Active` while the physical headset is off. |
+| Logitech headset that G HUB exposes with a usable battery-status signal | `LogitechGHub` | Logitech G HUB (installed and running) | AutoSwitch filters G HUB device metadata to headset candidates and uses `/battery/<deviceId>/state`; compatibility depends on G HUB exposing that signal for the model. |
 | SteelSeries Arctis Nova 5 / 5X | `SteelSeriesNova5` | None | Physical state read over HID; no SteelSeries GG required. |
 
 See [How it works](#how-it-works) for the exact behavior of each mode.
@@ -113,10 +115,10 @@ Bluetooth can recreate the audio endpoint after a reconnect, so the installer an
 
 ### LogitechGHub
 
-The Logitech PRO X family is an important exception: the Windows endpoint can remain `Active` while the physical headset is off. For those devices AutoSwitch uses G HUB's local WebSocket as the physical-state signal:
+Some Logitech wireless headsets keep their Windows endpoint `Active` while the physical headset is off. When G HUB exposes a compatible headset with a usable battery-status signal, AutoSwitch uses G HUB's local WebSocket as the physical-state source:
 
 ```text
-Logitech PRO X / PRO X 2 / PRO X Wireless
+Compatible Logitech headset
   ↓
 Logitech G HUB · ws://localhost:9010
   ↓
@@ -129,7 +131,9 @@ payload absent  → OFF
 Windows Core Audio / IPolicyConfig → all default roles
 ```
 
-The G HUB interface is unofficial and may change in a future G HUB release. See [`SOURCES.md`](SOURCES.md) and [`AGENT.md`](AGENT.md) for the verified design notes.
+The G HUB transport and candidate resolution are implemented once in `lib/LogitechGHub.psm1` and shared by both installer and runtime, so timeout/reconnect behavior cannot drift between the two paths.
+
+The G HUB interface is unofficial and may change in a future G HUB release. Support is therefore capability-based rather than a guarantee for every Logitech model. See [`SOURCES.md`](SOURCES.md) and [`AGENT.md`](AGENT.md) for the verified design notes.
 
 ### SteelSeriesNova5
 
@@ -174,6 +178,8 @@ Runtime settings live in `%LOCALAPPDATA%\PROX2AutoSwitch\config.json` and are ed
 
 The debounce has a practical consequence: `OffMissThreshold=2` × `PollMilliseconds=1500` delays the return to the fallback by about **1.5–3 s** (a maximum of about three seconds), depending on where in the poll cycle the headset turns off. Switching to the headset on power-up is immediate.
 
+Configuration updates made by the installer or **Reconfigure...** are written through a validated same-volume temporary file and atomically replace the previous JSON, so an interrupted write cannot leave a partially-written `config.json`.
+
 ## Tray and reconfiguration
 
 The tray menu shows the configured headset, fallback and next switch action.
@@ -184,7 +190,7 @@ It also provides:
 
 - **AutoSwitch: Enabled / Disabled** — pause or resume switching.
 - **Disable / Enable Audio Enhancements** — change the configured headset's global Windows enhancement state, with UAC only for the helper.
-- **Reconfigure...** — choose new endpoints and repeat the complete detection wizard without reinstalling.
+- **Reconfigure...** — choose new endpoints and repeat the complete detection wizard without reinstalling, including Windows endpoint, compatible Logitech G HUB and SteelSeries Nova 5/5X detection paths.
 - **Exit** — stop AutoSwitch.
 
 A failed reconfiguration leaves the previous working configuration untouched.
@@ -210,7 +216,7 @@ Installed runtime data and the main log live under:
 ## Troubleshooting
 
 - **Bluetooth headset stopped switching after a reconnect.** The audio endpoint is recreated with a new internal ID after reconnecting. Run **Reconfigure...** to re-find it by name (see [Machine-local identifiers](#machine-local-identifiers)).
-- **Logitech headset is on but the output stays on the speakers.** The G HUB WebSocket is the physical-state signal. Make sure Logitech G HUB is installed and running, then rerun the validation wizard.
+- **Logitech headset is on but the output stays on the speakers.** The G HUB WebSocket is the physical-state signal. Make sure Logitech G HUB is installed and running, then rerun the validation wizard. The selected model must expose a usable battery-status signal through G HUB.
 - **Two devices share the same display name.** AutoSwitch resolves the current ID from the stable identity, so a copy of `config.json` from another PC is not supported (see [Machine-local identifiers](#machine-local-identifiers)).
 - **Wondering what happened at runtime?** Run **`Verify.cmd`** or read `%LOCALAPPDATA%\PROX2AutoSwitch\autoswitch.log`.
 
@@ -237,7 +243,8 @@ The installer runs three phases — detection and validation, endpoint handling,
 ### Endpoint handling
 
 - Handles a Bluetooth endpoint that returns with a new `Item ID`.
-- Falls back to Logitech G HUB only when Windows cannot expose a useful physical state and the selected headset is confirmed as a Logitech PRO X family device.
+- Falls back to Logitech G HUB when Windows cannot expose a useful physical state and G HUB reports a compatible Logitech headset with a usable battery-status signal.
+- Supports the SteelSeries Nova 5/5X HID provider when its receiver can be identified safely.
 - Captures machine-local Item IDs.
 
 ### Installation and startup
@@ -258,6 +265,7 @@ The G HUB `deviceId` is also not persisted because it may change. AutoSwitch kee
 ## Project layout
 
 ```text
+VERSION                                         canonical release version
 Install.cmd / Verify.cmd / Uninstall.cmd       double-click entrypoints
 Install-AutoSwitch.ps1                         canonical installer alias
 Verify-AutoSwitch.ps1                          canonical verifier alias
@@ -265,7 +273,8 @@ Uninstall-AutoSwitch.ps1                       canonical uninstaller alias
 Instalar-* / Verificar-* / Desinstalar-*.ps1   legacy compatible entrypoints
 Runtime-PROX2-AutoSwitch.ps1                   tray UI + worker runtime
 Toggle-AudioEnhancements.ps1                   elevated enhancement helper
-lib/AutoSwitchCore.psm1                        shared pure logic + COM interop
+lib/AutoSwitchCore.psm1                        shared logic + Core Audio COM interop
+lib/LogitechGHub.psm1                          shared bounded G HUB provider
 lib/SteelSeriesNova5.psm1                      HID provider for Arctis Nova 5/5X
 install.ps1                                    checksum-verifying bootstrap
 tests/                                         Pester regression coverage
@@ -285,6 +294,7 @@ The project intentionally keeps hardware-specific findings and source references
 
 - Audio endpoint enumeration and switching run in-process; installation downloads no third-party audio-control binary — the Windows audio APIs are called directly.
 - Release ZIPs publish SHA-256 checksums and are built reproducibly.
+- Tag releases produced by the release workflow add GitHub artifact provenance attestations for the ZIP archives.
 - The G HUB WebSocket is local but unofficial; treat compatibility changes after G HUB updates as expected maintenance risk.
 - Normal runtime is non-elevated; only the Audio Enhancements helper requests UAC.
 - Please report security issues through the process in [`SECURITY.md`](SECURITY.md), not a public issue.

@@ -1,5 +1,5 @@
 ﻿#requires -Version 5.1
-# AutoSwitchCore.psm1 - pure, testable logic for Audio AutoSwitch.
+# AutoSwitchCore.psm1 - shared, testable logic for Audio AutoSwitch.
 # No G HUB or third-party audio utility is required for Pester tests.
 
 Set-StrictMode -Version Latest
@@ -44,7 +44,6 @@ function Resolve-HeadsetState {
         Misses    = $newMisses
     }
 }
-
 
 
 function Get-DeviceColumn {
@@ -115,6 +114,56 @@ function Test-ValidAudioConfig {
     return ($HeadsetId -ine $SpeakerId)
 }
 
+function Write-AutoSwitchJsonAtomically {
+    <#
+    .SYNOPSIS
+        Persist a JSON document without exposing a partially-written target file.
+    .DESCRIPTION
+        Serialize and validate the JSON in a temporary file on the same volume,
+        then replace the target atomically. Existing files get a short-lived
+        backup during File.Replace; temporary/backup files are cleaned up.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][object]$InputObject,
+        [Parameter(Mandatory = $true)][string]$Path,
+        [ValidateRange(2, 100)][int]$Depth = 10
+    )
+
+    $directory = Split-Path -Parent $Path
+    if ([string]::IsNullOrWhiteSpace($directory)) {
+        $directory = (Get-Location).Path
+        $Path = Join-Path $directory (Split-Path -Leaf $Path)
+    }
+    if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
+        throw "Configuration directory does not exist: $directory"
+    }
+
+    $leaf = Split-Path -Leaf $Path
+    $temporary = Join-Path $directory (".{0}.{1}.{2}.tmp" -f $leaf, $PID, [guid]::NewGuid().ToString('N'))
+    $backup = Join-Path $directory (".{0}.bak" -f $leaf)
+
+    try {
+        $json = $InputObject | ConvertTo-Json -Depth $Depth
+        $utf8 = New-Object System.Text.UTF8Encoding($true)
+        [System.IO.File]::WriteAllText($temporary, $json, $utf8)
+
+        # Validate what is actually on disk before it can replace the working config.
+        [void](([System.IO.File]::ReadAllText($temporary, $utf8)) | ConvertFrom-Json)
+
+        if ([System.IO.File]::Exists($Path)) {
+            [System.IO.File]::Replace($temporary, $Path, $backup, $true)
+            Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue
+        }
+        else {
+            [System.IO.File]::Move($temporary, $Path)
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function New-GHubTimeoutToken {
     <#
     .SYNOPSIS
@@ -132,7 +181,6 @@ function New-GHubTimeoutToken {
     $cts.CancelAfter($Milliseconds)
     return $cts
 }
-
 
 
 function Get-DeviceLabel {
@@ -569,9 +617,9 @@ namespace AutoSwitch.NativeAudio
                         ThrowIfFailed(device.GetState(out state));
                         ThrowIfFailed(device.OpenPropertyStore(STGM_READ, out store));
 
-                        string name = ReadString(store, FMTID_DEVICE, 2);       // PKEY_Device_DeviceDesc
-                        string adapter = ReadString(store, FMTID_DEVICE_INTERFACE, 2); // PKEY_DeviceInterface_FriendlyName
-                        string friendly = ReadString(store, FMTID_DEVICE, 14); // PKEY_Device_FriendlyName
+                        string name = ReadString(store, FMTID_DEVICE, 2);
+                        string adapter = ReadString(store, FMTID_DEVICE_INTERFACE, 2);
+                        string friendly = ReadString(store, FMTID_DEVICE, 14);
 
                         if (String.IsNullOrWhiteSpace(name)) name = friendly;
                         if (String.IsNullOrWhiteSpace(adapter)) adapter = friendly;
@@ -757,8 +805,8 @@ function Get-ConfigDetectionMode {
         Resolve DetectionMode from a config, including implicit migration.
     .DESCRIPTION
         If $Config already has DetectionMode, return the validated value
-        ('WindowsEndpoint' or 'LogitechGHub'). If absent, return
-        'LogitechGHub' (comportamiento de configs v1.1.0 y anteriores).
+        ('WindowsEndpoint', 'LogitechGHub' or 'SteelSeriesNova5'). If absent,
+        return 'LogitechGHub' (behavior of configs v1.1.0 and earlier).
         Return $null when an existing value is invalid.
     #>
     [CmdletBinding()]
@@ -854,4 +902,19 @@ function Test-LogitechHeadsetDevice {
     return ($name -match '(?i)\bheadset\b|\bheadphone\b|PRO\s*X|G733|G533|G435|G335|G935|G933|Astro')
 }
 
-Export-ModuleMember -Function Resolve-HeadsetState, Test-ValidAudioConfig, New-GHubTimeoutToken, Get-DeviceColumn, Resolve-EndpointState, Get-DeviceLabel, Find-RenderDeviceByIdentity, Get-EndpointFxState, Get-ConfigDetectionMode, Test-LogitechProXDeviceName, Test-LogitechHeadsetDevice, Initialize-CoreAudioBackend, Get-CoreAudioRenderDevices, Get-CoreAudioDefaultRenderDeviceId, Get-CoreAudioDefaultRenderDeviceIds, Test-CoreAudioDefaultRenderDevice, Set-CoreAudioDefaultRenderDevice
+function Get-LogitechHeadsetCandidates {
+    <#
+    .SYNOPSIS
+        Filter a G HUB device list to devices that can drive LogitechGHub mode.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [object[]]$DeviceInfos
+    )
+
+    return @($DeviceInfos | Where-Object { Test-LogitechHeadsetDevice -Device $_ })
+}
+
+Export-ModuleMember -Function Resolve-HeadsetState, Test-ValidAudioConfig, Write-AutoSwitchJsonAtomically, New-GHubTimeoutToken, Get-DeviceColumn, Resolve-EndpointState, Get-DeviceLabel, Find-RenderDeviceByIdentity, Get-EndpointFxState, Get-ConfigDetectionMode, Test-LogitechProXDeviceName, Test-LogitechHeadsetDevice, Get-LogitechHeadsetCandidates, Initialize-CoreAudioBackend, Get-CoreAudioRenderDevices, Get-CoreAudioDefaultRenderDeviceId, Get-CoreAudioDefaultRenderDeviceIds, Test-CoreAudioDefaultRenderDevice, Set-CoreAudioDefaultRenderDevice
