@@ -6,9 +6,10 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_VERSION = "1.4.0"
+VERSION_FILE = ROOT / "VERSION"
 
 REQUIRED_FILES = (
+    "VERSION",
     "README.md",
     "LICENSE",
     "SECURITY.md",
@@ -30,6 +31,8 @@ REQUIRED_FILES = (
     "lib/AutoSwitchCore.psm1",
     "scripts/build-release.sh",
     "scripts/run-gitleaks.sh",
+    ".github/workflows/validate.yml",
+    ".github/workflows/release.yml",
     "wiki/Home.md",
     "wiki/Inicio.md",
     "site/index.html",
@@ -45,6 +48,15 @@ CURRENT_VERSION_FILES = (
 
 def fail(message: str) -> None:
     raise SystemExit(message)
+
+
+def current_version() -> str:
+    if not VERSION_FILE.is_file():
+        fail("VERSION is missing")
+    version = VERSION_FILE.read_text(encoding="utf-8-sig").strip()
+    if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
+        fail(f"VERSION must contain MAJOR.MINOR.PATCH, got: {version!r}")
+    return version
 
 
 def check_required_files() -> None:
@@ -65,7 +77,8 @@ def check_no_temporary_github_files() -> None:
 
 
 def check_current_version() -> None:
-    marker = f"v{CURRENT_VERSION}"
+    version = current_version()
+    marker = f"v{version}"
     missing = []
     for relative in CURRENT_VERSION_FILES:
         text = (ROOT / relative).read_text(encoding="utf-8-sig")
@@ -75,8 +88,8 @@ def check_current_version() -> None:
         fail(f"Current stable marker {marker} is missing from: " + ", ".join(missing))
 
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8-sig")
-    if f"## [{CURRENT_VERSION}]" not in changelog:
-        fail(f"CHANGELOG.md has no {CURRENT_VERSION} release section")
+    if f"## [{version}]" not in changelog:
+        fail(f"CHANGELOG.md has no {version} release section")
 
 
 def check_wiki_links() -> None:
@@ -87,7 +100,6 @@ def check_wiki_links() -> None:
     for path in wiki.glob("*.md"):
         text = path.read_text(encoding="utf-8-sig")
         for page, _label in pattern.findall(text):
-            # GitHub Wiki uses [[Page]] or [[Page|Visible label]].
             target = page.strip()
             if target.startswith("http://") or target.startswith("https://"):
                 continue
@@ -100,8 +112,18 @@ def check_wiki_links() -> None:
 def check_release_workflows() -> None:
     workflows = ROOT / ".github" / "workflows"
     permanent_release = workflows / "release.yml"
-    if permanent_release.exists():
-        fail("Permanent release.yml is not allowed; use a versioned one-shot publisher")
+    if not permanent_release.is_file():
+        fail(".github/workflows/release.yml is required")
+
+    legacy = sorted(workflows.glob("release-v*.yml")) + sorted(workflows.glob("release-v*.yaml"))
+    if legacy:
+        names = ", ".join(path.name for path in legacy)
+        fail("Version-specific release workflows are not allowed: " + names)
+
+    for relative in (".github/workflows/validate.yml", ".github/workflows/release.yml"):
+        text = (ROOT / relative).read_text(encoding="utf-8-sig")
+        if "VERSION" not in text:
+            fail(f"{relative} must read the canonical VERSION file")
 
 
 def main() -> int:
@@ -110,7 +132,7 @@ def main() -> int:
     check_current_version()
     check_wiki_links()
     check_release_workflows()
-    print("Repository quality checks OK.")
+    print(f"Repository quality checks OK (v{current_version()}).")
     return 0
 
 
