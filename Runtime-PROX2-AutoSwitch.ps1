@@ -19,6 +19,11 @@ $ModulePath = Join-Path $InstallDir "lib\AutoSwitchCore.psm1"
 if (-not (Test-Path $ModulePath)) { exit 12 }
 Import-Module $ModulePath -ErrorAction Stop
 
+# Shared Logitech G HUB provider (bounded local WebSocket transport).
+$script:GHubModulePath = Join-Path $InstallDir "lib\LogitechGHub.psm1"
+if (-not (Test-Path $script:GHubModulePath)) { exit 14 }
+Import-Module $script:GHubModulePath -ErrorAction Stop
+
 # SteelSeries Nova 5/5X HID detection (optional provider module).
 $script:SteelSeriesModulePath = Join-Path $InstallDir "lib\SteelSeriesNova5.psm1"
 $script:SteelSeriesAvailable = $false
@@ -90,212 +95,24 @@ if ($env:AUTOSWITCH_WORKER -ne '1') {
     }
 }
 
-$script:Ws  = $null
-
-function Close-GHubConnection {
-    # Closing must not hang recovery: if CloseAsync does not
-    # finish within 1 s (or fails), Abort() + Dispose() guarantee exit.
-    if ($null -ne $script:Ws -and
-        $script:Ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
-        $closeCts = New-Object System.Threading.CancellationTokenSource
-        $closeCts.CancelAfter(1000)
-        try {
-            $script:Ws.CloseAsync(
-                [System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure,
-                "reconnect",
-                $closeCts.Token
-            ).GetAwaiter().GetResult() | Out-Null
-        }
-        catch {
-            try { $script:Ws.Abort() } catch {}
-        }
-        finally {
-            $closeCts.Dispose()
-        }
-    }
-
-    try {
-        if ($null -ne $script:Ws) { $script:Ws.Dispose() }
-    } catch {}
-
-    $script:Ws  = $null
-}
-
-# G HUB timeout token: defined in lib\AutoSwitchCore.psm1 (imported above).
-
-function Connect-GHub {
-    Close-GHubConnection
-
-    $script:Ws  = New-Object System.Net.WebSockets.ClientWebSocket
-
-    $script:Ws.Options.UseDefaultCredentials = $false
-    $script:Ws.Options.SetRequestHeader("Origin", "file://")
-    $script:Ws.Options.SetRequestHeader("Pragma", "no-cache")
-    $script:Ws.Options.SetRequestHeader("Cache-Control", "no-cache")
-    $script:Ws.Options.SetRequestHeader(
-        "Sec-WebSocket-Extensions",
-        "permessage-deflate; client_max_window_bits"
-    )
-    $script:Ws.Options.SetRequestHeader("Sec-WebSocket-Protocol", "json")
-    $script:Ws.Options.AddSubProtocol("json")
-
-    # WindowsEndpoint configs may never have had GHubPort. Reconfigure can
-    # switch such a config to LogitechGHub, so use the established default safely.
+function Open-ConfiguredGHubConnection {
     $ghubPort = 9010
     if ($Config.PSObject.Properties['GHubPort'] -and $Config.GHubPort) {
         $ghubPort = [int]$Config.GHubPort
     }
-    $uri = New-Object System.Uri("ws://localhost:$ghubPort")
 
-    $timeout = New-GHubTimeoutToken -Milliseconds $script:ConnectTimeoutMs
-    try {
-        $script:Ws.ConnectAsync($uri, $timeout.Token).GetAwaiter().GetResult() | Out-Null
-    }
-    catch [System.OperationCanceledException] {
-        throw "Timed out connecting to G HUB ($($script:ConnectTimeoutMs) ms)."
-    }
-    finally {
-        $timeout.Dispose()
-    }
-
-    if ($script:Ws.State -ne [System.Net.WebSockets.WebSocketState]::Open) {
-        throw "Could not connect to Logitech G HUB."
-    }
+    Open-LogitechGHubConnection `
+        -Port $ghubPort `
+        -ConnectTimeoutMs $script:ConnectTimeoutMs `
+        -ReceiveTimeoutMs $script:ReceiveTimeoutMs `
+        -RequestTimeoutMs $script:RequestTimeoutMs
 }
 
-function Send-GHubJson {
-    param([Parameter(Mandatory=$true)][object]$Object)
-
-    $json = $Object | ConvertTo-Json -Compress -Depth 20
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
-    $segment = New-Object 'System.ArraySegment[byte]' -ArgumentList (,$bytes)
-
-    $timeout = New-GHubTimeoutToken -Milliseconds $script:ReceiveTimeoutMs
-    try {
-        $script:Ws.SendAsync(
-            $segment,
-            [System.Net.WebSockets.WebSocketMessageType]::Text,
-            $true,
-            $timeout.Token
-        ).GetAwaiter().GetResult() | Out-Null
+function Get-ConfiguredGHubDisplayName {
+    if ($Config.PSObject.Properties['GHubDisplayName'] -and $Config.GHubDisplayName) {
+        return [string]$Config.GHubDisplayName
     }
-    catch [System.OperationCanceledException] {
-        throw "Timed out sending a request to G HUB ($($script:ReceiveTimeoutMs) ms)."
-    }
-    finally {
-        $timeout.Dispose()
-    }
-}
-
-function Receive-GHubText {
-    param(
-        # Hard request deadline: no fragment may cross this point.
-        [Parameter(Mandatory=$true)][datetime]$Deadline
-    )
-
-    $buffer = New-Object byte[] 16384
-    $stream = New-Object System.IO.MemoryStream
-
-    try {
-        do {
-            $remainingMs = [int](($Deadline - (Get-Date)).TotalMilliseconds)
-            if ($remainingMs -le 0) {
-                throw "G HUB request timed out ($($script:RequestTimeoutMs) ms)."
-            }
-            # Each fragment waits at most ReceiveTimeoutMs, never beyond
-            # the request-wide deadline.
-            $fragmentMs = [Math]::Min($script:ReceiveTimeoutMs, $remainingMs)
-
-            $segment = New-Object 'System.ArraySegment[byte]' -ArgumentList (,$buffer)
-
-            $timeout = New-GHubTimeoutToken -Milliseconds $fragmentMs
-            try {
-                $result = $script:Ws.ReceiveAsync(
-                    $segment,
-                    $timeout.Token
-                ).GetAwaiter().GetResult()
-            }
-            catch [System.OperationCanceledException] {
-                throw "Timed out waiting for a G HUB response ($($fragmentMs) ms)."
-            }
-            finally {
-                $timeout.Dispose()
-            }
-
-            if ($result.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) {
-                throw "G HUB closed the WebSocket."
-            }
-
-            if ($result.Count -gt 0) {
-                $stream.Write($buffer, 0, $result.Count)
-            }
-        } while (-not $result.EndOfMessage)
-
-        return [System.Text.Encoding]::UTF8.GetString($stream.ToArray())
-    }
-    finally {
-        $stream.Dispose()
-    }
-}
-
-function Invoke-GHubGet {
-    param([Parameter(Mandatory=$true)][string]$Path)
-
-    $msgId = [guid]::NewGuid().ToString()
-
-    Send-GHubJson @{
-        msgId = $msgId
-        verb  = "GET"
-        path  = $Path
-    }
-
-    # Request-wide deadline: even if G HUB interleaves events,
-    # the requested response must arrive before the deadline.
-    $deadline = (Get-Date).AddMilliseconds($script:RequestTimeoutMs)
-
-    while ($true) {
-        if ((Get-Date) -gt $deadline) {
-            throw "G HUB request timed out ($($script:RequestTimeoutMs) ms): $Path"
-        }
-
-        $raw = Receive-GHubText -Deadline $deadline
-
-        try {
-            $message = $raw | ConvertFrom-Json
-        }
-        catch {
-            continue
-        }
-
-        # G HUB may interleave asynchronous events.
-        if (($message.msgId -eq $msgId) -or ($message.path -eq $Path)) {
-            return $message
-        }
-    }
-}
-
-function Get-LogitechBatteryPath {
-    $devices = Invoke-GHubGet -Path "/devices/list"
-    $all = @($devices.payload.deviceInfos)
-
-    $headset = $all |
-        Where-Object {
-            $_.extendedDisplayName -eq [string]$Config.GHubDisplayName -and
-            (Test-LogitechHeadsetDevice -Device $_)
-        } |
-        Select-Object -First 1
-
-    if (-not $headset) {
-        $headset = @(Get-LogitechHeadsetCandidates -DeviceInfos $all) |
-            Select-Object -First 1
-    }
-
-    if (-not $headset) {
-        throw "G HUB did not return a Logitech headset in /devices/list."
-    }
-
-    Write-AutoSwitchLog ("Logitech headset detected by G HUB: {0} ({1})" -f $headset.extendedDisplayName, $headset.id)
-    return "/battery/$($headset.id)/state"
+    return $null
 }
 
 function Get-DefaultRenderItemId {
@@ -647,10 +464,8 @@ function Select-GHubLogitechHeadset {
         are present, the user chooses explicitly; the runtime never guesses.
     #>
     try {
-        Connect-GHub
-        $devices = Invoke-GHubGet -Path "/devices/list"
-        $deviceInfos = @($devices.payload.deviceInfos)
-        $candidates = @(Get-LogitechHeadsetCandidates -DeviceInfos $deviceInfos)
+        Open-ConfiguredGHubConnection
+        $candidates = @(Get-LogitechGHubHeadsets)
 
         if ($candidates.Count -eq 0) { return $null }
         if ($candidates.Count -eq 1) { return $candidates[0] }
@@ -674,6 +489,9 @@ function Select-GHubLogitechHeadset {
     catch {
         Write-AutoSwitchLog ("Reconfigure: G HUB check failed: {0}" -f $_.Exception.Message)
         return $null
+    }
+    finally {
+        Close-LogitechGHubConnection
     }
 }
 
@@ -1055,6 +873,7 @@ function Start-WorkerLoop {
                     $lastState = $null
                     $misses = 0
                     $script:WorkerBatteryPath = $null
+                    Close-LogitechGHubConnection
                     Write-AutoSwitchLog "Config reloaded (reconfigure)."
                 }
             }
@@ -1109,8 +928,10 @@ function Start-WorkerLoop {
         else {
             try {
                 if (-not $script:WorkerBatteryPath) {
-                    Connect-GHub
-                    $script:WorkerBatteryPath = Get-LogitechBatteryPath
+                    Open-ConfiguredGHubConnection
+                    $batteryInfo = Get-LogitechGHubBatteryPath -DisplayName (Get-ConfiguredGHubDisplayName)
+                    $script:WorkerBatteryPath = [string]$batteryInfo.Path
+                    Write-AutoSwitchLog ("Logitech headset detected by G HUB: {0} ({1})" -f $batteryInfo.DisplayName, $batteryInfo.DeviceId)
 
                     if ($availabilityLogged) {
                         Write-AutoSwitchLog "G HUB connection recovered."
@@ -1121,12 +942,12 @@ function Start-WorkerLoop {
                     $availabilityLogged = $false
                 }
 
-                $battery = Invoke-GHubGet -Path $script:WorkerBatteryPath
+                $battery = Invoke-LogitechGHubGet -Path $script:WorkerBatteryPath
                 $isOn = $null -ne $battery.payload
                 $known = $true
             }
             catch {
-                Close-GHubConnection
+                Close-LogitechGHubConnection
                 $script:WorkerBatteryPath = $null
                 if (-not $availabilityLogged) {
                     Write-AutoSwitchLog ((
@@ -1164,7 +985,7 @@ function Start-WorkerLoop {
         Start-Sleep -Milliseconds ([int]$Config.PollMilliseconds)
     }
 
-    Close-GHubConnection
+    Close-LogitechGHubConnection
     Write-AutoSwitchLog "Worker stopped."
 }
 
@@ -1277,7 +1098,7 @@ try {
 finally {
     Stop-Worker
     try { $script:TrayIcon.Visible = $false } catch {}
-    Close-GHubConnection
+    Close-LogitechGHubConnection
     try {
         $mutex.ReleaseMutex()
         $mutex.Dispose()
