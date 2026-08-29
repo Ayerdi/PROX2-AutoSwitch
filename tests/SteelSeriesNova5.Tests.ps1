@@ -24,7 +24,9 @@ Describe 'SteelSeries Arctis Nova 5 HID status mapping' {
 
 Describe 'SteelSeries Arctis Nova 5 native HID bridge' {
     It 'compiles the embedded HID/SetupAPI bridge without touching hardware' {
-        { Initialize-SteelSeriesNova5Hid } | Should -Not -Throw
-        ('AutoSwitch.SteelSeriesNova5Hid' -as [type]) | Should -Not -BeNullOrEmpty
+        InModuleScope SteelSeriesNova5 {
+            { Initialize-SteelSeriesNova5Hid } | Should -Not -Throw
+            ('AutoSwitch.SteelSeriesNova5Hid' -as [type]) | Should -Not -BeNullOrEmpty
+        }
     }
 }
