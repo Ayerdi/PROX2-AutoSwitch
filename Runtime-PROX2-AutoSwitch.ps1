@@ -33,7 +33,7 @@ if (Test-Path $script:SteelSeriesModulePath) {
     }
 }
 
-# Timeouts de G HUB (ms). Overridables desde config.json.
+# G HUB timeouts (ms), overridable from config.json.
 $script:ConnectTimeoutMs = 5000
 $script:ReceiveTimeoutMs = 5000
 $script:RequestTimeoutMs = 10000
@@ -71,8 +71,7 @@ if (-not $Config.PSObject.Properties['DetectionMode']) {
         }
         $migrated['DetectionMode'] = $script:DetectionMode
         $migrated['Version'] = '1.2.0'
-        $migrated | ConvertTo-Json -Depth 10 |
-            Set-Content -Path $ConfigPath -Encoding UTF8
+        Write-AutoSwitchJsonAtomically -InputObject $migrated -Path $ConfigPath
         Write-AutoSwitchLog "Config migrated to v1.2.0 (DetectionMode=$script:DetectionMode)."
     }
     catch { }
@@ -141,7 +140,7 @@ function Connect-GHub {
     $script:Ws.Options.AddSubProtocol("json")
 
     # WindowsEndpoint configs may never have had GHubPort. Reconfigure can
-    # switch such a config to PRO X 2, so use the established default safely.
+    # switch such a config to LogitechGHub, so use the established default safely.
     $ghubPort = 9010
     if ($Config.PSObject.Properties['GHubPort'] -and $Config.GHubPort) {
         $ghubPort = [int]$Config.GHubPort
@@ -275,17 +274,19 @@ function Invoke-GHubGet {
     }
 }
 
-function Get-ProX2BatteryPath {
+function Get-LogitechBatteryPath {
     $devices = Invoke-GHubGet -Path "/devices/list"
     $all = @($devices.payload.deviceInfos)
 
     $headset = $all |
-        Where-Object { $_.extendedDisplayName -eq [string]$Config.GHubDisplayName } |
+        Where-Object {
+            $_.extendedDisplayName -eq [string]$Config.GHubDisplayName -and
+            (Test-LogitechHeadsetDevice -Device $_)
+        } |
         Select-Object -First 1
 
     if (-not $headset) {
-        $headset = $all |
-            Where-Object { Test-LogitechHeadsetDevice -Device $_ } |
+        $headset = @(Get-LogitechHeadsetCandidates -DeviceInfos $all) |
             Select-Object -First 1
     }
 
@@ -359,7 +360,7 @@ function Get-HeadsetEndpointState {
     $row = $rows |
         Where-Object {
             $id = Get-DeviceColumn -Row $_ -Names @('Item ID')
-            $null -ne $id -and $id.Trim().ToLowerInvariant() -eq [string]$Config.HeadsetId
+            $null -ne $id -and $id.Trim() -ieq [string]$Config.HeadsetId
         } |
         Select-Object -First 1
 
@@ -396,8 +397,8 @@ function Get-EnhancementsAction {
     if ($null -eq $fx) {
         return $null
     }
-    if ($fx) { return 'Enable' }   # already disabled -> offer enable
-    return 'Disable'               # enabled -> offer disable
+    if ($fx) { return 'Enable' }
+    return 'Disable'
 }
 
 function Update-EnhancementsMenu {
@@ -447,7 +448,6 @@ function Invoke-EnhancementsToggle {
         $proc.WaitForExit()
     }
     catch {
-        # UAC canceled or failed to launch.
         Write-AutoSwitchLog ("Enhancements: change canceled or failed ({0})." -f $_.Exception.Message)
         return
     }
@@ -464,8 +464,6 @@ function Invoke-EnhancementsToggle {
 # --- Tray info: headset, fallback and the output that would be selected now ---
 
 function Get-RenderDevices {
-    # Solo endpoints Active (utilizables ahora). Si no hay ninguno, todos
-    # (el llamador puede mostrar el aviso).
     try {
         $all = @(Get-CoreAudioRenderDevices)
         $active = @($all | Where-Object {
@@ -478,7 +476,6 @@ function Get-RenderDevices {
 }
 
 function Update-TrayInfo {
-    # Refresh the tray menu information lines.
     $hs = if ($Config.HeadsetName) { [string]$Config.HeadsetName } else { [string]$Config.HeadsetId }
     $fb = if ($Config.SpeakerName) { [string]$Config.SpeakerName } else { [string]$Config.SpeakerId }
     if ($script:MenuItemInfoHeadset) {
@@ -490,7 +487,6 @@ function Update-TrayInfo {
         $script:MenuItemInfoFallback.Enabled = $false
     }
 
-    # Determine where the next switch would go from the current default.
     $next = "Current: ?"
     try {
         $current = Get-DefaultRenderItemId
@@ -516,7 +512,7 @@ function Update-TrayInfo {
 # --- Reconfigure headset/fallback without reinstalling ---
 
 function Save-Config {
-    $Config | ConvertTo-Json -Depth 10 | Set-Content -Path $ConfigPath -Encoding UTF8
+    Write-AutoSwitchJsonAtomically -InputObject $Config -Path $ConfigPath
 }
 
 function Get-HeadsetStateForId {
@@ -547,14 +543,10 @@ function Get-HeadsetStateForId {
     $row = $rows |
         Where-Object {
             $id = Get-DeviceColumn -Row $_ -Names @('Item ID')
-            $null -ne $id -and $id.Trim().ToLowerInvariant() -eq $ItemId.Trim().ToLowerInvariant()
+            $null -ne $id -and $id.Trim() -ieq $ItemId.Trim()
         } |
         Select-Object -First 1
 
-    # Identity fallback: a Bluetooth endpoint may return with a different
-    # Item ID. Do not treat the visible "Device Name — Name" label as
-    # one column: resolving through the two real columns also avoids confusing
-    # two Render endpoints from the same device.
     if (-not $row -and
         (-not [string]::IsNullOrWhiteSpace($DeviceName) -or
          -not [string]::IsNullOrWhiteSpace($EndpointName))) {
@@ -573,7 +565,6 @@ function Get-HeadsetStateForId {
 
     if (-not $row) {
         if ($Diagnose) {
-            # What is currently in Core Audio? Render devices with their states and IDs.
             $lines = @()
             foreach ($r in $rows) {
                 $name  = Get-DeviceColumn -Row $r -Names @('Device Name', 'Name')
@@ -639,7 +630,6 @@ function Wait-ForHeadsetState {
         Start-Sleep -Milliseconds $PollIntervalMs
     } while ((Get-Date) -lt $deadline)
 
-    # Timeout: the observed state did not reach the expected state. Log context for diagnosis.
     Write-AutoSwitchLog ("Wait-ForHeadsetState: timed out waiting for '{0}' on {1}. Last observed state: {2}" -f $Expected, $ItemId, $last)
     [void](Get-HeadsetStateForId -ItemId $ItemId -DeviceName $DeviceName -EndpointName $EndpointName -Diagnose)
     return [pscustomobject]@{
@@ -648,28 +638,26 @@ function Wait-ForHeadsetState {
     }
 }
 
-function Test-GHubProX2 {
+function Select-GHubLogitechHeadset {
     <#
     .SYNOPSIS
-        Connects to G HUB and returns the PRO X 2 candidate that matches the
-        headset selected in the wizard (or the only candidate, or $null if none exists).
+        Connect to G HUB and return a user-confirmed Logitech headset candidate.
+    .DESCRIPTION
+        A single compatible G HUB headset is selected automatically. If several
+        are present, the user chooses explicitly; the runtime never guesses.
     #>
     try {
         Connect-GHub
         $devices = Invoke-GHubGet -Path "/devices/list"
         $deviceInfos = @($devices.payload.deviceInfos)
-
-        $candidates = @($deviceInfos | Where-Object {
-            $_.extendedDisplayName -match 'PRO\s*X\s*2'
-        })
+        $candidates = @(Get-LogitechHeadsetCandidates -DeviceInfos $deviceInfos)
 
         if ($candidates.Count -eq 0) { return $null }
         if ($candidates.Count -eq 1) { return $candidates[0] }
 
-        # Multiple PRO X 2 devices: never guess. Ask the user which one to use.
         foreach ($candidate in $candidates) {
             $answer = [System.Windows.Forms.MessageBox]::Show(
-                ("Multiple PRO X 2 devices were found in G HUB.`n`nUse this one?`n{0} ({1})" -f $candidate.extendedDisplayName, $candidate.id),
+                ("Multiple Logitech headsets were found in G HUB.`n`nUse this one?`n{0} ({1})" -f $candidate.extendedDisplayName, $candidate.id),
                 "Audio AutoSwitch",
                 [System.Windows.Forms.MessageBoxButtons]::YesNoCancel,
                 [System.Windows.Forms.MessageBoxIcon]::Question
@@ -737,7 +725,6 @@ function Show-ReconfigureDialog {
         [void]$comboFallback.Items.Add($label)
     }
 
-    # Preselect the current values.
     for ($i = 0; $i -lt $devices.Count; $i++) {
         $id = Get-DeviceColumn -Row $devices[$i] -Names @('Item ID')
         if ($id -ieq [string]$Config.HeadsetId) { $comboHeadset.SelectedIndex = $i }
@@ -793,10 +780,6 @@ function Show-ReconfigureDialog {
             $newHeadsetEndpointName = Get-DeviceColumn -Row $selectedHeadsetRow -Names @('Name')
             $newSpeakerName = Get-DeviceLabel -Row $devices[$comboFallback.SelectedIndex]
 
-            # --- Ciclo ON -> OFF -> ON del headset seleccionado ---
-            # El wizard hace polling porque Bluetooth/Core Audio puede tardar
-            # several seconds to expose each transition. If Windows recreates the
-            # endpoint, it is re-resolved by Device Name + Name and the new ID is persisted.
             $lblStatus.Text = "Step 1/3: turn the headset ON, then click OK in the prompt."
             $lblStatus.Refresh()
 
@@ -831,8 +814,6 @@ function Show-ReconfigureDialog {
             $lblStatus.Text = "Step 2/3: ON=$s1  OFF=$s2  ON=$s3"
             $lblStatus.Refresh()
 
-            # If Bluetooth returned with a new Item ID, persist the observed value
-            # (the last non-null FoundId, preferably the value observed in step 3).
             $observedId = $null
             if ($r3.FoundId) { $observedId = $r3.FoundId }
             elseif ($r1.FoundId) { $observedId = $r1.FoundId }
@@ -848,18 +829,30 @@ function Show-ReconfigureDialog {
             }
             else {
                 $answer = [System.Windows.Forms.MessageBox]::Show(
-                    "Windows does not reflect the physical ON/OFF cycle of this headset.`n`nIs it a Logitech PRO X 2 detected by G HUB?",
+                    "Windows does not reflect the physical ON/OFF cycle of this headset.`n`nIs it a Logitech headset detected by G HUB?",
                     "Audio AutoSwitch",
                     [System.Windows.Forms.MessageBoxButtons]::YesNo,
                     [System.Windows.Forms.MessageBoxIcon]::Question
                 )
-                if ($answer -eq 'Yes') {
-                    $lblStatus.Text = "Step 3/3: checking G HUB for PRO X 2..."
+                if ($answer -eq [System.Windows.Forms.DialogResult]::Yes) {
+                    $lblStatus.Text = "Step 3/3: checking G HUB for Logitech headsets..."
                     $lblStatus.Refresh()
-                    $ghubDevice = Test-GHubProX2
+                    $ghubDevice = Select-GHubLogitechHeadset
                     if ($ghubDevice) {
                         $newMode = "LogitechGHub"
                         $newGhubName = [string]$ghubDevice.extendedDisplayName
+                    }
+                }
+                elseif ($script:SteelSeriesAvailable) {
+                    $steelAnswer = [System.Windows.Forms.MessageBox]::Show(
+                        "Is it a SteelSeries Arctis Nova 5 / 5X?",
+                        "Audio AutoSwitch",
+                        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                        [System.Windows.Forms.MessageBoxIcon]::Question
+                    )
+                    if ($steelAnswer -eq [System.Windows.Forms.DialogResult]::Yes -and
+                        (Test-SteelSeriesNova5Receiver)) {
+                        $newMode = "SteelSeriesNova5"
                     }
                 }
             }
@@ -874,14 +867,11 @@ function Show-ReconfigureDialog {
                 return
             }
 
-            # --- Save the full configuration (including mode) ---
             $Config.HeadsetId   = [string]$newHeadsetId
             $Config.SpeakerId   = [string]$newFallbackId
             $Config.HeadsetName = $newHeadsetName
             $Config.SpeakerName = $newSpeakerName
 
-            # Optional properties may not exist in WindowsEndpoint configs.
-            # Add-Member -Force updates existing values and safely creates missing ones.
             $Config | Add-Member -NotePropertyName DetectionMode -NotePropertyValue $newMode -Force
             $Config | Add-Member -NotePropertyName EnhancementsDeviceId -NotePropertyValue ([string]$newHeadsetId) -Force
 
@@ -899,7 +889,6 @@ function Show-ReconfigureDialog {
             }
 
             Save-Config
-            # Ask the worker to reload configuration on the next cycle.
             try { New-Item -ItemType File -Path $script:ReloadFlag -Force | Out-Null } catch {}
 
             Write-AutoSwitchLog ("Reconfigured: headset={0} fallback={1} mode={2}" -f $Config.HeadsetName, $Config.SpeakerName, $newMode)
@@ -944,8 +933,6 @@ function Invoke-Reconfigure {
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
 
-    # Outer try/catch: if a failure occurs while creating/opening the dialog
-    # (before entering "Detect mode..."), make sure it is recorded in the log.
     try {
         Show-ReconfigureDialog
     }
@@ -1004,11 +991,8 @@ $script:ReloadFlag  = Join-Path $script:ControlDir "reload.flag"
 $script:WorkerProcess = $null
 
 function Start-Worker {
-    # Lanza el mismo script en modo worker (env var). Asi el worker tiene
-    # access to ALL functions (G HUB, audio, endpoint) without duplicating them.
     try { New-Item -ItemType Directory -Path $script:ControlDir -Force | Out-Null } catch {}
 
-    # Estado inicial: AutoSwitch ON.
     try { New-Item -ItemType File -Path $script:EnabledFlag -Force | Out-Null } catch {}
     try { Remove-Item $script:StopFlag -Force -ErrorAction SilentlyContinue } catch {}
 
@@ -1046,10 +1030,6 @@ function Stop-Worker {
     } catch {}
 }
 
-# --- Worker loop (only when AUTOSWITCH_WORKER=1) ---
-# Runs at the end of the script; G HUB/audio/endpoint functions are already
-# definidas arriba porque es el mismo script.
-
 function Start-WorkerLoop {
     $controlDir = $env:AUTOSWITCH_CONTROL
     $enabledFlag = Join-Path $controlDir "enabled.flag"
@@ -1064,15 +1044,12 @@ function Start-WorkerLoop {
     Write-AutoSwitchLog "Worker started (mode $script:DetectionMode)."
 
     while (-not (Test-Path $stopFlag)) {
-        # The tray requested a configuration reload (reconfigure without reinstalling).
         if (Test-Path $reloadFlag) {
             try {
                 Remove-Item $reloadFlag -Force -ErrorAction SilentlyContinue
                 $newConfig = Get-Content -Raw -Path $ConfigPath | ConvertFrom-Json
                 if ($newConfig) {
-                    # Update the script-global variable (do not create a local copy).
                     Set-Variable -Name Config -Value $newConfig -Scope 1
-                    # If configuration specifies another mode, the worker respects it.
                     $newMode = Get-ConfigDetectionMode -Config $newConfig
                     if ($newMode) { $script:DetectionMode = $newMode }
                     $lastState = $null
@@ -1100,7 +1077,6 @@ function Start-WorkerLoop {
                 $endpoint = Get-HeadsetEndpointState
                 if ($endpoint -eq 'Connected') { $isOn = $true; $known = $true }
                 elseif ($endpoint -eq 'Disconnected') { $isOn = $false; $known = $true }
-                # Unknown -> no tocar nada.
             }
             catch {
                 if (-not $availabilityLogged) {
@@ -1110,7 +1086,6 @@ function Start-WorkerLoop {
             }
         }
         elseif ($script:DetectionMode -eq 'SteelSeriesNova5') {
-            # SteelSeries Arctis Nova 5/5X HID state via the optional module.
             if (-not $script:SteelSeriesAvailable) {
                 if (-not $availabilityLogged) {
                     Write-AutoSwitchLog "SteelSeries module not available; not switching."
@@ -1122,7 +1097,6 @@ function Start-WorkerLoop {
                     $steelState = Get-SteelSeriesNova5State -TimeoutMilliseconds 800
                     if ($steelState -eq 'Connected') { $isOn = $true; $known = $true }
                     elseif ($steelState -eq 'Disconnected') { $isOn = $false; $known = $true }
-                    # Unknown -> no tocar nada.
                 }
                 catch {
                     if (-not $availabilityLogged) {
@@ -1133,13 +1107,10 @@ function Start-WorkerLoop {
             }
         }
         else {
-            # LogitechGHub: PERSISTENT connection. Connect once and resolve
-            # batteryPath once; reconnect only on failure (re-resolving the
-            # deviceId, which may change after reconnection).
             try {
                 if (-not $script:WorkerBatteryPath) {
                     Connect-GHub
-                    $script:WorkerBatteryPath = Get-ProX2BatteryPath
+                    $script:WorkerBatteryPath = Get-LogitechBatteryPath
 
                     if ($availabilityLogged) {
                         Write-AutoSwitchLog "G HUB connection recovered."
@@ -1159,7 +1130,7 @@ function Start-WorkerLoop {
                 $script:WorkerBatteryPath = $null
                 if (-not $availabilityLogged) {
                     Write-AutoSwitchLog ((
-                        "G HUB/AutoSwitch no disponible: {0}. " +
+                        "G HUB/AutoSwitch unavailable: {0}. " +
                         "It will retry; while the state is unknown the output is not changed."
                     ) -f $_.Exception.Message)
                     $availabilityLogged = $true
@@ -1168,7 +1139,6 @@ function Start-WorkerLoop {
         }
 
         if ($known) {
-            # Debounce: solo se decide OFF tras OffMissThreshold lecturas.
             $state = Resolve-HeadsetState `
                 -PayloadPresent $isOn `
                 -Misses $misses `
@@ -1204,8 +1174,6 @@ function Initialize-TrayAndTimer {
 
     $script:TrayIcon = New-Object System.Windows.Forms.NotifyIcon
 
-    # App-specific icon. If the .ico file does not exist
-    # on disk, fall back to SystemIcons.Application so an icon is always available.
     try {
         $iconFile = Join-Path $InstallDir "icon.ico"
         if (Test-Path $iconFile) {
@@ -1222,9 +1190,6 @@ function Initialize-TrayAndTimer {
     $script:TrayIcon.Text = "Audio AutoSwitch"
     $script:TrayIcon.Visible = $true
 
-    # Form invisible que sostiene el message pump de WinForms. Application.Run()
-    # without a Form does not reliably keep NotifyIcon active on every
-    # .NET builds; an invisible Form provides a robust message pump for the tray.
     $script:MainForm = New-Object System.Windows.Forms.Form
     $script:MainForm.WindowState = 'Minimized'
     $script:MainForm.ShowInTaskbar = $false
@@ -1233,7 +1198,6 @@ function Initialize-TrayAndTimer {
 
     $menu = New-Object System.Windows.Forms.ContextMenuStrip
 
-    # Lineas de informacion (Headset / Fallback / Next switch).
     $script:MenuItemInfoHeadset = New-Object System.Windows.Forms.ToolStripMenuItem
     $script:MenuItemInfoHeadset.Text = "Headset: ..."
     $script:MenuItemInfoHeadset.Enabled = $false
@@ -1263,7 +1227,6 @@ function Initialize-TrayAndTimer {
     $script:MenuItemEnhancements.Add_Click({ Invoke-EnhancementsToggle })
     [void]$menu.Items.Add($script:MenuItemEnhancements)
 
-    # Reconfiguration submenu (choose headset/fallback without reinstalling).
     $reconfigureItem = New-Object System.Windows.Forms.ToolStripMenuItem
     $reconfigureItem.Text = "Reconfigure..."
     $reconfigureItem.Add_Click({ Invoke-Reconfigure })
@@ -1276,9 +1239,6 @@ function Initialize-TrayAndTimer {
 
     $script:TrayIcon.ContextMenuStrip = $menu
 
-    # Refresh the Audio Enhancements menu text periodically (the SysFx state
-    # can change through the installer or an external helper). Update it
-    # on the UI thread; Get-EndpointFxState is a lightweight COM read.
     $script:MenuTimer = New-Object System.Windows.Forms.Timer
     $script:MenuTimer.Interval = 5000
     $script:MenuTimer.Add_Tick({
@@ -1292,10 +1252,9 @@ function Initialize-TrayAndTimer {
     Write-AutoSwitchLog "Tray configured; message pump active."
 }
 
-Write-AutoSwitchLog "PRO X 2 AutoSwitch started (mode $script:DetectionMode)."
+Write-AutoSwitchLog "Audio AutoSwitch started (mode $script:DetectionMode)."
 
 if ($env:AUTOSWITCH_WORKER -eq '1') {
-    # Worker mode: polling loop only. It does not touch the tray.
     Start-WorkerLoop
     exit 0
 }
@@ -1312,8 +1271,6 @@ try {
         }
     }
 
-    # Main message pump hosted by an invisible Form. The tray
-    # notification system processes events here and remains active until Exit.
     [System.Windows.Forms.Application]::Run($script:MainForm)
     Write-AutoSwitchLog "Message pump finished (Exit)."
 }
