@@ -63,13 +63,22 @@ Describe 'Generic Logitech G HUB candidate selection' {
 }
 
 Describe 'Runtime provider regression guards' {
-    It 'uses generic Logitech names in runtime/reconfigure paths' {
+    It 'uses the shared generic Logitech G HUB provider instead of duplicated transport code' {
         $runtime = Get-Content -Raw -Path (Join-Path $PSScriptRoot '..\Runtime-PROX2-AutoSwitch.ps1')
+        $installer = Get-Content -Raw -Path (Join-Path $PSScriptRoot '..\Instalar-PROX2-AutoSwitch.ps1')
 
-        $runtime | Should -Match 'Select-GHubLogitechHeadset'
-        $runtime | Should -Match 'Get-LogitechBatteryPath'
+        $runtime | Should -Match 'LogitechGHub\.psm1'
+        $runtime | Should -Match 'Get-LogitechGHubBatteryPath'
+        $runtime | Should -Match 'Open-ConfiguredGHubConnection'
+        $runtime | Should -Not -Match 'function Connect-GHub'
+        $runtime | Should -Not -Match 'function Invoke-GHubGet'
         $runtime | Should -Not -Match 'Test-GHubProX2'
         $runtime | Should -Not -Match 'Get-ProX2BatteryPath'
+
+        $installer | Should -Match 'LogitechGHub\.psm1'
+        $installer | Should -Match 'Select-InstallerLogitechHeadset'
+        $installer | Should -Not -Match 'function Connect-GHub'
+        $installer | Should -Not -Match 'function Invoke-GHubGet'
     }
 
     It 'keeps SteelSeries available from Reconfigure' {
