@@ -29,15 +29,16 @@ jobs:
         run: bash -n scripts/*.sh
       - name: Deterministic release build
         run: |
-          bash scripts/build-release.sh 1.2.5
-          first="$(cut -d' ' -f1 dist/PROX2-AutoSwitch-v1.2.5.zip.sha256)"
-          cp dist/PROX2-AutoSwitch-v1.2.5.zip /tmp/autoswitch-first.zip
+          version="$(tr -d '\r\n' < VERSION)"
+          bash scripts/build-release.sh "$version"
+          first="$(cut -d' ' -f1 "dist/PROX2-AutoSwitch-v${version}.zip.sha256")"
+          cp "dist/PROX2-AutoSwitch-v${version}.zip" /tmp/autoswitch-first.zip
           rm -f dist/*.zip dist/*.sha256
-          bash scripts/build-release.sh 1.2.5
-          second="$(cut -d' ' -f1 dist/PROX2-AutoSwitch-v1.2.5.zip.sha256)"
+          bash scripts/build-release.sh "$version"
+          second="$(cut -d' ' -f1 "dist/PROX2-AutoSwitch-v${version}.zip.sha256")"
           test "$first" = "$second"
-          cmp /tmp/autoswitch-first.zip dist/PROX2-AutoSwitch-v1.2.5.zip
-          cmp dist/PROX2-AutoSwitch-v1.2.5.zip dist/Audio-AutoSwitch.zip
+          cmp /tmp/autoswitch-first.zip "dist/PROX2-AutoSwitch-v${version}.zip"
+          cmp "dist/PROX2-AutoSwitch-v${version}.zip" dist/Audio-AutoSwitch.zip
 
   powershell:
     runs-on: windows-latest
