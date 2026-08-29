@@ -29,6 +29,8 @@ REQUIRED_FILES = (
     "Runtime-PROX2-AutoSwitch.ps1",
     "Toggle-AudioEnhancements.ps1",
     "lib/AutoSwitchCore.psm1",
+    "lib/LogitechGHub.psm1",
+    "lib/SteelSeriesNova5.psm1",
     "scripts/build-release.sh",
     "scripts/run-gitleaks.sh",
     ".github/workflows/validate.yml",
