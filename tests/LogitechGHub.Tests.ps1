@@ -2,19 +2,19 @@
 
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot '..\lib\LogitechGHub.psm1') -Force
-}
 
-function New-TestGHubHeadset {
-    param(
-        [Parameter(Mandatory = $true)][string]$Name,
-        [Parameter(Mandatory = $true)][string]$Id
-    )
+    function New-TestGHubHeadset {
+        param(
+            [Parameter(Mandatory = $true)][string]$Name,
+            [Parameter(Mandatory = $true)][string]$Id
+        )
 
-    return [pscustomobject]@{
-        id                  = $Id
-        extendedDisplayName = $Name
-        deviceType          = 'headset'
-        capabilities        = [pscustomobject]@{ hasBatteryStatus = $true }
+        return [pscustomobject]@{
+            id                  = $Id
+            extendedDisplayName = $Name
+            deviceType          = 'headset'
+            capabilities        = [pscustomobject]@{ hasBatteryStatus = $true }
+        }
     }
 }
 
