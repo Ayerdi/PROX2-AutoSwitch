@@ -1,0 +1,68 @@
+name: Publish v1.5.0
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/release-v1.5.0.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Skip if release exists
+        id: existing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v1.5.0 >/dev/null 2>&1; then
+            echo 'exists=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'exists=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Repository quality checks
+        if: steps.existing.outputs.exists == 'false'
+        run: |
+          python3 scripts/check-repository.py
+          python3 scripts/check-language.py
+          bash scripts/run-gitleaks.sh
+
+      - name: Build deterministic release twice
+        if: steps.existing.outputs.exists == 'false'
+        run: |
+          bash scripts/build-release.sh 1.5.0
+          first="$(cut -d' ' -f1 dist/PROX2-AutoSwitch-v1.5.0.zip.sha256)"
+          first_copy="$(mktemp /tmp/autoswitch-v1.5.0.XXXXXX.zip)"
+          trap 'rm -f -- "${first_copy}"' EXIT
+          cp dist/PROX2-AutoSwitch-v1.5.0.zip "${first_copy}"
+          rm -f dist/*.zip dist/*.sha256
+          bash scripts/build-release.sh 1.5.0
+          second="$(cut -d' ' -f1 dist/PROX2-AutoSwitch-v1.5.0.zip.sha256)"
+          test "$first" = "$second"
+          cmp "${first_copy}" dist/PROX2-AutoSwitch-v1.5.0.zip
+          cmp dist/PROX2-AutoSwitch-v1.5.0.zip dist/Audio-AutoSwitch.zip
+
+      - name: Publish v1.5.0
+        if: steps.existing.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v1.5.0 \
+            dist/PROX2-AutoSwitch-v1.5.0.zip \
+            dist/PROX2-AutoSwitch-v1.5.0.zip.sha256 \
+            dist/Audio-AutoSwitch.zip \
+            dist/Audio-AutoSwitch.zip.sha256 \
+            --target "$GITHUB_SHA" \
+            --title 'v1.5.0 — PRO X 2 direct HID + tray battery' \
+            --notes-file docs/RELEASE-NOTES-v1.5.0.md
