@@ -26,6 +26,9 @@ jobs:
       - name: Apply v1.5.0 runtime/package changes
         run: python3 scripts/prepare-v1.5-runtime.py
 
+      - name: Repair docs preparer syntax
+        run: sed -i 's/if (ROOT\.joinpath(rel)\.exists():/if ROOT.joinpath(rel).exists():/g' scripts/prepare-v1.5-docs.py
+
       - name: Apply v1.5.0 docs/release changes
         run: python3 scripts/prepare-v1.5-docs.py
 
