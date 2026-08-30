@@ -4,7 +4,7 @@ La bandeja muestra auricular, salida alternativa y el próximo cambio esperado.
 
 Permite:
 
-- activar/desactivar AutoSwitch;
+- activar/desactivar AutoSwitch; en PRO X 2 el estado y la batería por HID directo siguen actualizándose mientras AutoSwitch está pausado, pero no se cambia ninguna salida de audio;
 - deshabilitar/habilitar Audio Enhancements con UAC solo para el helper elevado;
 - ejecutar `Reconfigure...` y validar un nuevo ciclo ON → OFF → ON;
 - salir.

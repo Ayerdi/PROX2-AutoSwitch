@@ -14,7 +14,7 @@ Existing `DetectionMode = LogitechGHub` configs remain compatible. The runtime a
 
 ## Tray battery
 
-A connected PRO X 2 now shows connection state and battery, for example `Battery: 76%`. When powered off the tray shows Disconnected without a stale battery value.
+A connected PRO X 2 now shows connection state and battery, for example `Battery: 76%`. When powered off the tray shows Disconnected without a stale battery value. Direct Centurion telemetry continues to refresh while AutoSwitch is paused, but no audio output is changed until switching is enabled again.
 
 ## Hardware validation
 

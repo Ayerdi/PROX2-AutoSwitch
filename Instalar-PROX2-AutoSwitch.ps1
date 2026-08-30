@@ -675,7 +675,7 @@ try {
     }
 
     $config = [ordered]@{
-        Version                = "1.4.0"
+        Version                = "1.5.0"
         DetectionMode          = $DetectionMode
         HeadsetName            = [string]$headsetOutput.Name
         HeadsetId              = [string]$headsetOutput.ItemId

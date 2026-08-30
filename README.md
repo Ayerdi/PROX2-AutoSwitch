@@ -205,7 +205,7 @@ The tray menu shows the configured headset, fallback and next switch action. For
 
 It also provides:
 
-- **AutoSwitch: Enabled / Disabled** — pause or resume switching.
+- **AutoSwitch: Enabled / Disabled** — pause or resume switching. On PRO X 2, direct HID connection state and battery continue refreshing while switching is paused; audio outputs are never changed until AutoSwitch is enabled again.
 - **Disable / Enable Audio Enhancements** — change the configured headset's global Windows enhancement state, with UAC only for the helper.
 - **Reconfigure...** — choose new endpoints and repeat the complete detection wizard without reinstalling.
 - **Exit** — stop AutoSwitch.

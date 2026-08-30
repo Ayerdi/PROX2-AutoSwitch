@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot '..\lib\LogitechProX2Centurion.psm1') -Force

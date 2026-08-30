@@ -13,7 +13,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Added
 - `lib/LogitechProX2Centurion.psm1`: isolated direct HID provider returning `Connected`, `Disconnected` or `Unknown`, plus `BatteryPercent`.
-- PRO X 2 battery percentage and physical connection state in the tray; the tooltip also includes battery while connected.
+- PRO X 2 battery percentage and physical connection state in the tray; the tooltip also includes battery while connected. Centurion telemetry keeps refreshing while AutoSwitch is paused, without changing any audio output.
 - `tools/Test-LogitechProX2Centurion.ps1` for live direct-state/battery diagnostics.
 - Pester coverage for PRO X 2 provider/config selection and release-package integration.
 

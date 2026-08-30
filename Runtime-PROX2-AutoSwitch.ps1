@@ -1186,9 +1186,21 @@ function Start-WorkerLoop {
         }
 
         $enabled = Test-Path $enabledFlag
-        if (-not $enabled) {
+        $centurionStatusOnly = (-not $enabled) -and
+            $script:DetectionMode -eq 'LogitechGHub' -and
+            $script:CenturionAvailable -and
+            (Test-LogitechProX2CenturionConfig -Config $Config)
+
+        if (-not $enabled -and -not $centurionStatusOnly) {
             Start-Sleep -Milliseconds ([int]$Config.PollMilliseconds)
             continue
+        }
+
+        if ($centurionStatusOnly) {
+            # Keep tray telemetry fresh while AutoSwitch is paused, but discard
+            # switching history so re-enabling starts from a clean observation.
+            $misses = 0
+            $lastState = $null
         }
 
         $isOn = $false
@@ -1296,7 +1308,7 @@ function Start-WorkerLoop {
             }
         }
 
-        if ($known) {
+        if ($known -and $enabled) {
             # Debounce: solo se decide OFF tras OffMissThreshold lecturas.
             $state = Resolve-HeadsetState `
                 -PayloadPresent $isOn `

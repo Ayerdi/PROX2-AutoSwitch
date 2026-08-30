@@ -4,7 +4,7 @@ The tray menu shows the configured headset, fallback output and expected next sw
 
 Actions:
 
-- enable/disable automatic switching without exiting;
+- enable/disable automatic switching without exiting; PRO X 2 direct HID state/battery keeps refreshing while switching is paused, but outputs are not changed;
 - disable/enable Windows Audio Enhancements for the configured headset (UAC only for the elevated helper);
 - `Reconfigure...` to select current devices and validate a fresh ON → OFF → ON cycle;
 - exit AutoSwitch.
