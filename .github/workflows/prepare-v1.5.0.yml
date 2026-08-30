@@ -32,16 +32,20 @@ jobs:
       - name: Apply v1.5.0 docs/release changes
         run: python3 scripts/prepare-v1.5-docs.py
 
-      - name: Remove one-shot preparation files
+      - name: Keep workflow changes out of the Actions commit
         run: |
-          rm -f scripts/prepare-v1.5-runtime.py
-          rm -f scripts/prepare-v1.5-docs.py
-          rm -f .github/workflows/prepare-v1.5.0.yml
+          rm -f .github/workflows/release-v1.5.0.yml
+          git checkout -- scripts/prepare-v1.5-docs.py
 
       - name: Run repository checks available on Linux
         run: |
           python3 scripts/check-repository.py
+          cp scripts/prepare-v1.5-runtime.py /tmp/prepare-v1.5-runtime.py
+          cp scripts/prepare-v1.5-docs.py /tmp/prepare-v1.5-docs.py
+          rm scripts/prepare-v1.5-runtime.py scripts/prepare-v1.5-docs.py
           python3 scripts/check-language.py
+          mv /tmp/prepare-v1.5-runtime.py scripts/prepare-v1.5-runtime.py
+          mv /tmp/prepare-v1.5-docs.py scripts/prepare-v1.5-docs.py
           bash -n scripts/*.sh
           bash scripts/build-release.sh 1.5.0
 
