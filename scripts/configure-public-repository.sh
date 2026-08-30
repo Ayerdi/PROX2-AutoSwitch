@@ -29,7 +29,7 @@ python3 scripts/check-repository.py
 python3 scripts/check-language.py
 
 gh api --method PATCH "repos/${REPOSITORY}" \
-  -f description='Automatic Windows audio output switching for compatible wireless headsets, with a Logitech PRO X 2 fallback.' \
+  -f description='Automatic Windows audio switching for compatible wireless headsets, with direct Logitech PRO X 2 HID and SteelSeries Nova 5 support.' \
   -f homepage='https://ayerdi.github.io/PROX2-AutoSwitch/' \
   -F has_issues=true \
   -F has_discussions=true \
@@ -42,6 +42,8 @@ gh api --method PUT "repos/${REPOSITORY}/topics" \
   -f 'names[]=headset' \
   -f 'names[]=powershell' \
   -f 'names[]=logitech' \
+  -f 'names[]=steelseries' \
+  -f 'names[]=hid' \
   -f 'names[]=automation' \
   -f 'names[]=open-source' >/dev/null
 
