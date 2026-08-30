@@ -17,6 +17,7 @@
 
 ## Releases
 
+- [v1.5.0 release notes](RELEASE-NOTES-v1.5.0.md)
 - [v1.2.5 release notes](RELEASE-NOTES-v1.2.5.md)
 - [Changelog](../CHANGELOG.md)
 - [GitHub Releases](https://github.com/Ayerdi/PROX2-AutoSwitch/releases)

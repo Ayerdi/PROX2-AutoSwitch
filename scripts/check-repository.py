@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_VERSION = "1.4.0"
+CURRENT_VERSION = "1.5.0"
 
 REQUIRED_FILES = (
     "README.md",
@@ -28,6 +28,8 @@ REQUIRED_FILES = (
     "Runtime-PROX2-AutoSwitch.ps1",
     "Toggle-AudioEnhancements.ps1",
     "lib/AutoSwitchCore.psm1",
+    "lib/LogitechProX2Centurion.psm1",
+    "tools/Test-LogitechProX2Centurion.ps1",
     "scripts/build-release.sh",
     "scripts/run-gitleaks.sh",
     "wiki/Home.md",

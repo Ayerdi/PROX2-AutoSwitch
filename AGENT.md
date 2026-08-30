@@ -257,3 +257,12 @@ To evolve the runtime, one option is to use WebSocket events and keep polling as
 - Do not assume speaker names will always be the same.
 - Do not assume the Item ID survives a format, driver change, endpoint recreation or Bluetooth reconnect.
 - Do not assume the G HUB API is officially supported.
+
+
+## v1.5.0 PRO X 2 Centurion provider (verified 2026-08-31)
+
+G HUB `2026.5.939708` stopped exposing the PRO X 2 `/battery/<deviceId>/state` route (`NO_SUCH_PATH`) while `/devices/list` remained `ACTIVE` even with the headset physically OFF. v1.5.0 therefore keeps `DetectionMode = LogitechGHub` for backward-compatible configs but automatically prefers `lib/LogitechProX2Centurion.psm1` when the configured device is a PRO X 2.
+
+Verified receiver details: Logitech `046D:0AF7`, UsagePage `0xFFA0`, Usage `0x0001`, 64-byte reports. Connected queries return a valid battery response; the tested OFF state repeatedly emitted `51 05 00 FF 03 1A 0B 00 ...`. Unrecognized/malformed/time-out results are `Unknown` and never switch. The existing outer OFF debounce remains mandatory.
+
+End-to-end hardware validation on 2026-08-31 completed two real OFF/ON cycles: two confirmed OFF observations selected the fallback and the next valid battery reply selected the PRO X 2. The same provider supplies battery percentage to the tray.

@@ -102,12 +102,12 @@
 
   <header>
     <div class="badges">
-      <span class="badge"><strong>v1.4.0</strong> stable</span>
+      <span class="badge"><strong>v1.5.0</strong> stable</span>
       <span class="badge">Windows 10/11 x64</span>
       <span class="badge">MIT</span>
     </div>
     <h1>Audio <span>AutoSwitch</span></h1>
-    <p class="tagline">Automatically switch the Windows default audio output when a compatible wireless headset turns on or off — with a generic Windows endpoint mode, a Logitech PRO X family fallback through G HUB, and SteelSeries Arctis Nova 5/5X over HID.</p>
+    <p class="tagline">Automatically switch the Windows default audio output when a compatible wireless headset turns on or off — with a generic Windows endpoint mode, direct Logitech PRO X 2 Centurion HID with tray battery, G HUB fallback for other compatible Logitech headsets, and SteelSeries Arctis Nova 5/5X over HID.</p>
     <div class="actions">
       <a class="button primary" href="https://github.com/Ayerdi/PROX2-AutoSwitch/releases/latest">Download latest release</a>
       <a class="button" href="https://github.com/Ayerdi/PROX2-AutoSwitch/wiki/Installation">Installation guide</a>
@@ -121,7 +121,7 @@
     <div class="grid">
       <div class="card"><h3>Headset on</h3><p class="muted">Windows selects the configured headset automatically.</p></div>
       <div class="card"><h3>Headset off</h3><p class="muted">Windows returns to the configured fallback output.</p></div>
-      <div class="card"><h3>Tray controls</h3><p class="muted">Pause switching, reconfigure endpoints and control Audio Enhancements without reinstalling.</p></div>
+      <div class="card"><h3>Tray controls + battery</h3><p class="muted">Pause switching, reconfigure endpoints and control Audio Enhancements. PRO X 2 also shows live battery percentage and connection state.</p></div>
       <div class="card"><h3>Invisible startup</h3><p class="muted">Runs per-user in the background without leaving a PowerShell window open.</p></div>
     </div>
   </section>
@@ -161,7 +161,7 @@
   </section>
 
   <section>
-    <h2>Two detection modes</h2>
+    <h2>Detection providers</h2>
     <div class="grid">
       <div class="card">
         <h3>WindowsEndpoint</h3>
@@ -171,8 +171,15 @@ Unplugged    → Disconnected
 Unknown      → no switch</code></pre>
       </div>
       <div class="card">
+        <h3>Logitech PRO X 2 · Centurion HID</h3>
+        <p class="muted">v1.5.0 reads the LIGHTSPEED receiver directly, restoring ON/OFF detection after G HUB changed its old battery route. The same direct reply supplies tray battery percentage.</p>
+        <pre><code>valid battery → ON + %
+known power signature → OFF
+unknown → no switch</code></pre>
+      </div>
+      <div class="card">
         <h3>LogitechGHub</h3>
-        <p class="muted">Fallback for Logitech PRO X 2, whose Windows endpoint can remain <code>Active</code> while the physical headset is off. G HUB's local WebSocket supplies the physical-state signal.</p>
+        <p class="muted">Other compatible Logitech headsets can still use G HUB's local WebSocket when Windows does not expose their physical state.</p>
         <pre><code>payload present → ON
 payload absent  → OFF</code></pre>
       </div>
@@ -200,7 +207,7 @@ payload absent  → OFF</code></pre>
         <li>Windows 10/11 x64.</li>
         <li>PowerShell 5.1 or newer.</li>
         <li>Internet access during installation.</li>
-        <li>Logitech G HUB only when the selected headset requires <code>LogitechGHub</code> mode.</li>
+        <li>Logitech G HUB only for Logitech headsets that still use the G HUB provider; PRO X 2 direct state/battery is read from HID.</li>
       </ul>
     </div>
   </section>

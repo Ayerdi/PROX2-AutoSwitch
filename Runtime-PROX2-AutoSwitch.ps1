@@ -33,7 +33,22 @@ if (Test-Path $script:SteelSeriesModulePath) {
     }
 }
 
-# Timeouts de G HUB (ms). Overridables desde config.json.
+# Logitech PRO X 2 LIGHTSPEED direct Centurion HID provider.
+# DetectionMode remains LogitechGHub for backward-compatible config files;
+# PRO X 2 uses direct HID before the legacy G HUB battery provider.
+$script:CenturionModulePath = Join-Path $InstallDir "lib\LogitechProX2Centurion.psm1"
+$script:CenturionAvailable = $false
+if (Test-Path $script:CenturionModulePath) {
+    try {
+        Import-Module $script:CenturionModulePath -ErrorAction Stop
+        $script:CenturionAvailable = $true
+    }
+    catch {
+        $script:CenturionAvailable = $false
+    }
+}
+
+# G HUB timeouts (ms). Overridable from config.json.
 $script:ConnectTimeoutMs = 5000
 $script:ReceiveTimeoutMs = 5000
 $script:RequestTimeoutMs = 10000
@@ -375,6 +390,45 @@ function Get-HeadsetEndpointState {
     return Resolve-EndpointState -State $state
 }
 
+# --- Provider state shared from worker -> tray ---
+# Hardware polling remains in the worker. The WinForms thread only reads this
+# small status file, so HID/G HUB calls never block the tray.
+function Write-HeadsetProviderStatus {
+    param(
+        [Parameter(Mandatory = $true)][string]$Provider,
+        [Parameter(Mandatory = $true)][string]$State,
+        [int]$BatteryPercent = -1
+    )
+
+    try {
+        $control = Join-Path $InstallDir "control"
+        New-Item -ItemType Directory -Path $control -Force | Out-Null
+        $path = Join-Path $control "headset-status.json"
+        $tmp = "$path.tmp"
+        [ordered]@{
+            Provider       = $Provider
+            State          = $State
+            BatteryPercent = $BatteryPercent
+            UpdatedAt      = (Get-Date).ToString("o")
+        } | ConvertTo-Json -Compress | Set-Content -Path $tmp -Encoding UTF8
+        Move-Item $tmp $path -Force
+    }
+    catch { }
+}
+
+function Get-HeadsetProviderStatus {
+    try {
+        $path = Join-Path (Join-Path $InstallDir "control") "headset-status.json"
+        if (-not (Test-Path $path)) { return $null }
+        $status = Get-Content -Raw -Path $path | ConvertFrom-Json
+        if (-not $status.UpdatedAt) { return $null }
+        $age = (Get-Date) - [datetime]$status.UpdatedAt
+        if ($age.TotalSeconds -gt 15) { return $null }
+        return $status
+    }
+    catch { return $null }
+}
+
 # --- Tray icon + Timer (message pump) + worker process ---
 # Polling runs in a separate PowerShell worker process so it does not block
 # the WinForms thread. The UI-thread timer only marks state; the worker
@@ -386,6 +440,7 @@ $script:MenuItemAutoSwitch = $null
 $script:MenuItemEnhancements = $null
 $script:MenuTimer = $null
 $script:MenuItemInfoHeadset = $null
+$script:MenuItemInfoBattery = $null
 $script:MenuItemInfoFallback = $null
 $script:MenuItemInfoNext = $null
 $script:ReloadFlag = $null
@@ -478,38 +533,66 @@ function Get-RenderDevices {
 }
 
 function Update-TrayInfo {
-    # Refresh the tray menu information lines.
     $hs = if ($Config.HeadsetName) { [string]$Config.HeadsetName } else { [string]$Config.HeadsetId }
     $fb = if ($Config.SpeakerName) { [string]$Config.SpeakerName } else { [string]$Config.SpeakerId }
+    $providerStatus = Get-HeadsetProviderStatus
+
     if ($script:MenuItemInfoHeadset) {
-        $script:MenuItemInfoHeadset.Text = "Headset: $hs"
+        $suffix = ""
+        if ($providerStatus -and $providerStatus.State) {
+            $suffix = " — $($providerStatus.State)"
+        }
+        $script:MenuItemInfoHeadset.Text = "Headset: $hs$suffix"
         $script:MenuItemInfoHeadset.Enabled = $false
     }
+
+    if ($script:MenuItemInfoBattery) {
+        $batteryText = "Battery: n/a"
+        if ($providerStatus -and $providerStatus.Provider -eq "Centurion") {
+            if ($providerStatus.State -eq "Connected" -and [int]$providerStatus.BatteryPercent -ge 0) {
+                $batteryText = "Battery: $([int]$providerStatus.BatteryPercent)%"
+            }
+            elseif ($providerStatus.State -eq "Disconnected") {
+                $batteryText = "Battery: -- (Disconnected)"
+            }
+            else {
+                $batteryText = "Battery: -- (Unknown)"
+            }
+        }
+        $script:MenuItemInfoBattery.Text = $batteryText
+        $script:MenuItemInfoBattery.Enabled = $false
+    }
+
     if ($script:MenuItemInfoFallback) {
         $script:MenuItemInfoFallback.Text = "Fallback: $fb"
         $script:MenuItemInfoFallback.Enabled = $false
     }
 
-    # Determine where the next switch would go from the current default.
     $next = "Current: ?"
     try {
         $current = Get-DefaultRenderItemId
-        if ($current -ieq [string]$Config.HeadsetId) {
-            $next = "Next switch: $fb"
-        }
-        elseif ($current -ieq [string]$Config.SpeakerId) {
-            $next = "Next switch: $hs"
-        }
-        else {
-            $next = "Current: $current"
-        }
+        if ($current -ieq [string]$Config.HeadsetId) { $next = "Next switch: $fb" }
+        elseif ($current -ieq [string]$Config.SpeakerId) { $next = "Next switch: $hs" }
+        else { $next = "Current: $current" }
     }
-    catch {
-        $next = "Next switch: unknown"
-    }
+    catch { $next = "Next switch: unknown" }
     if ($script:MenuItemInfoNext) {
         $script:MenuItemInfoNext.Text = $next
         $script:MenuItemInfoNext.Enabled = $false
+    }
+
+    if ($script:TrayIcon) {
+        $tip = "Audio AutoSwitch"
+        if ($providerStatus -and $providerStatus.Provider -eq "Centurion") {
+            if ($providerStatus.State -eq "Connected" -and [int]$providerStatus.BatteryPercent -ge 0) {
+                $tip = "PRO X 2 - $([int]$providerStatus.BatteryPercent)% - AutoSwitch"
+            }
+            elseif ($providerStatus.State -eq "Disconnected") {
+                $tip = "PRO X 2 - Disconnected - AutoSwitch"
+            }
+        }
+        if ($tip.Length -gt 60) { $tip = $tip.Substring(0, 60) }
+        $script:TrayIcon.Text = $tip
     }
 }
 
@@ -847,19 +930,35 @@ function Show-ReconfigureDialog {
                 $newMode = "WindowsEndpoint"
             }
             else {
-                $answer = [System.Windows.Forms.MessageBox]::Show(
-                    "Windows does not reflect the physical ON/OFF cycle of this headset.`n`nIs it a Logitech PRO X 2 detected by G HUB?",
-                    "Audio AutoSwitch",
-                    [System.Windows.Forms.MessageBoxButtons]::YesNo,
-                    [System.Windows.Forms.MessageBoxIcon]::Question
-                )
-                if ($answer -eq 'Yes') {
-                    $lblStatus.Text = "Step 3/3: checking G HUB for PRO X 2..."
-                    $lblStatus.Refresh()
-                    $ghubDevice = Test-GHubProX2
-                    if ($ghubDevice) {
-                        $newMode = "LogitechGHub"
-                        $newGhubName = [string]$ghubDevice.extendedDisplayName
+                if ($script:CenturionAvailable -and $newHeadsetName -match '(?i)PRO\s*X\s*2') {
+                    try {
+                        $lblStatus.Text = "Step 3/3: checking PRO X 2 direct HID..."
+                        $lblStatus.Refresh()
+                        $centurion = Get-LogitechProX2CenturionState
+                        if ($centurion.State -eq 'Connected' -or $centurion.State -eq 'Disconnected') {
+                            $newMode = "LogitechGHub"
+                            $newGhubName = $newHeadsetName
+                            Write-AutoSwitchLog "Reconfigure: PRO X 2 direct Centurion HID provider detected."
+                        }
+                    }
+                    catch { }
+                }
+
+                if (-not $newMode) {
+                    $answer = [System.Windows.Forms.MessageBox]::Show(
+                        "Windows does not reflect the physical ON/OFF cycle of this headset.`n`nIs it a Logitech headset detected by G HUB?",
+                        "Audio AutoSwitch",
+                        [System.Windows.Forms.MessageBoxButtons]::YesNo,
+                        [System.Windows.Forms.MessageBoxIcon]::Question
+                    )
+                    if ($answer -eq 'Yes') {
+                        $lblStatus.Text = "Step 3/3: checking G HUB..."
+                        $lblStatus.Refresh()
+                        $ghubDevice = Test-GHubProX2
+                        if ($ghubDevice) {
+                            $newMode = "LogitechGHub"
+                            $newGhubName = [string]$ghubDevice.extendedDisplayName
+                        }
                     }
                 }
             }
@@ -1133,36 +1232,66 @@ function Start-WorkerLoop {
             }
         }
         else {
-            # LogitechGHub: PERSISTENT connection. Connect once and resolve
-            # batteryPath once; reconnect only on failure (re-resolving the
-            # deviceId, which may change after reconnection).
-            try {
-                if (-not $script:WorkerBatteryPath) {
-                    Connect-GHub
-                    $script:WorkerBatteryPath = Get-ProX2BatteryPath
+            # Backward-compatible LogitechGHub config: PRO X 2 uses direct
+            # Centurion HID; other compatible Logitech headsets keep G HUB.
+            $useCenturion = $script:CenturionAvailable -and
+                (Test-LogitechProX2CenturionConfig -Config $Config)
 
-                    if ($availabilityLogged) {
-                        Write-AutoSwitchLog "G HUB connection recovered."
+            if ($useCenturion) {
+                try {
+                    $centurion = Get-LogitechProX2CenturionState
+                    if ($centurion.State -eq "Connected") {
+                        $isOn = $true; $known = $true
+                        Write-HeadsetProviderStatus -Provider "Centurion" -State "Connected" -BatteryPercent ([int]$centurion.BatteryPercent)
+                        if ($availabilityLogged) { Write-AutoSwitchLog "PRO X 2 Centurion HID provider recovered." }
+                        $availabilityLogged = $false
+                    }
+                    elseif ($centurion.State -eq "Disconnected") {
+                        $isOn = $false; $known = $true
+                        Write-HeadsetProviderStatus -Provider "Centurion" -State "Disconnected"
+                        $availabilityLogged = $false
                     }
                     else {
-                        Write-AutoSwitchLog "Connected to G HUB."
+                        $misses = 0
+                        Write-HeadsetProviderStatus -Provider "Centurion" -State "Unknown"
+                        if (-not $availabilityLogged) {
+                            Write-AutoSwitchLog (("PRO X 2 Centurion state is unknown: {0}. " + "The output will not be changed.") -f $centurion.Error)
+                            $availabilityLogged = $true
+                        }
                     }
-                    $availabilityLogged = $false
                 }
-
-                $battery = Invoke-GHubGet -Path $script:WorkerBatteryPath
-                $isOn = $null -ne $battery.payload
-                $known = $true
+                catch {
+                    $misses = 0
+                    Write-HeadsetProviderStatus -Provider "Centurion" -State "Unknown"
+                    if (-not $availabilityLogged) {
+                        Write-AutoSwitchLog (("PRO X 2 Centurion provider unavailable: {0}. " + "It will retry; unknown state never changes the output.") -f $_.Exception.Message)
+                        $availabilityLogged = $true
+                    }
+                }
             }
-            catch {
-                Close-GHubConnection
-                $script:WorkerBatteryPath = $null
-                if (-not $availabilityLogged) {
-                    Write-AutoSwitchLog ((
-                        "G HUB/AutoSwitch no disponible: {0}. " +
-                        "It will retry; while the state is unknown the output is not changed."
-                    ) -f $_.Exception.Message)
-                    $availabilityLogged = $true
+            else {
+                try {
+                    if (-not $script:WorkerBatteryPath) {
+                        Connect-GHub
+                        $script:WorkerBatteryPath = Get-ProX2BatteryPath
+                        if ($availabilityLogged) { Write-AutoSwitchLog "G HUB connection recovered." }
+                        else { Write-AutoSwitchLog "Connected to G HUB." }
+                        $availabilityLogged = $false
+                    }
+                    $battery = Invoke-GHubGet -Path $script:WorkerBatteryPath
+                    $isOn = $null -ne $battery.payload
+                    $known = $true
+                    Write-HeadsetProviderStatus -Provider "GHub" -State $(if ($isOn) { "Connected" } else { "Disconnected" })
+                }
+                catch {
+                    Close-GHubConnection
+                    $script:WorkerBatteryPath = $null
+                    $misses = 0
+                    Write-HeadsetProviderStatus -Provider "GHub" -State "Unknown"
+                    if (-not $availabilityLogged) {
+                        Write-AutoSwitchLog (("G HUB/AutoSwitch unavailable: {0}. " + "It will retry; while the state is unknown the output is not changed.") -f $_.Exception.Message)
+                        $availabilityLogged = $true
+                    }
                 }
             }
         }
@@ -1238,6 +1367,11 @@ function Initialize-TrayAndTimer {
     $script:MenuItemInfoHeadset.Text = "Headset: ..."
     $script:MenuItemInfoHeadset.Enabled = $false
     [void]$menu.Items.Add($script:MenuItemInfoHeadset)
+
+    $script:MenuItemInfoBattery = New-Object System.Windows.Forms.ToolStripMenuItem
+    $script:MenuItemInfoBattery.Text = "Battery: n/a"
+    $script:MenuItemInfoBattery.Enabled = $false
+    [void]$menu.Items.Add($script:MenuItemInfoBattery)
 
     $script:MenuItemInfoFallback = New-Object System.Windows.Forms.ToolStripMenuItem
     $script:MenuItemInfoFallback.Text = "Fallback: ..."
