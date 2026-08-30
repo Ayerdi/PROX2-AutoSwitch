@@ -1,0 +1,26 @@
+name: Sync Wiki v1.5.0
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/wiki-v1.5.0.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  wiki:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Synchronize GitHub Wiki from versioned source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/publish-wiki.sh --apply
