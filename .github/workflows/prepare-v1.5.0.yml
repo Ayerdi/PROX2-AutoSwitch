@@ -35,6 +35,7 @@ jobs:
       - name: Keep workflow changes out of the Actions commit
         run: |
           rm -f .github/workflows/release-v1.5.0.yml
+          git checkout -- .github/workflows/validate.yml
           git checkout -- scripts/prepare-v1.5-docs.py
 
       - name: Run repository checks available on Linux
