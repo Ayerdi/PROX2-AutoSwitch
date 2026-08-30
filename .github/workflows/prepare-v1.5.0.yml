@@ -32,6 +32,12 @@ jobs:
       - name: Apply v1.5.0 docs/release changes
         run: python3 scripts/prepare-v1.5-docs.py
 
+      - name: Remove one-shot preparation files
+        run: |
+          rm -f scripts/prepare-v1.5-runtime.py
+          rm -f scripts/prepare-v1.5-docs.py
+          rm -f .github/workflows/prepare-v1.5.0.yml
+
       - name: Run repository checks available on Linux
         run: |
           python3 scripts/check-repository.py
