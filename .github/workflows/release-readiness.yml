@@ -1,0 +1,190 @@
+name: release-readiness
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (defaults to VERSION; must match it)'
+        required: false
+        type: string
+  pull_request:
+    paths:
+      - 'VERSION'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - 'AGENT.md'
+      - 'SOURCES.md'
+      - 'SECURITY.md'
+      - 'SUPPORT.md'
+      - '*.cmd'
+      - '*.ps1'
+      - 'lib/**'
+      - 'tools/**'
+      - 'tests/**'
+      - 'scripts/**'
+      - 'docs/**'
+      - 'wiki/**'
+      - 'site/**'
+      - '.github/workflows/**'
+  push:
+    branches:
+      - main
+    paths:
+      - 'VERSION'
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - 'AGENT.md'
+      - 'SOURCES.md'
+      - 'SECURITY.md'
+      - 'SUPPORT.md'
+      - '*.cmd'
+      - '*.ps1'
+      - 'lib/**'
+      - 'tools/**'
+      - 'tests/**'
+      - 'scripts/**'
+      - 'docs/**'
+      - 'wiki/**'
+      - 'site/**'
+      - '.github/workflows/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-readiness-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          canonical="$(tr -d '\r\n' < VERSION)"
+          version="${REQUESTED_VERSION:-$canonical}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$version" = "$canonical"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Validating release v$version"
+
+      - name: Repository quality
+        run: python3 scripts/check-repository.py
+
+      - name: Release source readiness
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: python3 scripts/check-release-readiness.py --version "$VERSION" --source-only
+
+      - name: English canonical language guard
+        run: python3 scripts/check-language.py
+
+      - name: Validate Bash scripts
+        run: bash -n scripts/*.sh
+
+      - name: Git whitespace check
+        run: git diff --check HEAD^
+
+      - name: Secret scan
+        run: bash scripts/run-gitleaks.sh
+
+  powershell:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate PowerShell syntax
+        shell: pwsh
+        run: |
+          $scripts=Get-ChildItem -Recurse -File | Where-Object { $_.Extension -in '.ps1','.psm1' }
+          foreach($script in $scripts){$tokens=$null;$errors=$null;[System.Management.Automation.Language.Parser]::ParseFile($script.FullName,[ref]$tokens,[ref]$errors)|Out-Null;if($errors.Count){$errors|ForEach-Object{Write-Error "$($script.FullName): $($_.Message)"};exit 1}}
+
+      - name: Install validation modules
+        shell: powershell
+        run: |
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.24.0 -Force -Scope CurrentUser -SkipPublisherCheck
+          Install-Module Pester -RequiredVersion 5.9.0 -Force -Scope CurrentUser -SkipPublisherCheck
+
+      - name: PSScriptAnalyzer
+        shell: powershell
+        run: |
+          Import-Module PSScriptAnalyzer -RequiredVersion 1.24.0
+          $r=Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error,Warning -ExcludeRule PSAvoidUsingWriteHost,PSAvoidUsingPlainTextForPassword,PSAvoidUsingCmdletAliases,PSAvoidUsingEmptyCatchBlock,PSUseApprovedVerbs,PSUseShouldProcessForStateChangingFunctions,PSUseSingularNouns
+          if($r){$r|Format-Table -AutoSize|Out-String|Write-Host;exit 1}
+
+      - name: Pester
+        shell: powershell
+        run: Import-Module Pester -RequiredVersion 5.9.0; Invoke-Pester -Path .\tests -CI
+
+  package:
+    needs: source
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VERSION: ${{ needs.source.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build deterministic release twice
+        shell: bash
+        run: |
+          bash scripts/build-release.sh "$VERSION"
+          first="$(cut -d' ' -f1 "dist/PROX2-AutoSwitch-v${VERSION}.zip.sha256")"
+          cp "dist/PROX2-AutoSwitch-v${VERSION}.zip" /tmp/autoswitch-first.zip
+          rm -f dist/*.zip dist/*.sha256
+          bash scripts/build-release.sh "$VERSION"
+          second="$(cut -d' ' -f1 "dist/PROX2-AutoSwitch-v${VERSION}.zip.sha256")"
+          test "$first" = "$second"
+          cmp /tmp/autoswitch-first.zip "dist/PROX2-AutoSwitch-v${VERSION}.zip"
+          cmp "dist/PROX2-AutoSwitch-v${VERSION}.zip" dist/Audio-AutoSwitch.zip
+
+      - name: Validate packaged release
+        run: python3 scripts/check-release-readiness.py --version "$VERSION" --package-only
+
+      - name: Show release asset checksums
+        shell: bash
+        run: cat dist/*.sha256
+
+  release-readiness:
+    name: release-readiness
+    if: always()
+    needs:
+      - source
+      - powershell
+      - package
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Confirm release checks
+        run: |
+          test '${{ needs.source.result }}' = 'success'
+          test '${{ needs.powershell.result }}' = 'success'
+          test '${{ needs.package.result }}' = 'success'
+
+      - name: Release readiness summary
+        if: always()
+        run: |
+          {
+            echo '## Release readiness'
+            echo
+            echo '- Source/docs/workflows: `${{ needs.source.result }}`'
+            echo '- PowerShell/Pester/Analyzer: `${{ needs.powershell.result }}`'
+            echo '- Deterministic package/checksums: `${{ needs.package.result }}`'
+          } >> "$GITHUB_STEP_SUMMARY"
