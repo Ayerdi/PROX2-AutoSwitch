@@ -6,13 +6,34 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_VERSION = "1.5.0"
+VERSION_FILE = ROOT / "VERSION"
+SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
+
+def fail(message: str) -> None:
+    raise SystemExit(message)
+
+
+def read_text(relative: str) -> str:
+    return (ROOT / relative).read_text(encoding="utf-8-sig")
+
+
+def read_current_version() -> str:
+    if not VERSION_FILE.is_file():
+        fail("VERSION file is missing")
+    version = VERSION_FILE.read_text(encoding="utf-8-sig").strip()
+    if not SEMVER.fullmatch(version):
+        fail(f"VERSION is not MAJOR.MINOR.PATCH: {version!r}")
+    return version
+
+
+CURRENT_VERSION = read_current_version()
 RELEASE_WORKFLOW = f".github/workflows/release-v{CURRENT_VERSION}.yml"
 WIKI_WORKFLOW = f".github/workflows/wiki-v{CURRENT_VERSION}.yml"
 RELEASE_NOTES = f"docs/RELEASE-NOTES-v{CURRENT_VERSION}.md"
 
 REQUIRED_FILES = (
+    "VERSION",
     "README.md",
     "LICENSE",
     "SECURITY.md",
@@ -36,6 +57,10 @@ REQUIRED_FILES = (
     "tools/Test-LogitechProX2Centurion.ps1",
     "scripts/build-release.sh",
     "scripts/run-gitleaks.sh",
+    "scripts/check-release-readiness.py",
+    ".github/workflows/release-readiness.yml",
+    ".github/workflows/post-release-verify.yml",
+    "docs/RELEASE-PROCESS.md",
     "wiki/Home.md",
     "wiki/Inicio.md",
     "site/index.html",
@@ -50,14 +75,6 @@ CURRENT_VERSION_FILES = (
     "wiki/Inicio.md",
     "site/index.html",
 )
-
-
-def fail(message: str) -> None:
-    raise SystemExit(message)
-
-
-def read_text(relative: str) -> str:
-    return (ROOT / relative).read_text(encoding="utf-8-sig")
 
 
 def check_required_files() -> None:
@@ -91,7 +108,11 @@ def check_current_version() -> None:
         fail(f"CHANGELOG.md has no {CURRENT_VERSION} release section")
 
     installer = read_text("Instalar-PROX2-AutoSwitch.ps1")
-    installer_version = re.search(r'^\s*Version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"\s*$', installer, re.MULTILINE)
+    installer_version = re.search(
+        r'^\s*Version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"\s*$',
+        installer,
+        re.MULTILINE,
+    )
     if not installer_version:
         fail("Installer config Version assignment was not found")
     if installer_version.group(1) != CURRENT_VERSION:
@@ -101,8 +122,11 @@ def check_current_version() -> None:
         )
 
     validate = read_text(".github/workflows/validate.yml")
-    if f"bash scripts/build-release.sh {CURRENT_VERSION}" not in validate:
-        fail(f"validate.yml does not build current version {CURRENT_VERSION}")
+    if "cat VERSION" not in validate:
+        fail("validate.yml does not consume the canonical VERSION file")
+    hardcoded = re.findall(r"build-release\.sh\s+([0-9]+\.[0-9]+\.[0-9]+)", validate)
+    if hardcoded:
+        fail("validate.yml hard-codes release version(s): " + ", ".join(hardcoded))
 
     release = read_text(RELEASE_WORKFLOW)
     release_markers = (
@@ -134,7 +158,6 @@ def check_wiki_links() -> None:
     for path in wiki.glob("*.md"):
         text = path.read_text(encoding="utf-8-sig")
         for page, _label in pattern.findall(text):
-            # GitHub Wiki uses [[Page]] or [[Page|Visible label]].
             target = page.strip()
             if target.startswith("http://") or target.startswith("https://"):
                 continue
@@ -157,7 +180,7 @@ def main() -> int:
     check_current_version()
     check_wiki_links()
     check_release_workflows()
-    print("Repository quality checks OK.")
+    print(f"Repository quality checks OK for v{CURRENT_VERSION}.")
     return 0
 
 
