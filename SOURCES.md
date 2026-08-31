@@ -1,6 +1,6 @@
 # SOURCES
 
-Verified on August 7, 2026 (updated August 12, 2026).
+Verified on August 7, 2026 (updated August 31, 2026).
 
 
 
@@ -35,13 +35,31 @@ These are empirical project observations, not vendor guarantees for all Jabra/Bl
 
 ## PRO X 2 specific evidence
 
-During the original AutoSwitch build, a controlled test was run on the target machine:
+Original 2026-08-07 behavior:
 
 - PRO X 2 on: `GET /battery/<deviceId>/state` returned a battery payload.
 - PRO X 2 off: several consecutive queries returned no payload.
 - PRO X 2 back on: the payload returned.
 
-That behavior is the basis for the runtime's ON/OFF detection and must be re-verified if a G HUB update changes it.
+Regression observed on 2026-08-31 with G HUB `2026.5.939708`:
+
+- `/devices/list` still found the PRO X 2 and reported `state=ACTIVE` / `resourcesAvailable=true` both ON and OFF;
+- `GET /battery/dev00000000/state` returned `NO_SUCH_PATH`;
+- known G HUB subscriptions did not restore the removed battery route.
+
+Direct receiver validation on the same PRO X 2 (`VID 046D`, `PID 0AF7`):
+
+- vendor HID collection: UsagePage `0xFFA0`, Usage `0x0001`, 64-byte input/output;
+- a Centurion battery request returns a valid `0x51 0x0B ...` frame while connected, with battery percentage at byte 10;
+- physical OFF repeatedly produced `51 05 00 FF 03 1A 0B 00 ...`, followed by no valid battery response;
+- two complete real AutoSwitch cycles succeeded: OFF selected the configured fallback after two confirmed samples, and ON selected the PRO X 2 again;
+- battery values observed in the end-to-end run were 70% and 76%.
+
+Public protocol cross-check: HeadsetControl's Logitech G PRO X 2 LIGHTSPEED implementation:
+
+https://github.com/Sapd/HeadsetControl/blob/master/lib/devices/logitech_gpro_x2_lightspeed.hpp
+
+The project implementation additionally treats the exact OFF signature observed on the tested hardware as a confirmed disconnected observation. Any other missing/invalid response remains `Unknown` and never changes the output.
 
 
 ## Windows Core Audio endpoint APIs

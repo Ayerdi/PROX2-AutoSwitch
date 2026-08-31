@@ -29,15 +29,15 @@ jobs:
         run: bash -n scripts/*.sh
       - name: Deterministic release build
         run: |
-          bash scripts/build-release.sh 1.2.5
-          first="$(cut -d' ' -f1 dist/PROX2-AutoSwitch-v1.2.5.zip.sha256)"
-          cp dist/PROX2-AutoSwitch-v1.2.5.zip /tmp/autoswitch-first.zip
+          bash scripts/build-release.sh 1.5.0
+          first="$(cut -d' ' -f1 dist/PROX2-AutoSwitch-v1.5.0.zip.sha256)"
+          cp dist/PROX2-AutoSwitch-v1.5.0.zip /tmp/autoswitch-first.zip
           rm -f dist/*.zip dist/*.sha256
-          bash scripts/build-release.sh 1.2.5
-          second="$(cut -d' ' -f1 dist/PROX2-AutoSwitch-v1.2.5.zip.sha256)"
+          bash scripts/build-release.sh 1.5.0
+          second="$(cut -d' ' -f1 dist/PROX2-AutoSwitch-v1.5.0.zip.sha256)"
           test "$first" = "$second"
-          cmp /tmp/autoswitch-first.zip dist/PROX2-AutoSwitch-v1.2.5.zip
-          cmp dist/PROX2-AutoSwitch-v1.2.5.zip dist/Audio-AutoSwitch.zip
+          cmp /tmp/autoswitch-first.zip dist/PROX2-AutoSwitch-v1.5.0.zip
+          cmp dist/PROX2-AutoSwitch-v1.5.0.zip dist/Audio-AutoSwitch.zip
 
   powershell:
     runs-on: windows-latest
@@ -75,3 +75,22 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - run: bash scripts/run-gitleaks.sh
+
+  # Stable aggregate check for branch-protection configurations that require
+  # a single "validate" context. It succeeds only when every component check
+  # above succeeds, while the component checks remain individually visible.
+  validate:
+    name: validate
+    if: always()
+    needs:
+      - quality
+      - powershell
+      - secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Confirm component checks
+        run: |
+          test '${{ needs.quality.result }}' = 'success'
+          test '${{ needs.powershell.result }}' = 'success'
+          test '${{ needs.secrets.result }}' = 'success'

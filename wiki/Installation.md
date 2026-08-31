@@ -24,3 +24,8 @@ The older `Instalar-PROX2-AutoSwitch.ps1` filename remains as a compatibility en
 The wizard lists output devices, lets you choose headset/fallback, observes a real OFF/ON cycle and picks the detection mode: `WindowsEndpoint` when Windows provides a usable signal, `LogitechGHub` for a confirmed Logitech PRO X family device, or `SteelSeriesNova5` for an Arctis Nova 5/5X receiver.
 
 [[Instalacion|Leer en español]]
+
+
+## PRO X 2 in v1.5.0
+
+Logitech PRO X 2 LIGHTSPEED uses direct Centurion HID for physical ON/OFF state and battery percentage. The configuration value remains `LogitechGHub` for backward compatibility, but G HUB's removed `/battery/<deviceId>/state` route is not used for PRO X 2 state detection anymore. Unknown HID reads never switch audio, and OFF still requires consecutive confirmed observations.

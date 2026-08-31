@@ -6,14 +6,14 @@
 
 Automatically switch the Windows default audio output when your wireless headset connects or disconnects.
 
-**Stable release: [v1.4.0](https://github.com/Ayerdi/PROX2-AutoSwitch/releases/latest) · Windows 10/11 x64**
+**Stable release: [v1.5.0](https://github.com/Ayerdi/PROX2-AutoSwitch/releases/latest) · Windows 10/11 x64**
 
 *Built with vibe coding — a solo project; its quirks are documented in [`AGENT.md`](AGENT.md).*
 
 - Headset on / connected → use the headset.
 - Headset off / disconnected → return to the configured fallback output.
-- Three detection modes: generic `WindowsEndpoint`, `LogitechGHub` (PRO X / PRO X 2 / PRO X Wireless), `SteelSeriesNova5` (Arctis Nova 5 / 5X).
-- Tray controls for AutoSwitch, reconfiguration and Windows Audio Enhancements.
+- Three config modes remain backward compatible, with direct Centurion HID for Logitech PRO X 2 LIGHTSPEED (`046D:0AF7`) and the existing G HUB provider for other compatible Logitech headsets.
+- Tray controls for AutoSwitch, reconfiguration and Windows Audio Enhancements; PRO X 2 also shows live battery percentage and connection state.
 - Invisible startup: no PowerShell window at login.
 
 ![AutoSwitch demo: headset on selects the headset output, headset off returns to the speakers](site/autoswitch-demo.gif)
@@ -28,6 +28,7 @@ Automatically switch the Windows default audio output when your wireless headset
 - [Supported headsets](#supported-headsets)
 - [How it works](#how-it-works)
   - [WindowsEndpoint](#windowsendpoint)
+  - [Logitech PRO X 2 — Centurion HID](#logitech-pro-x-2--centurion-hid)
   - [LogitechGHub](#logitechghub)
   - [SteelSeriesNova5](#steelseriesnova5)
   - [Safety rules](#safety-rules)
@@ -90,7 +91,8 @@ powershell.exe -ExecutionPolicy Bypass -Command "irm https://raw.githubuserconte
 | Headset | Detection mode | Extra software | Notes |
 |---|---|---|---|
 | Any headset whose Windows endpoint exposes connection state | `WindowsEndpoint` | None | Validated with a Jabra Evolve 65. |
-| Logitech PRO X, PRO X 2, PRO X Wireless | `LogitechGHub` | Logitech G HUB (installed and running) | Used when Windows keeps the endpoint `Active` while the physical headset is off. |
+| Logitech PRO X 2 LIGHTSPEED (`046D:0AF7`) | `LogitechGHub` (backward-compatible config name) | None for state detection | v1.5.0 reads the LIGHTSPEED receiver directly through Centurion HID and reports battery in the tray. |
+| Other compatible Logitech headsets (including PRO X / PRO X Wireless) | `LogitechGHub` | Logitech G HUB (installed and running) | Keeps the existing local WebSocket battery provider. |
 | SteelSeries Arctis Nova 5 / 5X | `SteelSeriesNova5` | None | Physical state read over HID; no SteelSeries GG required. |
 
 See [How it works](#how-it-works) for the exact behavior of each mode.
@@ -111,12 +113,35 @@ Unknown / invalid reading   → no switch
 
 Bluetooth can recreate the audio endpoint after a reconnect, so the installer and reconfiguration both wait for the real reconnect and then re-find the headset by its stable name. The underlying ID can change (see [Machine-local identifiers](#machine-local-identifiers)).
 
-### LogitechGHub
+### Logitech PRO X 2 — Centurion HID
 
-The Logitech PRO X family is an important exception: the Windows endpoint can remain `Active` while the physical headset is off. For those devices AutoSwitch uses G HUB's local WebSocket as the physical-state signal:
+Starting with v1.5.0, Logitech PRO X 2 LIGHTSPEED no longer depends on G HUB's `/battery/<deviceId>/state` route for physical ON/OFF detection. G HUB 2026.5.939708 was observed returning `NO_SUCH_PATH` for that route while `/devices/list` continued to report the receiver as `ACTIVE` even when the headset was physically off.
+
+AutoSwitch now talks directly to the PRO X 2 LIGHTSPEED receiver:
 
 ```text
-Logitech PRO X / PRO X 2 / PRO X Wireless
+PRO X 2 LIGHTSPEED receiver (VID 046D / PID 0AF7)
+  ↓
+vendor HID collection · UsagePage 0xFFA0 · 64-byte Centurion frames
+  ↓
+valid battery response → Connected + battery %
+known power/off signature → Disconnected
+anything else → Unknown → no switch
+  ↓
+two OFF observations → fallback
+valid ON response → headset
+```
+
+The same battery value is exposed in the tray, for example `Battery: 76%`. The config continues to use `DetectionMode = LogitechGHub` for backward compatibility with existing installs, but the runtime automatically selects the direct Centurion provider for PRO X 2.
+
+The direct provider was validated on real hardware on 2026-08-31 across repeated `ON → OFF → ON` cycles while G HUB was still running.
+
+### LogitechGHub
+
+Other compatible Logitech headsets still use the existing G HUB local WebSocket provider when Windows keeps their endpoint `Active` while the physical headset is off:
+
+```text
+compatible Logitech headset
   ↓
 Logitech G HUB · ws://localhost:9010
   ↓
@@ -125,11 +150,9 @@ GET /battery/<deviceId>/state
   ↓
 payload present → ON
 payload absent  → OFF
-  ↓
-Windows Core Audio / IPolicyConfig → all default roles
 ```
 
-The G HUB interface is unofficial and may change in a future G HUB release. See [`SOURCES.md`](SOURCES.md) and [`AGENT.md`](AGENT.md) for the verified design notes.
+The G HUB interface is unofficial and may change in a future G HUB release. PRO X 2 was moved to direct HID specifically to avoid relying on the route that changed in G HUB 2026.5.939708. See [`SOURCES.md`](SOURCES.md) and [`AGENT.md`](AGENT.md) for the verified design notes.
 
 ### SteelSeriesNova5
 
@@ -166,7 +189,7 @@ Runtime settings live in `%LOCALAPPDATA%\PROX2AutoSwitch\config.json` and are ed
 
 | Field | Default | Meaning |
 |---|---|---|
-| `DetectionMode` | set by installer | `WindowsEndpoint`, `LogitechGHub` or `SteelSeriesNova5`. |
+| `DetectionMode` | set by installer | `WindowsEndpoint`, `LogitechGHub` or `SteelSeriesNova5`. PRO X 2 keeps `LogitechGHub` as a backward-compatible config value but uses direct Centurion HID in v1.5.0. |
 | `PollMilliseconds` | `1500` | Interval between state reads. |
 | `OffMissThreshold` | `2` | Consecutive OFF reads before switching to the fallback. |
 | `ConnectTimeoutMs` | `5000` | G HUB WebSocket connect timeout. |
@@ -176,13 +199,13 @@ The debounce has a practical consequence: `OffMissThreshold=2` × `PollMilliseco
 
 ## Tray and reconfiguration
 
-The tray menu shows the configured headset, fallback and next switch action.
+The tray menu shows the configured headset, fallback and next switch action. For PRO X 2 LIGHTSPEED it also shows direct HID connection state and live battery percentage.
 
 ![Real AutoSwitch tray menu with a Logitech PRO X 2 configured](site/assets/tray-menu.png)
 
 It also provides:
 
-- **AutoSwitch: Enabled / Disabled** — pause or resume switching.
+- **AutoSwitch: Enabled / Disabled** — pause or resume switching. On PRO X 2, direct HID connection state and battery continue refreshing while switching is paused; audio outputs are never changed until AutoSwitch is enabled again.
 - **Disable / Enable Audio Enhancements** — change the configured headset's global Windows enhancement state, with UAC only for the helper.
 - **Reconfigure...** — choose new endpoints and repeat the complete detection wizard without reinstalling.
 - **Exit** — stop AutoSwitch.
@@ -210,7 +233,8 @@ Installed runtime data and the main log live under:
 ## Troubleshooting
 
 - **Bluetooth headset stopped switching after a reconnect.** The audio endpoint is recreated with a new internal ID after reconnecting. Run **Reconfigure...** to re-find it by name (see [Machine-local identifiers](#machine-local-identifiers)).
-- **Logitech headset is on but the output stays on the speakers.** The G HUB WebSocket is the physical-state signal. Make sure Logitech G HUB is installed and running, then rerun the validation wizard.
+- **PRO X 2 stopped switching after a G HUB update.** Upgrade to v1.5.0 or newer. PRO X 2 now uses direct Centurion HID and no longer depends on G HUB's removed battery route. Run `Verify.cmd` to see the direct state and battery.
+- **Another Logitech headset is on but the output stays on the speakers.** Its G HUB provider still needs Logitech G HUB installed and running; rerun the validation wizard.
 - **Two devices share the same display name.** AutoSwitch resolves the current ID from the stable identity, so a copy of `config.json` from another PC is not supported (see [Machine-local identifiers](#machine-local-identifiers)).
 - **Wondering what happened at runtime?** Run **`Verify.cmd`** or read `%LOCALAPPDATA%\PROX2AutoSwitch\autoswitch.log`.
 
@@ -219,7 +243,7 @@ Installed runtime data and the main log live under:
 - Windows 10/11 x64.
 - PowerShell 5.1 or newer.
 - No vendor software for `WindowsEndpoint` or `SteelSeriesNova5` headsets.
-- Logitech G HUB installed and running for `LogitechGHub` mode.
+- Logitech G HUB installed and running for Logitech headsets that still use the G HUB provider. PRO X 2 LIGHTSPEED direct state detection does not require the G HUB battery API.
 
 Normal runtime operation does not require administrator rights. Toggling global Windows Audio Enhancements uses a one-time UAC elevation for the helper process only.
 
@@ -237,7 +261,7 @@ The installer runs three phases — detection and validation, endpoint handling,
 ### Endpoint handling
 
 - Handles a Bluetooth endpoint that returns with a new `Item ID`.
-- Falls back to Logitech G HUB only when Windows cannot expose a useful physical state and the selected headset is confirmed as a Logitech PRO X family device.
+- For PRO X 2 LIGHTSPEED, checks the direct Centurion HID receiver when Windows cannot expose a useful physical state; other compatible Logitech headsets can fall back to G HUB.
 - Captures machine-local Item IDs.
 
 ### Installation and startup
@@ -266,6 +290,7 @@ Instalar-* / Verificar-* / Desinstalar-*.ps1   legacy compatible entrypoints
 Runtime-PROX2-AutoSwitch.ps1                   tray UI + worker runtime
 Toggle-AudioEnhancements.ps1                   elevated enhancement helper
 lib/AutoSwitchCore.psm1                        shared pure logic + COM interop
+lib/LogitechProX2Centurion.psm1                 direct PRO X 2 HID + battery provider
 lib/SteelSeriesNova5.psm1                      HID provider for Arctis Nova 5/5X
 install.ps1                                    checksum-verifying bootstrap
 tests/                                         Pester regression coverage
@@ -285,7 +310,7 @@ The project intentionally keeps hardware-specific findings and source references
 
 - Audio endpoint enumeration and switching run in-process; installation downloads no third-party audio-control binary — the Windows audio APIs are called directly.
 - Release ZIPs publish SHA-256 checksums and are built reproducibly.
-- The G HUB WebSocket is local but unofficial; treat compatibility changes after G HUB updates as expected maintenance risk.
+- PRO X 2 state/battery is read locally from its HID receiver. The G HUB WebSocket remains local but unofficial for other Logitech providers; treat future compatibility changes as expected maintenance risk.
 - Normal runtime is non-elevated; only the Audio Enhancements helper requests UAC.
 - Please report security issues through the process in [`SECURITY.md`](SECURITY.md), not a public issue.
 

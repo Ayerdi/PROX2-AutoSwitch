@@ -29,6 +29,7 @@ function Show-Test {
 Show-Test "Install directory" (Test-Path $InstallDir) $InstallDir
 Show-Test "Runtime" (Test-Path $MainScript) $MainScript
 Show-Test "Logic module (lib)" (Test-Path (Join-Path $InstallDir "lib\AutoSwitchCore.psm1")) (Join-Path $InstallDir "lib\AutoSwitchCore.psm1")
+Show-Test "PRO X 2 Centurion module" (Test-Path (Join-Path $InstallDir "lib\LogitechProX2Centurion.psm1")) (Join-Path $InstallDir "lib\LogitechProX2Centurion.psm1")
 Show-Test "Configuration" (Test-Path $ConfigPath) $ConfigPath
 Show-Test "Invisible autostart" (Test-Path $ShortcutPath) $ShortcutPath
 
@@ -74,55 +75,61 @@ if (Test-Path $ConfigPath) {
     catch {}
 }
 
-# G HUB is a requirement only for the Logitech-specific detection path. A
-# generic WindowsEndpoint installation must not show a scary false failure.
+# Provider-specific checks.
 if ($mode -eq 'LogitechGHub') {
-    $ghubPort = $false
-    $ghubPortToTest = 9010
-    if ($cfg -and $cfg.PSObject.Properties['GHubPort'] -and $cfg.GHubPort) {
-        $ghubPortToTest = [int]$cfg.GHubPort
-    }
-
-    try {
-        $client = New-Object System.Net.Sockets.TcpClient
-        $iar = $client.BeginConnect("127.0.0.1", $ghubPortToTest, $null, $null)
-        $ghubPort = $iar.AsyncWaitHandle.WaitOne(1000, $false)
-        if ($ghubPort) {
-            $client.EndConnect($iar)
+    $centurionModule = Join-Path $InstallDir "lib\LogitechProX2Centurion.psm1"
+    $useCenturion = $false
+    if ($cfg -and (Test-Path $centurionModule)) {
+        try {
+            Import-Module $centurionModule -ErrorAction Stop
+            $useCenturion = Test-LogitechProX2CenturionConfig -Config $cfg
         }
-        $client.Close()
-    }
-    catch {
-        $ghubPort = $false
+        catch { $useCenturion = $false }
     }
 
-    $ghubDetail = if ($ghubPort) { "Port reachable" } else { "Open Logitech G HUB" }
-    Show-Test "G HUB localhost:$ghubPortToTest" $ghubPort $ghubDetail
+    if ($useCenturion) {
+        Write-Host "[SKIP] G HUB (PRO X 2 uses direct Centurion HID in v1.5.0)" -ForegroundColor DarkGray
+        try {
+            $direct = Get-LogitechProX2CenturionState
+            $ok = $direct.State -eq 'Connected' -or $direct.State -eq 'Disconnected'
+            $detail = "State=$($direct.State)"
+            if ([int]$direct.BatteryPercent -ge 0) { $detail += "; battery=$([int]$direct.BatteryPercent)%" }
+            if ($direct.Error) { $detail += "; $($direct.Error)" }
+            Show-Test "PRO X 2 direct HID state" $ok $detail
+        }
+        catch { Show-Test "PRO X 2 direct HID state" $false $_.Exception.Message }
+    }
+    else {
+        $ghubPort = $false
+        $ghubPortToTest = 9010
+        if ($cfg -and $cfg.PSObject.Properties['GHubPort'] -and $cfg.GHubPort) { $ghubPortToTest = [int]$cfg.GHubPort }
+        try {
+            $client = New-Object System.Net.Sockets.TcpClient
+            $iar = $client.BeginConnect("127.0.0.1", $ghubPortToTest, $null, $null)
+            $ghubPort = $iar.AsyncWaitHandle.WaitOne(1000, $false)
+            if ($ghubPort) { $client.EndConnect($iar) }
+            $client.Close()
+        }
+        catch { $ghubPort = $false }
+        $ghubDetail = if ($ghubPort) { "Port reachable" } else { "Open Logitech G HUB" }
+        Show-Test "G HUB localhost:$ghubPortToTest" $ghubPort $ghubDetail
+    }
 }
 elseif ($mode -eq 'WindowsEndpoint') {
     Write-Host "[SKIP] G HUB (not used in WindowsEndpoint mode)" -ForegroundColor DarkGray
 }
 elseif ($mode -eq 'SteelSeriesNova5') {
     Write-Host "[SKIP] G HUB (not used in SteelSeriesNova5 mode)" -ForegroundColor DarkGray
-    # SteelSeries receiver presence over HID.
     $steelModule = Join-Path $InstallDir "lib\SteelSeriesNova5.psm1"
     if (Test-Path $steelModule) {
         try {
             Import-Module $steelModule -ErrorAction Stop
-            if (Test-SteelSeriesNova5Receiver) {
-                Show-Test "SteelSeries Nova 5/5X receiver" $true "HID receiver found"
-            }
-            else {
-                Show-Test "SteelSeries Nova 5/5X receiver" $false "No compatible HID receiver found"
-            }
+            if (Test-SteelSeriesNova5Receiver) { Show-Test "SteelSeries Nova 5/5X receiver" $true "HID receiver found" }
+            else { Show-Test "SteelSeries Nova 5/5X receiver" $false "No compatible HID receiver found" }
         }
-        catch {
-            Show-Test "SteelSeries Nova 5/5X receiver" $false $_.Exception.Message
-        }
+        catch { Show-Test "SteelSeries Nova 5/5X receiver" $false $_.Exception.Message }
     }
-    else {
-        Show-Test "SteelSeries Nova 5/5X receiver" $false "Module not installed"
-    }
+    else { Show-Test "SteelSeries Nova 5/5X receiver" $false "Module not installed" }
 }
 else {
     Show-Test "Detection mode" $false "Could not read a valid DetectionMode from config.json"
@@ -144,7 +151,15 @@ if (Test-Path $ConfigPath) {
         if ($cfg.SpeakerName) { Write-Host "  Fallback:       $($cfg.SpeakerName)" }
 
         if ($mode -eq 'LogitechGHub' -and $cfg.GHubDisplayName) {
-            Write-Host "  G HUB:          $($cfg.GHubDisplayName)"
+            $cm = Join-Path $InstallDir "lib\LogitechProX2Centurion.psm1"
+            try {
+                if (Test-Path $cm) { Import-Module $cm -ErrorAction Stop }
+                if ((Test-Path $cm) -and (Test-LogitechProX2CenturionConfig -Config $cfg)) {
+                    Write-Host "  Provider:       PRO X 2 Centurion HID"
+                }
+                else { Write-Host "  G HUB:          $($cfg.GHubDisplayName)" }
+            }
+            catch { Write-Host "  G HUB:          $($cfg.GHubDisplayName)" }
         }
 
         # Current state of the headset endpoint (WindowsEndpoint only).

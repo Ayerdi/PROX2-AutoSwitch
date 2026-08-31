@@ -8,6 +8,7 @@ $UninstallSrc = Join-Path $PackageDir "Desinstalar-PROX2-AutoSwitch.ps1"
 $VerifySrc    = Join-Path $PackageDir "Verificar-PROX2-AutoSwitch.ps1"
 $ModuleSrc    = Join-Path $PackageDir "lib\AutoSwitchCore.psm1"
 $SteelModuleSrc = Join-Path $PackageDir "lib\SteelSeriesNova5.psm1"
+$CenturionModuleSrc = Join-Path $PackageDir "lib\LogitechProX2Centurion.psm1"
 $HelperSrc    = Join-Path $PackageDir "Toggle-AudioEnhancements.ps1"
 $IconSrc      = Join-Path $PackageDir "assets\icon.ico"
 
@@ -21,7 +22,7 @@ $StartupDir   = [Environment]::GetFolderPath("Startup")
 $ShortcutPath = Join-Path $StartupDir "PRO X 2 AutoSwitch.lnk"
 
 
-foreach ($required in @($RuntimeSrc, $UninstallSrc, $VerifySrc, $ModuleSrc, $SteelModuleSrc, $HelperSrc, $IconSrc)) {
+foreach ($required in @($RuntimeSrc, $UninstallSrc, $VerifySrc, $ModuleSrc, $SteelModuleSrc, $CenturionModuleSrc, $HelperSrc, $IconSrc)) {
     if (-not (Test-Path $required)) {
         throw "A package file is missing: $required. Extract the full ZIP before installing."
     }
@@ -29,6 +30,7 @@ foreach ($required in @($RuntimeSrc, $UninstallSrc, $VerifySrc, $ModuleSrc, $Ste
 
 # Shared logic (Item ID extraction, config validation, debounce).
 Import-Module $ModuleSrc -ErrorAction Stop
+Import-Module $CenturionModuleSrc -ErrorAction Stop
 
 if (-not [Environment]::Is64BitOperatingSystem) {
     throw "This package is built for Windows x64."
@@ -86,6 +88,7 @@ Copy-Item $IconSrc (Join-Path $InstallDir "icon.ico") -Force
 New-Item -ItemType Directory -Path (Join-Path $InstallDir "lib") -Force | Out-Null
 Copy-Item $ModuleSrc (Join-Path $InstallDir "lib\AutoSwitchCore.psm1") -Force
 Copy-Item $SteelModuleSrc (Join-Path $InstallDir "lib\SteelSeriesNova5.psm1") -Force
+Copy-Item $CenturionModuleSrc (Join-Path $InstallDir "lib\LogitechProX2Centurion.psm1") -Force
 
 # --- G HUB functions for the installer ---
 $script:Ws  = $null
@@ -380,9 +383,9 @@ try {
     Write-Host "      -> Use WindowsEndpoint: Windows detects the endpoint as" -ForegroundColor DarkGray
     Write-Host "         Active when ON and Unplugged/absent when OFF." -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "  [2] Any Logitech headset (G HUB)" -ForegroundColor White
-    Write-Host "      -> Use LogitechGHub: Windows keeps the endpoint Active even" -ForegroundColor DarkGray
-    Write-Host "         when OFF, so detection uses the G HUB battery signal." -ForegroundColor DarkGray
+    Write-Host "  [2] Logitech headset (PRO X 2 direct HID; others via G HUB)" -ForegroundColor White
+    Write-Host "      -> PRO X 2 reads its LIGHTSPEED receiver directly (Centurion HID)." -ForegroundColor DarkGray
+    Write-Host "         Other compatible Logitech headsets keep the G HUB provider." -ForegroundColor DarkGray
     Write-Host ""
     Write-Host "  [3] Not sure - validate automatically" -ForegroundColor White
     Write-Host "      -> Run the ON->OFF->ON cycle and auto-detect the mode" -ForegroundColor DarkGray
@@ -405,46 +408,50 @@ try {
         Write-Host "      Using WindowsEndpoint mode with the selected endpoints." -ForegroundColor Green
     }
     elseif ($cycleChoice -eq 2) {
-        # Logitech headset: needs G HUB. The endpoint alone cannot tell ON from OFF.
-        Write-Host "      Assuming a Logitech headset. Looking it up in G HUB..." -ForegroundColor Yellow
-        try {
-            Connect-GHub
-            $devices = Invoke-GHubGet -Path "/devices/list"
-            $deviceInfos = @($devices.payload.deviceInfos)
-
-            $ghubCandidates = @($deviceInfos | Where-Object {
-                Test-LogitechHeadsetDevice -Device $_
-            })
-
-            if ($ghubCandidates.Count -eq 0) {
-                Write-Host "      G HUB reports no Logitech headset. Try option 3 (auto-detect)." -ForegroundColor Red
-            }
-            else {
-                $ghubHeadset = $ghubCandidates[0]
-                if ($ghubCandidates.Count -gt 1) {
-                    Write-Host "PRO X 2 headsets detected by G HUB:" -ForegroundColor Yellow
-                    for ($i = 0; $i -lt $ghubCandidates.Count; $i++) {
-                        Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $ghubCandidates[$i].extendedDisplayName, $ghubCandidates[$i].id)
-                    }
-                    $ghubChoice = 0
-                    do {
-                        $gc = Read-Host "Enter the number of the Logitech headset that matches '$headsetName'"
-                        $ghubValid = [int]::TryParse($gc, [ref]$ghubChoice) -and
-                                     $ghubChoice -ge 1 -and
-                                     $ghubChoice -le $ghubCandidates.Count
-                    } until ($ghubValid)
-                    $ghubHeadset = $ghubCandidates[$ghubChoice - 1]
+        $centurionMatched = $false
+        if ($headsetName -match '(?i)PRO\s*X\s*2') {
+            try {
+                $centurion = Get-LogitechProX2CenturionState
+                if ($centurion.State -eq 'Connected' -or $centurion.State -eq 'Disconnected') {
+                    $DetectionMode = "LogitechGHub"
+                    $ghubHeadset = [pscustomobject]@{ extendedDisplayName = $headsetName; id = "centurion-direct" }
+                    $centurionMatched = $true
+                    $batteryDetail = if ([int]$centurion.BatteryPercent -ge 0) { " battery=$([int]$centurion.BatteryPercent)%" } else { "" }
+                    Write-Host "      PRO X 2 direct Centurion HID detected.$batteryDetail" -ForegroundColor Green
                 }
-                $DetectionMode = "LogitechGHub"
-                Write-Host "      G HUB: $($ghubHeadset.extendedDisplayName)" -ForegroundColor Green
             }
-        }
-        catch {
-            Write-Host "      Could not connect to G HUB. Detail: $($_.Exception.Message)" -ForegroundColor Red
+            catch { Write-Host ("      Direct PRO X 2 HID check failed: {0}" -f $_.Exception.Message) -ForegroundColor DarkGray }
         }
 
-        if (-not $DetectionMode) {
-            Write-Host "      No G HUB association was set; the config will not be written." -ForegroundColor DarkGray
+        if (-not $centurionMatched) {
+            Write-Host "      Looking up the Logitech headset in G HUB..." -ForegroundColor Yellow
+            try {
+                Connect-GHub
+                $devices = Invoke-GHubGet -Path "/devices/list"
+                $ghubCandidates = @($devices.payload.deviceInfos | Where-Object { Test-LogitechHeadsetDevice -Device $_ })
+                if ($ghubCandidates.Count -eq 0) {
+                    Write-Host "      G HUB reports no compatible Logitech headset. Try option 3." -ForegroundColor Red
+                }
+                else {
+                    $ghubHeadset = $ghubCandidates[0]
+                    if ($ghubCandidates.Count -gt 1) {
+                        Write-Host "Logitech headsets detected by G HUB:" -ForegroundColor Yellow
+                        for ($i = 0; $i -lt $ghubCandidates.Count; $i++) {
+                            Write-Host ("  [{0}] {1}  ({2})" -f ($i + 1), $ghubCandidates[$i].extendedDisplayName, $ghubCandidates[$i].id)
+                        }
+                        $ghubChoice = 0
+                        do {
+                            $gc = Read-Host "Enter the number of the Logitech headset that matches '$headsetName'"
+                            $ghubValid = [int]::TryParse($gc, [ref]$ghubChoice) -and $ghubChoice -ge 1 -and $ghubChoice -le $ghubCandidates.Count
+                        } until ($ghubValid)
+                        $ghubHeadset = $ghubCandidates[$ghubChoice - 1]
+                    }
+                    $DetectionMode = "LogitechGHub"
+                    Write-Host "      G HUB: $($ghubHeadset.extendedDisplayName)" -ForegroundColor Green
+                }
+            }
+            catch { Write-Host ("      Could not connect to G HUB. Detail: {0}" -f $_.Exception.Message) -ForegroundColor Red }
+            finally { Close-GHubConnection }
         }
     }
     elseif ($cycleChoice -eq 4) {
@@ -668,7 +675,7 @@ try {
     }
 
     $config = [ordered]@{
-        Version                = "1.4.0"
+        Version                = "1.5.0"
         DetectionMode          = $DetectionMode
         HeadsetName            = [string]$headsetOutput.Name
         HeadsetId              = [string]$headsetOutput.ItemId

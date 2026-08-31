@@ -10,9 +10,11 @@ Include the affected release, impact, minimal reproduction and any known mitigat
 
 ## Trust-sensitive components
 
-### Logitech G HUB local WebSocket
+### Logitech direct HID / G HUB boundaries
 
-`ws://localhost:9010` is an undocumented, reverse-engineered local interface. It is **not** an official Logitech API. Treat responses as untrusted input and keep bounded connection/request/close timeouts.
+PRO X 2 LIGHTSPEED state and battery are read from the local `046D:0AF7` HID receiver through a narrowly scoped Centurion request. Treat malformed/unexpected frames as `Unknown`; they must never trigger an output change. The known OFF signature is still debounced before the fallback is selected.
+
+`ws://localhost:9010` remains an undocumented, reverse-engineered local interface for other Logitech providers. It is **not** an official Logitech API. Treat responses as untrusted input and keep bounded connection/request/close timeouts.
 
 ### Windows audio COM boundary
 

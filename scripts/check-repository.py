@@ -6,7 +6,11 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CURRENT_VERSION = "1.4.0"
+CURRENT_VERSION = "1.5.0"
+
+RELEASE_WORKFLOW = f".github/workflows/release-v{CURRENT_VERSION}.yml"
+WIKI_WORKFLOW = f".github/workflows/wiki-v{CURRENT_VERSION}.yml"
+RELEASE_NOTES = f"docs/RELEASE-NOTES-v{CURRENT_VERSION}.md"
 
 REQUIRED_FILES = (
     "README.md",
@@ -28,11 +32,16 @@ REQUIRED_FILES = (
     "Runtime-PROX2-AutoSwitch.ps1",
     "Toggle-AudioEnhancements.ps1",
     "lib/AutoSwitchCore.psm1",
+    "lib/LogitechProX2Centurion.psm1",
+    "tools/Test-LogitechProX2Centurion.ps1",
     "scripts/build-release.sh",
     "scripts/run-gitleaks.sh",
     "wiki/Home.md",
     "wiki/Inicio.md",
     "site/index.html",
+    RELEASE_WORKFLOW,
+    WIKI_WORKFLOW,
+    RELEASE_NOTES,
 )
 
 CURRENT_VERSION_FILES = (
@@ -45,6 +54,10 @@ CURRENT_VERSION_FILES = (
 
 def fail(message: str) -> None:
     raise SystemExit(message)
+
+
+def read_text(relative: str) -> str:
+    return (ROOT / relative).read_text(encoding="utf-8-sig")
 
 
 def check_required_files() -> None:
@@ -68,15 +81,49 @@ def check_current_version() -> None:
     marker = f"v{CURRENT_VERSION}"
     missing = []
     for relative in CURRENT_VERSION_FILES:
-        text = (ROOT / relative).read_text(encoding="utf-8-sig")
-        if marker not in text:
+        if marker not in read_text(relative):
             missing.append(relative)
     if missing:
         fail(f"Current stable marker {marker} is missing from: " + ", ".join(missing))
 
-    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8-sig")
+    changelog = read_text("CHANGELOG.md")
     if f"## [{CURRENT_VERSION}]" not in changelog:
         fail(f"CHANGELOG.md has no {CURRENT_VERSION} release section")
+
+    installer = read_text("Instalar-PROX2-AutoSwitch.ps1")
+    installer_version = re.search(r'^\s*Version\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"\s*$', installer, re.MULTILINE)
+    if not installer_version:
+        fail("Installer config Version assignment was not found")
+    if installer_version.group(1) != CURRENT_VERSION:
+        fail(
+            "Installer config version mismatch: "
+            f"expected {CURRENT_VERSION}, found {installer_version.group(1)}"
+        )
+
+    validate = read_text(".github/workflows/validate.yml")
+    if f"bash scripts/build-release.sh {CURRENT_VERSION}" not in validate:
+        fail(f"validate.yml does not build current version {CURRENT_VERSION}")
+
+    release = read_text(RELEASE_WORKFLOW)
+    release_markers = (
+        f"name: Publish v{CURRENT_VERSION}",
+        f"bash scripts/build-release.sh {CURRENT_VERSION}",
+        f"gh release create v{CURRENT_VERSION}",
+    )
+    missing_release_markers = [item for item in release_markers if item not in release]
+    if missing_release_markers:
+        fail(
+            f"{RELEASE_WORKFLOW} is inconsistent with current version {CURRENT_VERSION}: "
+            + ", ".join(missing_release_markers)
+        )
+
+    wiki_workflow = read_text(WIKI_WORKFLOW)
+    if f"name: Sync Wiki v{CURRENT_VERSION}" not in wiki_workflow:
+        fail(f"{WIKI_WORKFLOW} does not identify current version {CURRENT_VERSION}")
+
+    release_notes = read_text(RELEASE_NOTES)
+    if f"# Audio AutoSwitch v{CURRENT_VERSION}" not in release_notes:
+        fail(f"{RELEASE_NOTES} heading does not match current version {CURRENT_VERSION}")
 
 
 def check_wiki_links() -> None:

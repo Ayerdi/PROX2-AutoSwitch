@@ -4,6 +4,24 @@ All notable changes to this project are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project follows [Semantic Versioning](https://semver.org/).
 
+## [1.5.0] - 2026-08-31
+
+### Fixed
+- **Restored Logitech PRO X 2 LIGHTSPEED AutoSwitch after a G HUB API regression.** G HUB `2026.5.939708` was observed returning `NO_SUCH_PATH` for `GET /battery/<deviceId>/state`, while `/devices/list` kept the PRO X 2 receiver `ACTIVE` with `resourcesAvailable=true` even when the headset was physically off.
+- PRO X 2 now bypasses that G HUB battery route and reads the LIGHTSPEED receiver directly through Logitech's Centurion HID protocol (`VID 046D`, `PID 0AF7`, `UsagePage 0xFFA0`, 64-byte reports).
+- Direct HID was validated on real PRO X 2 hardware on 2026-08-31 with repeated real `ON → OFF → ON` cycles: valid battery frames selected the headset; two consecutive known OFF observations selected the configured fallback; returning ON selected the headset again.
+
+### Added
+- `lib/LogitechProX2Centurion.psm1`: isolated direct HID provider returning `Connected`, `Disconnected` or `Unknown`, plus `BatteryPercent`.
+- PRO X 2 battery percentage and physical connection state in the tray; the tooltip also includes battery while connected. Centurion telemetry keeps refreshing while AutoSwitch is paused, without changing any audio output.
+- `tools/Test-LogitechProX2Centurion.ps1` for live direct-state/battery diagnostics.
+- Pester coverage for PRO X 2 provider/config selection and release-package integration.
+
+### Changed
+- Existing `DetectionMode = LogitechGHub` configs remain backward compatible. When the configured headset is a PRO X 2, the runtime automatically prefers direct Centurion HID; other compatible Logitech headsets keep the existing G HUB provider.
+- `Unknown` HID/open/read/protocol failures never switch audio. OFF still requires the configured consecutive-read debounce before the fallback is selected.
+- Installer, verifier, README, English/Spanish Wiki source, website, maintainer notes, support/security notes, release tooling and package manifest were updated for v1.5.0.
+
 ## [1.4.0] - 2026-08-13
 
 ### Added

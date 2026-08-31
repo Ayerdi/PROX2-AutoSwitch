@@ -27,3 +27,8 @@ No. Es una interfaz local obtenida por ingeniería inversa y puede cambiar.
 ## ¿Hay documentación en inglés?
 
 Sí. Empieza en [[Home]].
+
+
+## PRO X 2 en v1.5.0
+
+Logitech PRO X 2 LIGHTSPEED usa Centurion HID directo para conocer el estado físico ON/OFF y el porcentaje de batería. El valor de configuración sigue siendo `LogitechGHub` por compatibilidad, pero ya no se usa la ruta eliminada `/battery/<deviceId>/state` de G HUB para detectar el estado del PRO X 2. Una lectura HID desconocida nunca cambia el audio y el apagado sigue necesitando varias observaciones confirmadas.
