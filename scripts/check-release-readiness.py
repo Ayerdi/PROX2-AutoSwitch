@@ -92,10 +92,7 @@ def require_regex(path: str, pattern: str, expected: str, label: str) -> None:
 
 
 def check_source(version: str) -> None:
-    release_workflow = f".github/workflows/release-v{version}.yml"
-    wiki_workflow = f".github/workflows/wiki-v{version}.yml"
     release_notes = f"docs/RELEASE-NOTES-v{version}.md"
-
     required = (
         "VERSION",
         "README.md",
@@ -104,22 +101,23 @@ def check_source(version: str) -> None:
         "scripts/check-repository.py",
         "scripts/build-release.sh",
         "scripts/check-release-readiness.py",
+        "scripts/publish-release.sh",
         ".github/workflows/validate.yml",
         ".github/workflows/release-readiness.yml",
+        ".github/workflows/publish-current-release.yml",
         ".github/workflows/post-release-verify.yml",
+        ".github/workflows/sync-wiki.yml",
         ".github/workflows/pages.yml",
+        "docs/RELEASE-PROCESS.md",
         "wiki/Home.md",
         "wiki/Inicio.md",
         "site/index.html",
-        release_workflow,
-        wiki_workflow,
         release_notes,
     )
     missing = [item for item in required if not (ROOT / item).is_file()]
     if missing:
         fail("Release-readiness files are missing: " + ", ".join(missing))
 
-    # Canonical user-facing stable markers.
     require_regex(
         "README.md",
         r"\*\*Stable release:\s*(?:\[)?v([0-9]+\.[0-9]+\.[0-9]+)",
@@ -154,7 +152,6 @@ def check_source(version: str) -> None:
     require_contains("CHANGELOG.md", f"## [{version}]", "current CHANGELOG section")
     require_contains(release_notes, f"# Audio AutoSwitch v{version}", "release-notes heading")
 
-    # The normal CI must consume VERSION rather than a hard-coded release number.
     validate = text(".github/workflows/validate.yml")
     if "cat VERSION" not in validate:
         fail("validate.yml must read the canonical VERSION file")
@@ -162,26 +159,42 @@ def check_source(version: str) -> None:
     if hardcoded_build:
         fail("validate.yml contains a hard-coded release version: " + ", ".join(hardcoded_build))
 
-    release = text(release_workflow)
-    release_markers = (
-        f"name: Publish v{version}",
+    readiness = text(".github/workflows/release-readiness.yml")
+    for marker in (
+        "name: release-readiness",
         "workflow_dispatch:",
-        f"bash scripts/build-release.sh {version}",
-        f"gh release create v{version}",
-        f"PROX2-AutoSwitch-v{version}.zip",
-        "Audio-AutoSwitch.zip",
-        f"--notes-file docs/RELEASE-NOTES-v{version}.md",
-    )
-    for marker in release_markers:
-        if marker not in release:
-            fail(f"{release_workflow} is missing required marker: {marker}")
+        "check-release-readiness.py",
+        "PSScriptAnalyzer",
+        "Invoke-Pester",
+        "Build deterministic release twice",
+    ):
+        if marker not in readiness:
+            fail(f"release-readiness.yml is missing required marker: {marker}")
 
-    wiki = text(wiki_workflow)
-    for marker in (f"name: Sync Wiki v{version}", "workflow_dispatch:", "scripts/publish-wiki.sh --apply"):
-        if marker not in wiki:
-            fail(f"{wiki_workflow} is missing required marker: {marker}")
+    publisher = text(".github/workflows/publish-current-release.yml")
+    for marker in (
+        "name: publish-current-release",
+        "workflow_run:",
+        "workflows: [release-readiness]",
+        "github.event.workflow_run.conclusion == 'success'",
+        "remote_main=",
+        "check-release-readiness.py --version \"$VERSION\" --source-only",
+        "check-release-readiness.py --version \"$VERSION\" --package-only",
+        "gh release create \"$tag\"",
+    ):
+        if marker not in publisher:
+            fail(f"publish-current-release.yml is missing release gate marker: {marker}")
 
-    # Pages must be manually rerunnable without artifact-name collisions.
+    sync_wiki = text(".github/workflows/sync-wiki.yml")
+    for marker in (
+        "name: sync-wiki",
+        "workflow_dispatch:",
+        "VERSION",
+        "scripts/publish-wiki.sh --apply",
+    ):
+        if marker not in sync_wiki:
+            fail(f"sync-wiki.yml is missing required marker: {marker}")
+
     pages = text(".github/workflows/pages.yml")
     for marker in (
         "workflow_dispatch:",
@@ -191,16 +204,26 @@ def check_source(version: str) -> None:
         if marker not in pages:
             fail(f"pages.yml is missing rerun-safety marker: {marker}")
 
-    # Future releases must keep both pre- and post-release validation available.
-    readiness = text(".github/workflows/release-readiness.yml")
-    for marker in ("name: release-readiness", "workflow_dispatch:", "check-release-readiness.py"):
-        if marker not in readiness:
-            fail(f"release-readiness.yml is missing required marker: {marker}")
-
     post = text(".github/workflows/post-release-verify.yml")
-    for marker in ("name: post-release-verify", "release:", "types: [published]", "check-release-readiness.py"):
+    for marker in (
+        "name: post-release-verify",
+        "release:",
+        "types: [published]",
+        "check-release-readiness.py",
+        "raw.githubusercontent.com/wiki/Ayerdi/PROX2-AutoSwitch/Home.md",
+        "ayerdi.github.io/PROX2-AutoSwitch/",
+    ):
         if marker not in post:
             fail(f"post-release-verify.yml is missing required marker: {marker}")
+
+    local_publisher = text("scripts/publish-release.sh")
+    for marker in (
+        "VERSION",
+        "check-release-readiness.py",
+        "release-readiness.yml",
+    ):
+        if marker not in local_publisher:
+            fail(f"publish-release.sh is missing release gate marker: {marker}")
 
     print(f"Source release readiness OK for v{version}.")
 
@@ -208,7 +231,7 @@ def check_source(version: str) -> None:
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+        for chunk in iter(lambda: handle.read(1024 * 1024, ), b""):
             digest.update(chunk)
     return digest.hexdigest()
 
@@ -226,9 +249,7 @@ def check_package(version: str, dist: Path) -> None:
     versioned_sum = dist / f"PROX2-AutoSwitch-v{version}.zip.sha256"
     alias_sum = dist / "Audio-AutoSwitch.zip.sha256"
 
-    expected_assets = {
-        item.format(version=version) for item in EXPECTED_RELEASE_ASSETS
-    }
+    expected_assets = {item.format(version=version) for item in EXPECTED_RELEASE_ASSETS}
     missing = [name for name in sorted(expected_assets) if not (dist / name).is_file()]
     if missing:
         fail("Missing release assets: " + ", ".join(missing))
