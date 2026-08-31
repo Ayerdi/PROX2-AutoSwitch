@@ -6,7 +6,9 @@ This project treats a release as complete only when both the repository state an
 
 The current stable version lives in the repository-root [`VERSION`](../VERSION) file as plain `MAJOR.MINOR.PATCH`.
 
-For a future release, for example `1.6.0`, update `VERSION` to `1.6.0` and update all release-facing content in the same pull request. CI deliberately fails if the installer, README, Wiki, Pages, release notes or versioned publisher do not agree with `VERSION`.
+For a future release, for example `1.6.0`, update `VERSION` to `1.6.0` and update all release-facing content in the same pull request. CI deliberately fails if the installer, README, Wiki, Pages or release notes do not agree with `VERSION`.
+
+The reusable workflows are not version-specific. A new release does **not** need a new publisher workflow.
 
 ## Before publishing: release-readiness
 
@@ -17,7 +19,7 @@ It validates:
 - canonical `VERSION` syntax and cross-file version consistency;
 - repository structure and required files;
 - README, CHANGELOG, release notes, English/Spanish Wiki and Pages stable markers;
-- the versioned release publisher and Wiki publisher for the target version;
+- the gated generic release publisher and reusable Wiki publisher;
 - GitHub Pages rerun safety;
 - English canonical-language policy and Wiki links;
 - Bash syntax and Git whitespace;
@@ -33,31 +35,36 @@ It validates:
 
 The aggregate `release-readiness` job is green only when every component succeeds.
 
-## Required files for a new version
+## Required changes for a new version
 
 When preparing `X.Y.Z`, the release pull request must contain at least:
 
 1. `VERSION` set to `X.Y.Z`.
 2. `CHANGELOG.md` section `## [X.Y.Z]`.
 3. `docs/RELEASE-NOTES-vX.Y.Z.md` with heading `# Audio AutoSwitch vX.Y.Z`.
-4. `.github/workflows/release-vX.Y.Z.yml`.
-5. `.github/workflows/wiki-vX.Y.Z.yml`.
-6. Current-version markers updated in README, Wiki EN/ES and Pages.
-7. The installer-generated `config.json` version updated to `X.Y.Z`.
-8. Any runtime/tests/docs changes belonging to the release.
+4. Current-version markers updated in README, Wiki EN/ES and Pages.
+5. The installer-generated `config.json` version updated to `X.Y.Z`.
+6. Any runtime/tests/docs changes belonging to the release.
+
+There is no need to duplicate `release-vX.Y.Z.yml` or `wiki-vX.Y.Z.yml`. Historical one-shot workflows may remain in the repository, but new releases use the permanent generic workflows.
 
 The readiness validator reports a concrete error for any missing or inconsistent item.
 
-## Publishing
+## Publishing gate
 
-After the release pull request is green and merged into `main`:
+[`publish-current-release`](../.github/workflows/publish-current-release.yml) is triggered only after `release-readiness` completes successfully on `main`, or manually as a guarded recovery path.
 
-- the versioned release workflow builds the package twice and publishes exactly four assets;
-- the versioned Wiki workflow synchronizes `wiki/` to the public GitHub Wiki;
-- the Pages workflow deploys `site/`;
-- normal `validate` runs again on `main`.
+Before creating a release it verifies that:
 
-Expected release assets:
+- the readiness result belongs to `main`;
+- the validated SHA is still the current `main` SHA (a stale run cannot publish);
+- manual publication has a successful `release-readiness` run for the exact same SHA;
+- the release does not already exist;
+- repository/source checks still pass;
+- the package is rebuilt twice and remains deterministic;
+- package/checksum validation passes again.
+
+Only then does it publish exactly four assets:
 
 ```text
 Audio-AutoSwitch.zip
@@ -65,6 +72,10 @@ Audio-AutoSwitch.zip.sha256
 PROX2-AutoSwitch-vX.Y.Z.zip
 PROX2-AutoSwitch-vX.Y.Z.zip.sha256
 ```
+
+This means a release cannot be published while the Windows Pester/PSScriptAnalyzer job is still running.
+
+The reusable [`sync-wiki`](../.github/workflows/sync-wiki.yml) workflow synchronizes `wiki/` whenever the version or Wiki source changes. The existing Pages workflow deploys `site/` and uses per-attempt artifact names so reruns do not collide.
 
 ## After publishing: post-release-verify
 
@@ -84,13 +95,18 @@ It verifies the actual public result rather than only source files:
 
 The public checks retry briefly because GitHub Release assets, Wiki and Pages can propagate asynchronously.
 
+## Local/manual publishing
+
+`scripts/publish-release.sh X.Y.Z --apply` remains available for maintainers, but it is subject to the same gate: `VERSION` must match, the working tree and `main` must be exact, and both `validate` and `release-readiness` must already be green for the current SHA. It then reruns source/package checks before publishing.
+
 ## Definition of done
 
 A stable release is considered validated when all of the following are true:
 
 - normal `validate` is green;
 - `release-readiness` is green for the release commit;
-- the versioned release and Wiki workflows are green;
+- `publish-current-release` succeeds (or reports that the exact release already exists);
+- `sync-wiki` is green;
 - GitHub Pages build/deploy is green;
 - `post-release-verify` is green against the public release.
 
