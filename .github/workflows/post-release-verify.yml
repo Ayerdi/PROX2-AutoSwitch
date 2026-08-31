@@ -3,6 +3,9 @@ name: post-release-verify
 on:
   release:
     types: [published]
+  workflow_run:
+    workflows: [publish-current-release]
+    types: [completed]
   workflow_dispatch:
     inputs:
       version:
@@ -19,11 +22,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: post-release-verify-${{ github.event.release.tag_name || inputs.version || github.ref }}
+  group: post-release-verify-${{ github.event.release.tag_name || github.event.workflow_run.head_sha || inputs.version || github.ref }}
   cancel-in-progress: false
 
 jobs:
   verify:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -70,7 +76,7 @@ jobs:
           tmp="${RUNNER_TEMP}/release-assets"
           mkdir -p "$tmp"
 
-          # A release event can race the final asset propagation by a few seconds.
+          # Release assets, Wiki and Pages can propagate shortly after publication.
           found=false
           for attempt in $(seq 1 18); do
             if gh release view "$tag" >/dev/null 2>&1; then
