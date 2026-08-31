@@ -21,6 +21,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Resolve canonical version
+        id: version
+        shell: bash
+        run: |
+          version="$(tr -d '\r\n' < VERSION)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Repository quality
         run: python3 scripts/check-repository.py
       - name: English canonical language guard
@@ -28,16 +35,19 @@ jobs:
       - name: Validate Bash scripts
         run: bash -n scripts/*.sh
       - name: Deterministic release build
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          bash scripts/build-release.sh 1.5.0
-          first="$(cut -d' ' -f1 dist/PROX2-AutoSwitch-v1.5.0.zip.sha256)"
-          cp dist/PROX2-AutoSwitch-v1.5.0.zip /tmp/autoswitch-first.zip
+          bash scripts/build-release.sh "$VERSION"
+          first="$(cut -d' ' -f1 "dist/PROX2-AutoSwitch-v${VERSION}.zip.sha256")"
+          cp "dist/PROX2-AutoSwitch-v${VERSION}.zip" /tmp/autoswitch-first.zip
           rm -f dist/*.zip dist/*.sha256
-          bash scripts/build-release.sh 1.5.0
-          second="$(cut -d' ' -f1 dist/PROX2-AutoSwitch-v1.5.0.zip.sha256)"
+          bash scripts/build-release.sh "$VERSION"
+          second="$(cut -d' ' -f1 "dist/PROX2-AutoSwitch-v${VERSION}.zip.sha256")"
           test "$first" = "$second"
-          cmp /tmp/autoswitch-first.zip dist/PROX2-AutoSwitch-v1.5.0.zip
-          cmp dist/PROX2-AutoSwitch-v1.5.0.zip dist/Audio-AutoSwitch.zip
+          cmp /tmp/autoswitch-first.zip "dist/PROX2-AutoSwitch-v${VERSION}.zip"
+          cmp "dist/PROX2-AutoSwitch-v${VERSION}.zip" dist/Audio-AutoSwitch.zip
+          python3 scripts/check-release-readiness.py --version "$VERSION" --package-only
 
   powershell:
     runs-on: windows-latest
