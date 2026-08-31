@@ -28,8 +28,6 @@ def read_current_version() -> str:
 
 
 CURRENT_VERSION = read_current_version()
-RELEASE_WORKFLOW = f".github/workflows/release-v{CURRENT_VERSION}.yml"
-WIKI_WORKFLOW = f".github/workflows/wiki-v{CURRENT_VERSION}.yml"
 RELEASE_NOTES = f"docs/RELEASE-NOTES-v{CURRENT_VERSION}.md"
 
 REQUIRED_FILES = (
@@ -58,14 +56,17 @@ REQUIRED_FILES = (
     "scripts/build-release.sh",
     "scripts/run-gitleaks.sh",
     "scripts/check-release-readiness.py",
+    "scripts/publish-release.sh",
+    ".github/workflows/validate.yml",
     ".github/workflows/release-readiness.yml",
+    ".github/workflows/publish-current-release.yml",
     ".github/workflows/post-release-verify.yml",
+    ".github/workflows/sync-wiki.yml",
+    ".github/workflows/pages.yml",
     "docs/RELEASE-PROCESS.md",
     "wiki/Home.md",
     "wiki/Inicio.md",
     "site/index.html",
-    RELEASE_WORKFLOW,
-    WIKI_WORKFLOW,
     RELEASE_NOTES,
 )
 
@@ -128,23 +129,6 @@ def check_current_version() -> None:
     if hardcoded:
         fail("validate.yml hard-codes release version(s): " + ", ".join(hardcoded))
 
-    release = read_text(RELEASE_WORKFLOW)
-    release_markers = (
-        f"name: Publish v{CURRENT_VERSION}",
-        f"bash scripts/build-release.sh {CURRENT_VERSION}",
-        f"gh release create v{CURRENT_VERSION}",
-    )
-    missing_release_markers = [item for item in release_markers if item not in release]
-    if missing_release_markers:
-        fail(
-            f"{RELEASE_WORKFLOW} is inconsistent with current version {CURRENT_VERSION}: "
-            + ", ".join(missing_release_markers)
-        )
-
-    wiki_workflow = read_text(WIKI_WORKFLOW)
-    if f"name: Sync Wiki v{CURRENT_VERSION}" not in wiki_workflow:
-        fail(f"{WIKI_WORKFLOW} does not identify current version {CURRENT_VERSION}")
-
     release_notes = read_text(RELEASE_NOTES)
     if f"# Audio AutoSwitch v{CURRENT_VERSION}" not in release_notes:
         fail(f"{RELEASE_NOTES} heading does not match current version {CURRENT_VERSION}")
@@ -169,9 +153,13 @@ def check_wiki_links() -> None:
 
 def check_release_workflows() -> None:
     workflows = ROOT / ".github" / "workflows"
-    permanent_release = workflows / "release.yml"
-    if permanent_release.exists():
-        fail("Permanent release.yml is not allowed; use a versioned one-shot publisher")
+    deprecated = workflows / "release.yml"
+    if deprecated.exists():
+        fail("release.yml is deprecated; use publish-current-release.yml")
+
+    publisher = read_text(".github/workflows/publish-current-release.yml")
+    if "workflows: [release-readiness]" not in publisher:
+        fail("publish-current-release.yml must be gated by release-readiness")
 
 
 def main() -> int:
