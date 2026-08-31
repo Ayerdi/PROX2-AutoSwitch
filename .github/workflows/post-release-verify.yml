@@ -85,9 +85,8 @@ jobs:
           done
           test "$found" = true
 
-          gh release view "$tag" --json tagName,isDraft,isPrerelease --jq \
-            'select(.tagName == "'"$tag"'" and .isDraft == false and .isPrerelease == false) | .tagName' \
-            | grep -Fx "$tag"
+          metadata="$(gh release view "$tag" --json tagName,isDraft,isPrerelease --jq '[.tagName,.isDraft,.isPrerelease] | @tsv')"
+          test "$metadata" = "${tag}"$'\t'"false"$'\t'"false"
 
           latest="$(gh release view --json tagName --jq '.tagName')"
           test "$latest" = "$tag"
