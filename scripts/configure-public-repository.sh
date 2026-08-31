@@ -71,4 +71,5 @@ else
 fi
 
 gh workflow run pages.yml --repo "${REPOSITORY}"
-printf 'Public repository settings applied. Publish the versioned Wiki with scripts/publish-wiki.sh --apply.\n'
+gh workflow run sync-wiki.yml --repo "${REPOSITORY}"
+printf 'Public repository settings applied. Pages and Wiki synchronization were queued.\n'
