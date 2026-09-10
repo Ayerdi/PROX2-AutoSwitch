@@ -1,0 +1,169 @@
+name: post-release-verify
+
+on:
+  release:
+    types: [published]
+  workflow_run:
+    workflows: [publish-current-release]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Published version to verify (defaults to VERSION; must match it)'
+        required: false
+        type: string
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/post-release-verify.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: post-release-verify-${{ github.event.release.tag_name || github.event.workflow_run.head_sha || inputs.version || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Resolve published version
+        id: version
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          canonical="$(tr -d '\r\n' < VERSION)"
+          if [[ "$EVENT_NAME" == 'release' ]]; then
+            version="${RELEASE_TAG#v}"
+          elif [[ -n "${REQUESTED_VERSION:-}" ]]; then
+            version="$REQUESTED_VERSION"
+          else
+            version="$canonical"
+          fi
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$version" = "$canonical"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Verifying published v$version"
+
+      - name: Validate repository release source
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python3 scripts/check-repository.py
+          python3 scripts/check-release-readiness.py --version "$VERSION" --source-only
+
+      - name: Verify GitHub Release and exact assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          tag="v${VERSION}"
+          tmp="${RUNNER_TEMP}/release-assets"
+          mkdir -p "$tmp"
+
+          # Release assets, Wiki and Pages can propagate shortly after publication.
+          found=false
+          for attempt in $(seq 1 18); do
+            if gh release view "$tag" >/dev/null 2>&1; then
+              count="$(gh release view "$tag" --json assets --jq '.assets | length')"
+              if [[ "$count" == '4' ]]; then
+                found=true
+                break
+              fi
+            fi
+            echo "Release assets not complete yet (attempt $attempt/18)."
+            sleep 10
+          done
+          test "$found" = true
+
+          metadata="$(gh release view "$tag" --json tagName,isDraft,isPrerelease --jq '[.tagName,.isDraft,.isPrerelease] | @tsv')"
+          test "$metadata" = "${tag}"$'\t'"false"$'\t'"false"
+
+          latest="$(gh release view --json tagName --jq '.tagName')"
+          test "$latest" = "$tag"
+
+          gh release view "$tag" --json assets --jq '.assets[].name' | sort > "$tmp/actual-assets.txt"
+          printf '%s\n' \
+            'Audio-AutoSwitch.zip' \
+            'Audio-AutoSwitch.zip.sha256' \
+            "PROX2-AutoSwitch-v${VERSION}.zip" \
+            "PROX2-AutoSwitch-v${VERSION}.zip.sha256" \
+            | sort > "$tmp/expected-assets.txt"
+          diff -u "$tmp/expected-assets.txt" "$tmp/actual-assets.txt"
+
+          gh release download "$tag" --dir "$tmp" \
+            --pattern 'Audio-AutoSwitch.zip' \
+            --pattern 'Audio-AutoSwitch.zip.sha256' \
+            --pattern "PROX2-AutoSwitch-v${VERSION}.zip" \
+            --pattern "PROX2-AutoSwitch-v${VERSION}.zip.sha256"
+
+          python3 scripts/check-release-readiness.py \
+            --version "$VERSION" \
+            --dist "$tmp" \
+            --package-only
+
+      - name: Verify public Wiki
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          check_url() {
+            local url="$1"
+            local marker="$2"
+            for attempt in $(seq 1 18); do
+              if body="$(curl -fsSL --connect-timeout 10 --max-time 30 "$url" 2>/dev/null)" && grep -Fq "$marker" <<<"$body"; then
+                return 0
+              fi
+              echo "Public content not updated yet: $url (attempt $attempt/18)"
+              sleep 10
+            done
+            return 1
+          }
+          check_url \
+            'https://raw.githubusercontent.com/wiki/Ayerdi/PROX2-AutoSwitch/Home.md' \
+            "Stable release: v${VERSION}"
+          check_url \
+            'https://raw.githubusercontent.com/wiki/Ayerdi/PROX2-AutoSwitch/Inicio.md' \
+            "estable: v${VERSION}"
+
+      - name: Verify public GitHub Pages
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          url='https://ayerdi.github.io/PROX2-AutoSwitch/'
+          marker="<strong>v${VERSION}</strong> stable"
+          for attempt in $(seq 1 18); do
+            if body="$(curl -fsSL --connect-timeout 10 --max-time 30 "$url" 2>/dev/null)" && grep -Fq "$marker" <<<"$body"; then
+              exit 0
+            fi
+            echo "Pages not updated yet (attempt $attempt/18)."
+            sleep 10
+          done
+          exit 1
+
+      - name: Published release summary
+        if: always()
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          {
+            echo "## Published release verification"
+            echo
+            echo "Validated release, checksums, Wiki and Pages for **v${VERSION}**."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,40 @@
+name: sync-wiki
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'VERSION'
+      - 'wiki/**'
+      - 'scripts/publish-wiki.sh'
+      - '.github/workflows/sync-wiki.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-wiki
+  cancel-in-progress: true
+
+jobs:
+  wiki:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate Wiki source against VERSION
+        run: |
+          python3 scripts/check-repository.py
+          version="$(tr -d '\r\n' < VERSION)"
+          python3 scripts/check-release-readiness.py --version "$version" --source-only
+
+      - name: Synchronize GitHub Wiki from versioned source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/publish-wiki.sh --apply
